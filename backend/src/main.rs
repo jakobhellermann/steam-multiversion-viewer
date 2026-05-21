@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
 
     let (api_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(routes::library))
+        .routes(routes!(routes::app_info))
         .split_for_parts();
 
     let app = api_router
