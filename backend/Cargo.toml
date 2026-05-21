@@ -1,0 +1,15 @@
+[package]
+name = "steam-multiversion-viewer"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["tracing", "http1", "json", "macros", "tokio", "query"] }
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.52", features = ["rt-multi-thread"] }
+tower = { version = "0.5", features = ["timeout"] }
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.23", features = ["serde", "v4"] }
