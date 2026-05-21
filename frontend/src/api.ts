@@ -15,6 +15,31 @@ export type AppInfo = {
   homepage: string | null;
   logo_url: string | null;
   icon_url: string;
+  branches: BranchInfo[];
+  depots: DepotEntry[];
+  private_branches: boolean;
+};
+
+export type BranchInfo = {
+  name: string;
+  build_id: number;
+  time_updated: number | null;
+  description: string | null;
+};
+
+export type DepotEntry = {
+  depot_id: number;
+  oslist: string | null;
+  osarch: string | null;
+  language: string | null;
+  manifests: DepotManifest[];
+};
+
+export type DepotManifest = {
+  branch: string;
+  gid: string;
+  size: number;
+  download_size: number;
 };
 
 async function getJson<T>(path: string): Promise<T> {
