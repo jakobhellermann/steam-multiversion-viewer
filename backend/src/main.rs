@@ -1,52 +1,38 @@
-//! Provides a RESTful web server managing some Todos.
-//!
-//! API will be:
-//!
-//! - `GET /todos`: return a JSON list of Todos.
-//! - `POST /todos`: create a new Todo.
-//! - `PATCH /todos/{id}`: update a specific Todo.
-//! - `DELETE /todos/{id}`: delete a specific Todo.
-//!
-//! Run with
-//!
-//! ```not_rust
-//! cargo run -p example-todos
-//! ```
+mod routes;
+mod state;
+mod steam;
 
-use axum::error_handling::HandleErrorLayer;
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::routing::{get, patch};
-use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use std::time::Duration;
+
+use anyhow::Result;
+use axum::Router;
+use axum::error_handling::HandleErrorLayer;
+use axum::http::StatusCode;
+use axum::routing::get;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use uuid::Uuid;
+
+use crate::state::AppState;
 
 #[tokio::main]
-async fn main() -> Result<(), std::io::Error> {
+async fn main() -> Result<()> {
+    let trace_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| format!("{}=debug,tower_http=info", env!("CARGO_CRATE_NAME")).into());
+    let trace_fmt = tracing_subscriber::fmt::layer()
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE);
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                format!("{}=debug,tower_http=debug", env!("CARGO_CRATE_NAME")).into()
-            }),
-        )
-        .with(tracing_subscriber::fmt::layer())
+        .with(trace_filter)
+        .with(trace_fmt)
         .init();
 
-    let db = Db::default();
+    tracing::info!("Starting...");
 
-    // Compose the routes
+    let state = AppState::init().await?;
+
     let app = Router::new()
-        .route("/todos", get(todos_index).post(todos_create))
-        .route("/todos/{id}", patch(todos_update).delete(todos_delete))
-        // Add middleware to all routes
+        .route("/api/library", get(routes::library))
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(|error: BoxError| async move {
@@ -63,96 +49,11 @@ async fn main() -> Result<(), std::io::Error> {
                 .layer(TraceLayer::new_for_http())
                 .into_inner(),
         )
-        .with_state(db);
+        .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
-        .await
-        .unwrap();
-    tracing::debug!("listening on http://{}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await
-}
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:6556").await?;
+    tracing::info!("listening on http://{}", listener.local_addr()?);
+    axum::serve(listener, app).await?;
 
-// The query parameters for todos index
-#[derive(Debug, Deserialize, Default)]
-pub struct Pagination {
-    pub offset: Option<usize>,
-    pub limit: Option<usize>,
-}
-
-async fn todos_index(pagination: Query<Pagination>, State(db): State<Db>) -> impl IntoResponse {
-    let todos = db.read().unwrap();
-
-    let todos = todos
-        .values()
-        .skip(pagination.offset.unwrap_or(0))
-        .take(pagination.limit.unwrap_or(usize::MAX))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    Json(todos)
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateTodo {
-    text: String,
-}
-
-async fn todos_create(State(db): State<Db>, Json(input): Json<CreateTodo>) -> impl IntoResponse {
-    let todo = Todo {
-        id: Uuid::new_v4(),
-        text: input.text,
-        completed: false,
-    };
-
-    db.write().unwrap().insert(todo.id, todo.clone());
-
-    (StatusCode::CREATED, Json(todo))
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateTodo {
-    text: Option<String>,
-    completed: Option<bool>,
-}
-
-async fn todos_update(
-    Path(id): Path<Uuid>,
-    State(db): State<Db>,
-    Json(input): Json<UpdateTodo>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let mut todo = db
-        .read()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    if let Some(text) = input.text {
-        todo.text = text;
-    }
-
-    if let Some(completed) = input.completed {
-        todo.completed = completed;
-    }
-
-    db.write().unwrap().insert(todo.id, todo.clone());
-
-    Ok(Json(todo))
-}
-
-async fn todos_delete(Path(id): Path<Uuid>, State(db): State<Db>) -> impl IntoResponse {
-    if db.write().unwrap().remove(&id).is_some() {
-        StatusCode::NO_CONTENT
-    } else {
-        StatusCode::NOT_FOUND
-    }
-}
-
-type Db = Arc<RwLock<HashMap<Uuid, Todo>>>;
-
-#[derive(Debug, Serialize, Clone)]
-struct Todo {
-    id: Uuid,
-    text: String,
-    completed: bool,
+    Ok(())
 }
