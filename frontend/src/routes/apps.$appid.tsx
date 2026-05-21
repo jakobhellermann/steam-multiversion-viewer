@@ -126,6 +126,14 @@ function DepotCard({ depot }: { depot: DepotEntry }) {
       <div className="px-4 py-2 border-b border-slate-800 flex items-baseline gap-3">
         <span className="font-mono tabular-nums">{depot.depot_id}</span>
         <span className="text-xs text-slate-400">{tags.join(" · ")}</span>
+        <a
+          href={`https://steamdb.info/depot/${depot.depot_id}/manifests/`}
+          target="_blank"
+          rel="noreferrer"
+          className="ml-auto text-xs text-slate-500 hover:text-sky-400 hover:underline"
+        >
+          history on SteamDB ↗
+        </a>
       </div>
       {depot.manifests.length === 0 ? (
         <p className="px-4 py-3 text-sm text-slate-500">No manifests in this depot.</p>
