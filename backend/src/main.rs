@@ -5,16 +5,28 @@ mod steam;
 use std::time::Duration;
 
 use anyhow::Result;
-use axum::Router;
+use axum::Json;
 use axum::error_handling::HandleErrorLayer;
 use axum::http::StatusCode;
+use axum::response::Html;
 use axum::routing::get;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use utoipa::OpenApi;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 use crate::state::AppState;
+
+#[derive(OpenApi)]
+#[openapi(info(title = "steam-multiversion-viewer", version = "0.1.0"))]
+struct ApiDoc;
+
+async fn scalar_html() -> Html<&'static str> {
+    Html(include_str!("static/scalar.html"))
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -31,8 +43,19 @@ async fn main() -> Result<()> {
 
     let state = AppState::init().await?;
 
-    let app = Router::new()
-        .route("/api/library", get(routes::library))
+    let (api_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(routes::library))
+        .split_for_parts();
+
+    let app = api_router
+        .route(
+            "/api/openapi.json",
+            get({
+                let openapi = openapi.clone();
+                async || Json(openapi)
+            }),
+        )
+        .route("/api/docs", get(scalar_html))
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(|error: BoxError| async move {

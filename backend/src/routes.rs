@@ -4,17 +4,19 @@ use axum::http::StatusCode;
 use serde::Serialize;
 use steam_vent::ConnectionTrait;
 use steam_vent_proto::steammessages_player_steamclient::CPlayer_GetOwnedGames_Request;
+use utoipa::ToSchema;
 
 use crate::state::AppState;
 use crate::steam::AppId;
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct OwnedGame {
     pub appid: AppId,
     pub name: String,
     pub playtime_minutes: u32,
 }
 
+#[utoipa::path(get, path = "/api/library")]
 pub async fn library(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<OwnedGame>>, (StatusCode, String)> {

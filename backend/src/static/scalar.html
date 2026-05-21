@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+  <head>
+    <title>steam-multiversion-viewer API</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script>
+      Scalar.createApiReference("#app", {
+        url: "/api/openapi.json",
+        hiddenClients: true,
+        hideDarkModeToggle: false,
+        hideClientButton: true,
+        agent: { disabled: true },
+        documentDownloadType: "json",
+      });
+    </script>
+  </body>
+</html>
