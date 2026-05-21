@@ -1,11 +1,11 @@
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use serde::Serialize;
 use steam_vent::ConnectionTrait;
 use steam_vent_proto::steammessages_player_steamclient::CPlayer_GetOwnedGames_Request;
 use utoipa::ToSchema;
 
+use crate::error::ApiError;
 use crate::state::AppState;
 use crate::steam::AppId;
 
@@ -17,9 +17,7 @@ pub struct OwnedGame {
 }
 
 #[utoipa::path(get, path = "/api/library")]
-pub async fn library(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<OwnedGame>>, (StatusCode, String)> {
+pub async fn library(State(state): State<AppState>) -> Result<Json<Vec<OwnedGame>>, ApiError> {
     let req = CPlayer_GetOwnedGames_Request {
         steamid: Some(state.connection.steam_id().into()),
         include_appinfo: Some(true),
@@ -27,11 +25,7 @@ pub async fn library(
         ..Default::default()
     };
 
-    let resp = state
-        .connection
-        .service_method(req)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let resp = state.connection.service_method(req).await?;
 
     let games = resp
         .games
@@ -59,15 +53,12 @@ pub struct AppInfo {
 }
 
 #[utoipa::path(get, path = "/api/apps/{appid}")]
+#[tracing::instrument(skip(state))]
 pub async fn app_info(
     State(state): State<AppState>,
     Path(appid): Path<i32>,
-) -> Result<Json<AppInfo>, (StatusCode, String)> {
-    let info = state
-        .depot
-        .app_info(appid as u32)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+) -> Result<Json<AppInfo>, ApiError> {
+    let info = state.depot.app_info(appid as u32).await?;
 
     let asset_url = |hash: &str, ext: &str| {
         format!(
