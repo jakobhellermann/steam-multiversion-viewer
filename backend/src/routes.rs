@@ -1,11 +1,14 @@
+use std::sync::Arc;
+
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use camino::Utf8PathBuf;
-use futures_util::stream::TryStreamExt;
+use futures_util::stream::{FuturesUnordered, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use steam_vent::ConnectionTrait;
 use steam_vent_depot::FileKind;
 use steam_vent_proto::steammessages_player_steamclient::CPlayer_GetOwnedGames_Request;
+use tokio::sync::Semaphore;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::config::Config;
@@ -376,14 +379,17 @@ pub async fn manifest_statuses(
 
     // Multiple branches may share the same gid, resulting in an unnecessary
     // open_manifest call.
-    let mut fu = futures_util::stream::FuturesUnordered::new();
+    let sem = Arc::new(Semaphore::new(8));
+    let mut fu = FuturesUnordered::new();
     for (&depot_id, depot) in &info.depots.depots {
         let depot_id = DepotId(depot_id);
         for (branch, m) in &depot.manifests {
             let branch = branch.clone();
             let gid = ManifestId(m.gid);
             let state = &state;
+            let sem = sem.clone();
             fu.push(async move {
+                let _permit = sem.acquire().await.expect("semaphore not closed");
                 let snap = state.open_manifest(appid, depot_id, gid, &branch).await?;
                 Ok::<_, ApiError>((depot_id, branch, snap))
             });

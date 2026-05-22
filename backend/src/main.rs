@@ -7,16 +7,12 @@ mod steam;
 mod store_index;
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::Result;
 use axum::Json;
-use axum::error_handling::HandleErrorLayer;
-use axum::http::StatusCode;
 use axum::response::Html;
 use axum::routing::get;
 use directories::ProjectDirs;
-use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
@@ -60,22 +56,7 @@ async fn main() -> Result<()> {
             }),
         )
         .route("/api/docs", get(scalar_html))
-        .layer(
-            ServiceBuilder::new()
-                .layer(HandleErrorLayer::new(|error: BoxError| async move {
-                    if error.is::<tower::timeout::error::Elapsed>() {
-                        Ok(StatusCode::REQUEST_TIMEOUT)
-                    } else {
-                        Err((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Unhandled internal error: {error}"),
-                        ))
-                    }
-                }))
-                .timeout(Duration::from_secs(10))
-                .layer(TraceLayer::new_for_http())
-                .into_inner(),
-        )
+        .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:6556").await?;
@@ -86,8 +67,14 @@ async fn main() -> Result<()> {
 }
 
 fn setup_logging() -> Result<PathBuf> {
-    let stdout_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| format!("{}=debug,tower_http=info", env!("CARGO_CRATE_NAME")).into());
+    let stdout_filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            format!(
+                "{}=debug,steam_vent_depot=info,steam_depot_vfs=info,tower_http=info",
+                env!("CARGO_CRATE_NAME")
+            )
+            .into()
+        });
     let stdout_layer = tracing_subscriber::fmt::layer()
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .with_filter(stdout_filter);
