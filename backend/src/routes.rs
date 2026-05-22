@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::error::ApiError;
 use crate::http::ImmutableCache;
 use crate::state::AppState;
-use crate::steam::AppId;
+use crate::steam::{AppId, DepotId, ManifestId};
 
 type Result<T, E = ApiError> = std::result::Result<T, E>;
 
@@ -71,7 +71,7 @@ pub struct BranchInfo {
 
 #[derive(Serialize, ToSchema)]
 pub struct DepotEntry {
-    pub depot_id: u32,
+    pub depot_id: DepotId,
     pub oslist: Option<String>,
     pub osarch: Option<String>,
     pub language: Option<String>,
@@ -81,7 +81,7 @@ pub struct DepotEntry {
 #[derive(Serialize, ToSchema)]
 pub struct DepotManifest {
     pub branch: String,
-    pub gid: String,
+    pub gid: ManifestId,
     pub size: u64,
     pub download_size: u64,
 }
@@ -130,14 +130,14 @@ pub async fn app_info(
                 .iter()
                 .map(|(branch, m)| DepotManifest {
                     branch: branch.clone(),
-                    gid: m.gid.to_string(),
+                    gid: ManifestId(m.gid),
                     size: m.size,
                     download_size: m.download,
                 })
                 .collect();
             manifests.sort_by(|a, b| a.branch.cmp(&b.branch));
             DepotEntry {
-                depot_id: id,
+                depot_id: DepotId(id),
                 oslist: d.config.as_ref().and_then(|c| c.oslist.clone()),
                 osarch: d.config.as_ref().and_then(|c| c.osarch.clone()),
                 language: d.config.as_ref().and_then(|c| c.language.clone()),
@@ -187,8 +187,8 @@ pub struct ManifestFilesQuery {
 
 #[derive(Serialize, ToSchema)]
 pub struct ManifestInfo {
-    pub depot_id: u32,
-    pub manifest_id: String,
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
     pub creation_time: u32,
     pub size_uncompressed: u64,
     pub size_compressed: u64,
@@ -197,8 +197,8 @@ pub struct ManifestInfo {
 
 #[derive(Serialize, ToSchema)]
 pub struct ManifestFilesPage {
-    pub depot_id: u32,
-    pub manifest_id: String,
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
     pub offset: usize,
     pub limit: usize,
     pub file_count: usize,
@@ -252,8 +252,8 @@ pub async fn manifest_info(
     Ok((
         ImmutableCache,
         Json(ManifestInfo {
-            depot_id: m.depot_id,
-            manifest_id: m.manifest_id.to_string(),
+            depot_id: DepotId(m.depot_id),
+            manifest_id: ManifestId(m.manifest_id),
             creation_time: m.creation_time,
             size_uncompressed: m.size_uncompressed,
             size_compressed: m.size_compressed,
@@ -297,8 +297,8 @@ pub async fn manifest_files(
     Ok((
         ImmutableCache,
         Json(ManifestFilesPage {
-            depot_id: m.depot_id,
-            manifest_id: m.manifest_id.to_string(),
+            depot_id: DepotId(m.depot_id),
+            manifest_id: ManifestId(m.manifest_id),
             offset: start,
             limit: end - start,
             file_count: total,

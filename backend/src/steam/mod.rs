@@ -3,4 +3,4 @@ mod client;
 mod types;
 
 pub use client::SteamClient;
-pub use types::AppId;
+pub use types::{AppId, DepotId, ManifestId};
