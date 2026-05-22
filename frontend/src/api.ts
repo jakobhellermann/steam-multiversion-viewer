@@ -104,6 +104,34 @@ export function fetchManifestInfo(
   return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${gid}?${qs}`);
 }
 
+export type Config = {
+  store_root: string;
+  restart_required: boolean;
+};
+
+export function fetchConfig(): Promise<Config> {
+  return getJson("/api/config");
+}
+
+export async function patchConfig(patch: { store_root?: string }): Promise<Config> {
+  const r = await fetch("/api/config", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) {
+    let message = `${r.status} ${r.statusText}`;
+    try {
+      const body = await r.json();
+      if (body && typeof body.error === "string") message = body.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  return r.json();
+}
+
 export function fetchManifestFiles(
   appid: AppId,
   depotId: number,

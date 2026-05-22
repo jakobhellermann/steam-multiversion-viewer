@@ -9,11 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root";
+import { Route as SettingsRouteImport } from "./routes/settings";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as AppsAppidRouteImport } from "./routes/apps.$appid";
 import { Route as AppsAppidIndexRouteImport } from "./routes/apps.$appid.index";
 import { Route as AppsAppidDepotsDepotIdManifestsGidRouteImport } from "./routes/apps.$appid.depots.$depotId.manifests.$gid";
 
+const SettingsRoute = SettingsRouteImport.update({
+  id: "/settings",
+  path: "/settings",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const IndexRoute = IndexRouteImport.update({
   id: "/",
   path: "/",
@@ -38,30 +44,39 @@ const AppsAppidDepotsDepotIdManifestsGidRoute =
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
+  "/settings": typeof SettingsRoute;
   "/apps/$appid": typeof AppsAppidRouteWithChildren;
   "/apps/$appid/": typeof AppsAppidIndexRoute;
   "/apps/$appid/depots/$depotId/manifests/$gid": typeof AppsAppidDepotsDepotIdManifestsGidRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
+  "/settings": typeof SettingsRoute;
   "/apps/$appid": typeof AppsAppidIndexRoute;
   "/apps/$appid/depots/$depotId/manifests/$gid": typeof AppsAppidDepotsDepotIdManifestsGidRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
+  "/settings": typeof SettingsRoute;
   "/apps/$appid": typeof AppsAppidRouteWithChildren;
   "/apps/$appid/": typeof AppsAppidIndexRoute;
   "/apps/$appid/depots/$depotId/manifests/$gid": typeof AppsAppidDepotsDepotIdManifestsGidRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: "/" | "/apps/$appid" | "/apps/$appid/" | "/apps/$appid/depots/$depotId/manifests/$gid";
+  fullPaths:
+    | "/"
+    | "/settings"
+    | "/apps/$appid"
+    | "/apps/$appid/"
+    | "/apps/$appid/depots/$depotId/manifests/$gid";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/apps/$appid" | "/apps/$appid/depots/$depotId/manifests/$gid";
+  to: "/" | "/settings" | "/apps/$appid" | "/apps/$appid/depots/$depotId/manifests/$gid";
   id:
     | "__root__"
     | "/"
+    | "/settings"
     | "/apps/$appid"
     | "/apps/$appid/"
     | "/apps/$appid/depots/$depotId/manifests/$gid";
@@ -69,11 +84,19 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
+  SettingsRoute: typeof SettingsRoute;
   AppsAppidRoute: typeof AppsAppidRouteWithChildren;
 }
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
+    "/settings": {
+      id: "/settings";
+      path: "/settings";
+      fullPath: "/settings";
+      preLoaderRoute: typeof SettingsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/": {
       id: "/";
       path: "/";
@@ -119,6 +142,7 @@ const AppsAppidRouteWithChildren = AppsAppidRoute._addFileChildren(AppsAppidRout
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  SettingsRoute: SettingsRoute,
   AppsAppidRoute: AppsAppidRouteWithChildren,
 };
 export const routeTree = rootRouteImport
