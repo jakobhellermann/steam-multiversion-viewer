@@ -2321,6 +2321,7 @@ dependencies = [
  "axum",
  "camino",
  "directories 5.0.1",
+ "futures-util",
  "serde",
  "serde_json",
  "steam-depot-vfs",

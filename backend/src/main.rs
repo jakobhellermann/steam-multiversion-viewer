@@ -4,6 +4,7 @@ mod http;
 mod routes;
 mod state;
 mod steam;
+mod store_index;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -44,6 +45,7 @@ async fn main() -> Result<()> {
     let (api_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(routes::library))
         .routes(routes!(routes::app_info))
+        .routes(routes!(routes::manifest_statuses))
         .routes(routes!(routes::manifest_info))
         .routes(routes!(routes::manifest_files))
         .routes(routes!(routes::get_config, routes::patch_config))
