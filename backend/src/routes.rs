@@ -1,11 +1,13 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use steam_vent::ConnectionTrait;
 use steam_vent_depot::FileKind;
 use steam_vent_proto::steammessages_player_steamclient::CPlayer_GetOwnedGames_Request;
 use utoipa::{IntoParams, ToSchema};
 
+use crate::config::Config;
 use crate::error::ApiError;
 use crate::http::ImmutableCache;
 use crate::state::AppState;
@@ -303,4 +305,48 @@ pub async fn manifest_files(
             files,
         }),
     ))
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ConfigDto {
+    #[schema(value_type = String)]
+    pub store_root: Utf8PathBuf,
+    pub restart_required: bool,
+}
+
+/// Partial config update — only fields the client wants to change.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct PatchConfig {
+    #[schema(value_type = String)]
+    pub store_root: Option<Utf8PathBuf>,
+}
+
+fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
+    ConfigDto {
+        restart_required: saved.store_root != state.config.store_root,
+        store_root: saved.store_root,
+    }
+}
+
+#[utoipa::path(get, path = "/api/config")]
+pub async fn get_config(State(state): State<AppState>) -> Result<Json<ConfigDto>> {
+    let saved = Config::load_or_default()?;
+    Ok(Json(build_config_dto(&state, saved)))
+}
+
+#[utoipa::path(patch, path = "/api/config", request_body = PatchConfig)]
+pub async fn patch_config(
+    State(state): State<AppState>,
+    Json(body): Json<PatchConfig>,
+) -> Result<Json<ConfigDto>> {
+    let mut cfg = Config::load_or_default()?;
+    if let Some(store_root) = body.store_root {
+        // Create the dir on save so users see "saved" only when the path is
+        // actually usable. The running process keeps using the old root until
+        // restart.
+        std::fs::create_dir_all(&store_root)?;
+        cfg.store_root = store_root;
+    }
+    cfg.save()?;
+    Ok(Json(build_config_dto(&state, cfg)))
 }

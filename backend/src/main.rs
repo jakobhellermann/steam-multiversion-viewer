@@ -1,3 +1,4 @@
+mod config;
 mod error;
 mod http;
 mod routes;
@@ -45,6 +46,7 @@ async fn main() -> Result<()> {
         .routes(routes!(routes::app_info))
         .routes(routes!(routes::manifest_info))
         .routes(routes!(routes::manifest_files))
+        .routes(routes!(routes::get_config, routes::patch_config))
         .split_for_parts();
 
     let app = api_router
