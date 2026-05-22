@@ -52,8 +52,8 @@ pub struct AppInfo {
     pub appid: AppId,
     pub name: String,
     pub r#type: String,
-    pub developer: String,
-    pub publisher: String,
+    pub developer: Option<String>,
+    pub publisher: Option<String>,
     pub homepage: Option<String>,
     pub logo_url: Option<String>,
     pub icon_url: String,
@@ -76,6 +76,8 @@ pub struct DepotEntry {
     pub oslist: Option<String>,
     pub osarch: Option<String>,
     pub language: Option<String>,
+    /// If set, this depot's content actually lives under a different app, e.g. Steamworks Common Redistributables
+    pub from_app_id: Option<AppId>,
     pub manifests: Vec<DepotManifest>,
 }
 
@@ -142,6 +144,7 @@ pub async fn app_info(
                 oslist: d.config.as_ref().and_then(|c| c.oslist.clone()),
                 osarch: d.config.as_ref().and_then(|c| c.osarch.clone()),
                 language: d.config.as_ref().and_then(|c| c.language.clone()),
+                from_app_id: d.depot_from_app.map(AppId),
                 manifests,
             }
         })
@@ -151,9 +154,9 @@ pub async fn app_info(
         appid,
         name: info.common.name,
         r#type: info.common.r#type,
-        developer: info.extended.developer,
-        publisher: info.extended.publisher,
-        homepage: info.extended.homepage,
+        developer: info.extended.as_ref().map(|e| e.developer.clone()),
+        publisher: info.extended.as_ref().map(|e| e.publisher.clone()),
+        homepage: info.extended.and_then(|e| e.homepage),
         logo_url: info.common.logo.as_deref().map(|h| asset_url(h, "jpg")),
         icon_url: asset_url(&info.common.icon, "jpg"),
         branches,
