@@ -3,4 +3,4 @@ use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(transparent)]
-pub struct AppId(pub i32);
+pub struct AppId(pub u32);

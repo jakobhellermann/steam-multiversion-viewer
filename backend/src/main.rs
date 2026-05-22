@@ -1,4 +1,5 @@
 mod error;
+mod http;
 mod routes;
 mod state;
 mod steam;
@@ -42,6 +43,8 @@ async fn main() -> Result<()> {
     let (api_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(routes::library))
         .routes(routes!(routes::app_info))
+        .routes(routes!(routes::manifest_info))
+        .routes(routes!(routes::manifest_files))
         .split_for_parts();
 
     let app = api_router
@@ -90,7 +93,7 @@ fn setup_logging() -> Result<PathBuf> {
         .as_ref()
         .map(|d| d.state_dir().unwrap_or_else(|| d.cache_dir()))
         .unwrap_or(Path::new("logs"));
-    std::fs::create_dir_all(&log_dir)?;
+    std::fs::create_dir_all(log_dir)?;
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
