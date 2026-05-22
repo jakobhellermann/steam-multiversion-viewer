@@ -66,6 +66,22 @@ export function fetchAppInfo(appid: AppId): Promise<AppInfo> {
   return getJson(`/api/apps/${appid}`);
 }
 
+export type ManifestStatusEntry = {
+  depot_id: number;
+  manifest_id: string;
+  branch: string;
+  chunks_total: number;
+  chunks_missing: number;
+  bytes_total: number;
+  bytes_missing: number;
+  bytes_missing_compressed: number;
+  bytes_unique: number;
+};
+
+export function fetchManifestStatuses(appid: AppId): Promise<ManifestStatusEntry[]> {
+  return getJson(`/api/apps/${appid}/manifests/status`);
+}
+
 export type ManifestInfo = {
   depot_id: number;
   manifest_id: string;

@@ -1,6 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { fetchAppInfo, type AppInfo, type DepotEntry } from "../api";
+import {
+  fetchAppInfo,
+  fetchManifestStatuses,
+  type AppInfo,
+  type DepotEntry,
+  type ManifestStatusEntry,
+} from "../api";
 
 export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
 
@@ -10,6 +16,10 @@ function AppDetail() {
   const query = useQuery({
     queryKey: ["app", appid],
     queryFn: () => fetchAppInfo(appid),
+  });
+  const statusQuery = useQuery({
+    queryKey: ["manifest-statuses", appid],
+    queryFn: () => fetchManifestStatuses(appid),
   });
 
   return (
@@ -23,12 +33,30 @@ function AppDetail() {
           </p>
         </div>
       )}
-      {query.data && <AppDetailBody info={query.data} />}
+      {query.data && (
+        <AppDetailBody
+          info={query.data}
+          statuses={statusQuery.data}
+          statusError={statusQuery.error as Error | null}
+        />
+      )}
     </div>
   );
 }
 
-function AppDetailBody({ info }: { info: AppInfo }) {
+function AppDetailBody({
+  info,
+  statuses,
+  statusError,
+}: {
+  info: AppInfo;
+  statuses: ManifestStatusEntry[] | undefined;
+  statusError: Error | null;
+}) {
+  const statusByKey = new Map<string, ManifestStatusEntry>();
+  for (const s of statuses ?? []) {
+    statusByKey.set(`${s.depot_id}/${s.manifest_id}/${s.branch}`, s);
+  }
   return (
     <>
       <div className="flex gap-6">
@@ -104,12 +132,17 @@ function AppDetailBody({ info }: { info: AppInfo }) {
 
       <section className="mt-8">
         <h2 className="text-xl font-semibold mb-3">Depots</h2>
+        {statusError && (
+          <p className="mb-2 text-xs text-red-400">
+            Failed to load manifest status: {statusError.message}
+          </p>
+        )}
         {info.depots.length === 0 ? (
           <p className="text-slate-500 text-sm">No depots.</p>
         ) : (
           <div className="space-y-4">
             {info.depots.map((d) => (
-              <DepotCard key={d.depot_id} depot={d} appid={info.appid} />
+              <DepotCard key={d.depot_id} depot={d} appid={info.appid} statuses={statusByKey} />
             ))}
           </div>
         )}
@@ -118,7 +151,15 @@ function AppDetailBody({ info }: { info: AppInfo }) {
   );
 }
 
-function DepotCard({ depot, appid }: { depot: DepotEntry; appid: number }) {
+function DepotCard({
+  depot,
+  appid,
+  statuses,
+}: {
+  depot: DepotEntry;
+  appid: number;
+  statuses: Map<string, ManifestStatusEntry>;
+}) {
   const tags = [depot.oslist, depot.osarch, depot.language].filter(Boolean) as string[];
 
   return (
@@ -144,41 +185,73 @@ function DepotCard({ depot, appid }: { depot: DepotEntry; appid: number }) {
               <th className="px-4 py-2">Branch</th>
               <th className="px-4 py-2">Manifest ID</th>
               <th className="px-4 py-2 text-right">Size</th>
-              <th className="px-4 py-2 text-right">Download</th>
+              <th className="px-4 py-2 text-right">Missing</th>
+              <th className="px-4 py-2 text-right">Unique</th>
             </tr>
           </thead>
           <tbody>
-            {depot.manifests.map((m) => (
-              <tr
-                key={`${m.branch}-${m.gid}`}
-                className="border-b border-slate-800 last:border-b-0 hover:bg-slate-800/40"
-              >
-                <td className="px-4 py-2 font-medium">{m.branch}</td>
-                <td className="px-4 py-2 font-mono tabular-nums text-xs">
-                  <Link
-                    to="/apps/$appid/depots/$depotId/manifests/$gid"
-                    params={{
-                      appid: String(appid),
-                      depotId: String(depot.depot_id),
-                      gid: m.gid,
-                    }}
-                    search={{ branch: m.branch, offset: 0, limit: 100 }}
-                    className="text-sky-400 hover:underline"
-                  >
-                    {m.gid}
-                  </Link>
-                </td>
-                <td className="px-4 py-2 text-right tabular-nums">{formatBytes(m.size)}</td>
-                <td className="px-4 py-2 text-right tabular-nums text-slate-400">
-                  {formatBytes(m.download_size)}
-                </td>
-              </tr>
-            ))}
+            {depot.manifests.map((m) => {
+              const status = statuses.get(`${depot.depot_id}/${m.gid}/${m.branch}`);
+              return (
+                <tr
+                  key={`${m.branch}-${m.gid}`}
+                  className="border-b border-slate-800 last:border-b-0 hover:bg-slate-800/40"
+                >
+                  <td className="px-4 py-2 font-medium whitespace-nowrap">{m.branch}</td>
+                  <td className="px-4 py-2 font-mono tabular-nums text-xs">
+                    <Link
+                      to="/apps/$appid/depots/$depotId/manifests/$gid"
+                      params={{
+                        appid: String(appid),
+                        depotId: String(depot.depot_id),
+                        gid: m.gid,
+                      }}
+                      search={{ branch: m.branch, offset: 0, limit: 100 }}
+                      className="text-sky-400 hover:underline"
+                    >
+                      {m.gid}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatBytes(m.size)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {status ? (
+                      status.bytes_missing === 0 ? (
+                        <span className="text-slate-600">—</span>
+                      ) : (
+                        <span className="text-amber-300">
+                          {formatBytes(status.bytes_missing)}{" "}
+                          <span className="text-slate-500">
+                            ({formatBytes(status.bytes_missing_compressed)})
+                          </span>
+                        </span>
+                      )
+                    ) : (
+                      <Skeleton />
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums text-slate-400">
+                    {status ? (
+                      status.bytes_unique === 0 ? (
+                        <span className="text-slate-600">—</span>
+                      ) : (
+                        formatBytes(status.bytes_unique)
+                      )
+                    ) : (
+                      <Skeleton />
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
     </div>
   );
+}
+
+function Skeleton() {
+  return <span className="inline-block h-3 w-16 bg-slate-800 rounded animate-pulse align-middle" />;
 }
 
 function formatTime(unix: number | null): string {
