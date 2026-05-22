@@ -58,6 +58,7 @@ async fn password_login(
 }
 
 fn refresh_token_path() -> Result<PathBuf> {
+    // TODO: centralize cache dir access
     let dirs = ProjectDirs::from("", "", "steam-multiversion-viewer")
         .context("user cache dir not supported on this platform")?;
     Ok(dirs.cache_dir().join("refresh_tokens.json"))

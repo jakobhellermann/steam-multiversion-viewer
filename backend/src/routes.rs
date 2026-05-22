@@ -19,13 +19,13 @@ pub struct OwnedGame {
 #[utoipa::path(get, path = "/api/library")]
 pub async fn library(State(state): State<AppState>) -> Result<Json<Vec<OwnedGame>>, ApiError> {
     let req = CPlayer_GetOwnedGames_Request {
-        steamid: Some(state.connection.steam_id().into()),
+        steamid: Some(state.steam.connection.steam_id().into()),
         include_appinfo: Some(true),
         include_played_free_games: Some(true),
         ..Default::default()
     };
 
-    let resp = state.connection.service_method(req).await?;
+    let resp = state.steam.connection.service_method(req).await?;
 
     let games = resp
         .games
@@ -86,7 +86,7 @@ pub async fn app_info(
     State(state): State<AppState>,
     Path(appid): Path<i32>,
 ) -> Result<Json<AppInfo>, ApiError> {
-    let info = state.depot.app_info(appid as u32).await?;
+    let info = state.steam.depot.app_info(appid as u32).await?;
 
     let asset_url = |hash: &str, ext: &str| {
         format!(

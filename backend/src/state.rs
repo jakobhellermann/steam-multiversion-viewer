@@ -1,13 +1,15 @@
-use anyhow::{Context, Result};
-use steam_vent::Connection;
-use steam_vent_depot::DepotClient;
+use std::sync::Arc;
 
-use crate::steam::auth;
+use anyhow::{Context, Result};
+use directories::ProjectDirs;
+use steam_depot_vfs::DepotStore;
+
+use crate::steam::{SteamClient, auth};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub connection: Connection,
-    pub depot: DepotClient,
+    pub steam: Arc<SteamClient>,
+    pub store: Arc<DepotStore>,
 }
 
 impl AppState {
@@ -16,9 +18,17 @@ impl AppState {
         let password = std::env::var("STEAM_PASSWORD").context("STEAM_PASSWORD not set")?;
 
         let connection = auth::login(&account, &password).await?;
-        let depot = DepotClient::new(connection.clone());
+        let steam = Arc::new(SteamClient::new(connection));
 
-        tracing::info!(steam_id = %connection.steam_id().steam3(), "logged in");
-        Ok(Self { connection, depot })
+        let dirs = ProjectDirs::from("", "", "steam-multiversion-viewer")
+            .context("user data dir not supported on this platform")?;
+        let store_root = dirs.data_dir().join("store");
+        std::fs::create_dir_all(&store_root)
+            .with_context(|| format!("creating store root {}", store_root.display()))?;
+        tracing::info!(root = %store_root.display(), "depot store ready");
+        let store = Arc::new(DepotStore::new(store_root));
+
+        tracing::info!(steam_id = %steam.connection.steam_id().steam3(), "logged in");
+        Ok(Self { steam, store })
     }
 }

@@ -10,6 +10,7 @@ axum = { version = "0.8", default-features = false, features = ["tracing", "http
 directories = "5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
+steam-depot-vfs = { path = "../../steam-depot-vfs/crates/steam-depot-vfs" }
 steam-vent = "0.5"
 steam-vent-depot = { path = "../../steam-vent-depot" }
 steam-vent-proto = "0.5"
