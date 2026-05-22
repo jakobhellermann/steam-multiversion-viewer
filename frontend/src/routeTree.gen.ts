@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from "./routes/__root";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as AppsAppidRouteImport } from "./routes/apps.$appid";
+import { Route as AppsAppidIndexRouteImport } from "./routes/apps.$appid.index";
+import { Route as AppsAppidDepotsDepotIdManifestsGidRouteImport } from "./routes/apps.$appid.depots.$depotId.manifests.$gid";
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -22,31 +24,52 @@ const AppsAppidRoute = AppsAppidRouteImport.update({
   path: "/apps/$appid",
   getParentRoute: () => rootRouteImport,
 } as any);
+const AppsAppidIndexRoute = AppsAppidIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => AppsAppidRoute,
+} as any);
+const AppsAppidDepotsDepotIdManifestsGidRoute =
+  AppsAppidDepotsDepotIdManifestsGidRouteImport.update({
+    id: "/depots/$depotId/manifests/$gid",
+    path: "/depots/$depotId/manifests/$gid",
+    getParentRoute: () => AppsAppidRoute,
+  } as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
-  "/apps/$appid": typeof AppsAppidRoute;
+  "/apps/$appid": typeof AppsAppidRouteWithChildren;
+  "/apps/$appid/": typeof AppsAppidIndexRoute;
+  "/apps/$appid/depots/$depotId/manifests/$gid": typeof AppsAppidDepotsDepotIdManifestsGidRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
-  "/apps/$appid": typeof AppsAppidRoute;
+  "/apps/$appid": typeof AppsAppidIndexRoute;
+  "/apps/$appid/depots/$depotId/manifests/$gid": typeof AppsAppidDepotsDepotIdManifestsGidRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
-  "/apps/$appid": typeof AppsAppidRoute;
+  "/apps/$appid": typeof AppsAppidRouteWithChildren;
+  "/apps/$appid/": typeof AppsAppidIndexRoute;
+  "/apps/$appid/depots/$depotId/manifests/$gid": typeof AppsAppidDepotsDepotIdManifestsGidRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: "/" | "/apps/$appid";
+  fullPaths: "/" | "/apps/$appid" | "/apps/$appid/" | "/apps/$appid/depots/$depotId/manifests/$gid";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/apps/$appid";
-  id: "__root__" | "/" | "/apps/$appid";
+  to: "/" | "/apps/$appid" | "/apps/$appid/depots/$depotId/manifests/$gid";
+  id:
+    | "__root__"
+    | "/"
+    | "/apps/$appid"
+    | "/apps/$appid/"
+    | "/apps/$appid/depots/$depotId/manifests/$gid";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
-  AppsAppidRoute: typeof AppsAppidRoute;
+  AppsAppidRoute: typeof AppsAppidRouteWithChildren;
 }
 
 declare module "@tanstack/react-router" {
@@ -65,12 +88,38 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppsAppidRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/apps/$appid/": {
+      id: "/apps/$appid/";
+      path: "/";
+      fullPath: "/apps/$appid/";
+      preLoaderRoute: typeof AppsAppidIndexRouteImport;
+      parentRoute: typeof AppsAppidRoute;
+    };
+    "/apps/$appid/depots/$depotId/manifests/$gid": {
+      id: "/apps/$appid/depots/$depotId/manifests/$gid";
+      path: "/depots/$depotId/manifests/$gid";
+      fullPath: "/apps/$appid/depots/$depotId/manifests/$gid";
+      preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsGidRouteImport;
+      parentRoute: typeof AppsAppidRoute;
+    };
   }
 }
 
+interface AppsAppidRouteChildren {
+  AppsAppidIndexRoute: typeof AppsAppidIndexRoute;
+  AppsAppidDepotsDepotIdManifestsGidRoute: typeof AppsAppidDepotsDepotIdManifestsGidRoute;
+}
+
+const AppsAppidRouteChildren: AppsAppidRouteChildren = {
+  AppsAppidIndexRoute: AppsAppidIndexRoute,
+  AppsAppidDepotsDepotIdManifestsGidRoute: AppsAppidDepotsDepotIdManifestsGidRoute,
+};
+
+const AppsAppidRouteWithChildren = AppsAppidRoute._addFileChildren(AppsAppidRouteChildren);
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AppsAppidRoute: AppsAppidRoute,
+  AppsAppidRoute: AppsAppidRouteWithChildren,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -65,3 +65,57 @@ export function fetchLibrary(): Promise<OwnedGame[]> {
 export function fetchAppInfo(appid: AppId): Promise<AppInfo> {
   return getJson(`/api/apps/${appid}`);
 }
+
+export type ManifestInfo = {
+  depot_id: number;
+  manifest_id: string;
+  creation_time: number;
+  size_uncompressed: number;
+  size_compressed: number;
+  file_count: number;
+};
+
+export type ManifestFileKind = "file" | "directory" | "symlink";
+
+export type ManifestFile = {
+  path: string;
+  size: number;
+  kind: ManifestFileKind;
+  chunk_count: number;
+  linktarget: string | null;
+};
+
+export type ManifestFilesPage = {
+  depot_id: number;
+  manifest_id: string;
+  offset: number;
+  limit: number;
+  file_count: number;
+  files: ManifestFile[];
+};
+
+export function fetchManifestInfo(
+  appid: AppId,
+  depotId: number,
+  gid: string,
+  branch: string,
+): Promise<ManifestInfo> {
+  const qs = new URLSearchParams({ branch });
+  return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${gid}?${qs}`);
+}
+
+export function fetchManifestFiles(
+  appid: AppId,
+  depotId: number,
+  gid: string,
+  branch: string,
+  offset: number,
+  limit: number,
+): Promise<ManifestFilesPage> {
+  const qs = new URLSearchParams({
+    branch,
+    offset: String(offset),
+    limit: String(limit),
+  });
+  return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${gid}/files?${qs}`);
+}
