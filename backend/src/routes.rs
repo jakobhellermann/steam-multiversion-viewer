@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use camino::Utf8PathBuf;
+use futures_util::stream::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use steam_vent::ConnectionTrait;
 use steam_vent_depot::FileKind;
@@ -90,9 +91,9 @@ pub struct DepotManifest {
 #[tracing::instrument(skip(state))]
 pub async fn app_info(
     State(state): State<AppState>,
-    Path(appid): Path<u32>,
+    Path(appid): Path<AppId>,
 ) -> Result<Json<AppInfo>> {
-    let info = state.steam.depot.app_info(appid).await?;
+    let info = state.steam.depot.app_info(appid.0).await?;
 
     let asset_url = |hash: &str, ext: &str| {
         format!(
@@ -147,7 +148,7 @@ pub async fn app_info(
         .collect();
 
     Ok(Json(AppInfo {
-        appid: AppId(appid),
+        appid,
         name: info.common.name,
         r#type: info.common.r#type,
         developer: info.extended.developer,
@@ -240,13 +241,10 @@ impl From<FileKind> for ManifestFileKind {
 #[tracing::instrument(skip(state))]
 pub async fn manifest_info(
     State(state): State<AppState>,
-    Path((appid, depot_id, gid)): Path<(u32, u32, u64)>,
+    Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestInfoQuery>,
 ) -> Result<(ImmutableCache, Json<ManifestInfo>)> {
-    let snapshot = state
-        .store
-        .open_depot_manifest(state.steam.clone(), appid, depot_id, gid, &q.branch)
-        .await?;
+    let snapshot = state.open_manifest(appid, depot_id, gid, &q.branch).await?;
     let m = snapshot.manifest();
 
     Ok((
@@ -270,13 +268,10 @@ pub async fn manifest_info(
 #[tracing::instrument(skip(state))]
 pub async fn manifest_files(
     State(state): State<AppState>,
-    Path((appid, depot_id, gid)): Path<(u32, u32, u64)>,
+    Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestFilesQuery>,
 ) -> Result<(ImmutableCache, Json<ManifestFilesPage>)> {
-    let snapshot = state
-        .store
-        .open_depot_manifest(state.steam.clone(), appid, depot_id, gid, &q.branch)
-        .await?;
+    let snapshot = state.open_manifest(appid, depot_id, gid, &q.branch).await?;
     let m = snapshot.manifest();
 
     let total = m.files.len();
@@ -349,4 +344,64 @@ pub async fn patch_config(
     }
     cfg.save()?;
     Ok(Json(build_config_dto(&state, cfg)))
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ManifestStatusEntry {
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
+    pub branch: String,
+    pub chunks_total: u32,
+    pub chunks_missing: u32,
+    pub bytes_total: u64,
+    /// Additional uncompressed bytes needed on disk to fully download this manifest.
+    pub bytes_missing: u64,
+    /// Compressed bytes that would be pulled over the wire to complete the download.
+    pub bytes_missing_compressed: u64,
+    /// Bytes currently on disk that are only referenced by this manifest
+    /// (i.e. what you'd reclaim by deleting it).
+    pub bytes_unique: u64,
+}
+
+#[utoipa::path(get, path = "/api/apps/{appid}/manifests/status")]
+#[tracing::instrument(skip(state))]
+pub async fn manifest_statuses(
+    State(state): State<AppState>,
+    Path(appid): Path<AppId>,
+) -> Result<Json<Vec<ManifestStatusEntry>>> {
+    let info = state.steam.depot.app_info(appid.0).await?;
+
+    // Multiple branches may share the same gid, resulting in an unnecessary
+    // open_manifest call.
+    let mut fu = futures_util::stream::FuturesUnordered::new();
+    for (&depot_id, depot) in &info.depots.depots {
+        let depot_id = DepotId(depot_id);
+        for (branch, m) in &depot.manifests {
+            let branch = branch.clone();
+            let gid = ManifestId(m.gid);
+            let state = &state;
+            fu.push(async move {
+                let snap = state.open_manifest(appid, depot_id, gid, &branch).await?;
+                Ok::<_, ApiError>((depot_id, branch, snap))
+            });
+        }
+    }
+    let mut out = Vec::new();
+    while let Some((depot_id, branch, snap)) = fu.try_next().await? {
+        let manifest = snap.manifest();
+        let stats = state.store_index.read().await.manifest_stats(manifest);
+        out.push(ManifestStatusEntry {
+            depot_id,
+            manifest_id: ManifestId(manifest.manifest_id),
+            branch,
+            chunks_total: stats.chunks_total,
+            chunks_missing: stats.chunks_missing,
+            bytes_total: stats.bytes_total,
+            bytes_missing: stats.bytes_missing,
+            bytes_missing_compressed: stats.bytes_missing_compressed,
+            bytes_unique: stats.bytes_unique,
+        });
+    }
+
+    Ok(Json(out))
 }
