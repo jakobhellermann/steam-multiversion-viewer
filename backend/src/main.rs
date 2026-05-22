@@ -3,6 +3,7 @@ mod routes;
 mod state;
 mod steam;
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -11,8 +12,10 @@ use axum::error_handling::HandleErrorLayer;
 use axum::http::StatusCode;
 use axum::response::Html;
 use axum::routing::get;
+use directories::ProjectDirs;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use utoipa::OpenApi;
@@ -31,16 +34,8 @@ async fn scalar_html() -> Html<&'static str> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let trace_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| format!("{}=debug,tower_http=info", env!("CARGO_CRATE_NAME")).into());
-    let trace_fmt = tracing_subscriber::fmt::layer()
-        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE);
-    tracing_subscriber::registry()
-        .with(trace_filter)
-        .with(trace_fmt)
-        .init();
-
-    tracing::info!("Starting...");
+    let log_path = setup_logging()?;
+    tracing::info!(log_file = %log_path.display(), "Starting...");
 
     let state = AppState::init().await?;
 
@@ -81,4 +76,41 @@ async fn main() -> Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+fn setup_logging() -> Result<PathBuf> {
+    let stdout_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| format!("{}=debug,tower_http=info", env!("CARGO_CRATE_NAME")).into());
+    let stdout_layer = tracing_subscriber::fmt::layer()
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+        .with_filter(stdout_filter);
+
+    let dirs = ProjectDirs::from("", "", "steam-multiversion-viewer");
+    let log_dir = dirs
+        .as_ref()
+        .map(|d| d.state_dir().unwrap_or_else(|| d.cache_dir()))
+        .unwrap_or(Path::new("logs"));
+    std::fs::create_dir_all(&log_dir)?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let file_name = format!("app.{ts}.log");
+    let log_path = log_dir.join(&file_name);
+    let file = std::fs::File::create(&log_path)?;
+    let file_filter = tracing_subscriber::EnvFilter::new(
+        "steam_multiversion_viewer=debug,steam_vent=debug,steam_vent_depot=debug,steam_depot_vfs=debug,tower_http=info",
+    );
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::sync::Mutex::new(file))
+        .with_ansi(false)
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+        .with_filter(file_filter);
+
+    tracing_subscriber::registry()
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
+
+    Ok(log_path)
 }
