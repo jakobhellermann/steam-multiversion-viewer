@@ -162,11 +162,30 @@ function DepotCard({
 }) {
   const tags = [depot.oslist, depot.osarch, depot.language].filter(Boolean) as string[];
 
+  const sharedFromLink =
+    depot.from_app_id != null ? (
+      <Link
+        to="/apps/$appid"
+        params={{ appid: String(depot.from_app_id) }}
+        hash={`depot-${depot.depot_id}`}
+        className="text-sky-400 hover:underline tabular-nums"
+      >
+        app {depot.from_app_id}
+      </Link>
+    ) : null;
+
+  const hasBody = depot.manifests.length > 0 || !sharedFromLink;
+
   return (
-    <div className="border border-slate-800 rounded">
-      <div className="px-4 py-2 border-b border-slate-800 flex items-baseline gap-3">
+    <div id={`depot-${depot.depot_id}`} className="border border-slate-800 rounded scroll-mt-4">
+      <div
+        className={`px-4 py-2 flex items-baseline gap-3 ${hasBody ? "border-b border-slate-800" : ""}`}
+      >
         <span className="font-mono tabular-nums">{depot.depot_id}</span>
         <span className="text-xs text-slate-400">{tags.join(" · ")}</span>
+        {sharedFromLink && (
+          <span className="text-xs text-slate-500">shared from {sharedFromLink}</span>
+        )}
         <a
           href={`https://steamdb.info/depot/${depot.depot_id}/manifests/`}
           target="_blank"
@@ -177,7 +196,9 @@ function DepotCard({
         </a>
       </div>
       {depot.manifests.length === 0 ? (
-        <p className="px-4 py-3 text-sm text-slate-500">No manifests in this depot.</p>
+        sharedFromLink ? null : (
+          <p className="px-4 py-3 text-sm text-slate-500">No manifests in this depot.</p>
+        )
       ) : (
         <table className="w-full text-left text-sm">
           <thead>

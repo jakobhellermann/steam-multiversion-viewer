@@ -10,8 +10,8 @@ export type AppInfo = {
   appid: AppId;
   name: string;
   type: string;
-  developer: string;
-  publisher: string;
+  developer: string | null;
+  publisher: string | null;
   homepage: string | null;
   logo_url: string | null;
   icon_url: string;
@@ -32,6 +32,7 @@ export type DepotEntry = {
   oslist: string | null;
   osarch: string | null;
   language: string | null;
+  from_app_id: number | null;
   manifests: DepotManifest[];
 };
 
