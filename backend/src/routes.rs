@@ -3,7 +3,8 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use camino::Utf8PathBuf;
-use futures_util::stream::{FuturesUnordered, TryStreamExt};
+use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
 use steam_vent::ConnectionTrait;
 use steam_vent_depot::FileKind;
@@ -358,6 +359,9 @@ pub struct ManifestStatusEntry {
     pub depot_id: DepotId,
     pub manifest_id: ManifestId,
     pub branch: String,
+    /// Set when this manifest couldn't be fetched (e.g. restricted branch
+    /// the account has no license for). Other stats are zeroed.
+    pub error: Option<String>,
     pub chunks_total: u32,
     pub chunks_missing: u32,
     pub bytes_total: u64,
@@ -391,26 +395,48 @@ pub async fn manifest_statuses(
             let sem = sem.clone();
             fu.push(async move {
                 let _permit = sem.acquire().await.expect("semaphore not closed");
-                let snap = state.open_manifest(appid, depot_id, gid, &branch).await?;
-                Ok::<_, ApiError>((depot_id, branch, snap))
+                let result = state.open_manifest(appid, depot_id, gid, &branch).await;
+                (depot_id, branch, gid, result)
             });
         }
     }
+
     let mut out = Vec::new();
-    while let Some((depot_id, branch, snap)) = fu.try_next().await? {
-        let manifest = snap.manifest();
-        let stats = state.store_index.read().await.manifest_stats(manifest);
-        out.push(ManifestStatusEntry {
-            depot_id,
-            manifest_id: ManifestId(manifest.manifest_id),
-            branch,
-            chunks_total: stats.chunks_total,
-            chunks_missing: stats.chunks_missing,
-            bytes_total: stats.bytes_total,
-            bytes_missing: stats.bytes_missing,
-            bytes_missing_compressed: stats.bytes_missing_compressed,
-            bytes_unique: stats.bytes_unique,
-        });
+    while let Some((depot_id, branch, gid, result)) = fu.next().await {
+        let entry = match result {
+            Ok(snap) => {
+                let manifest = snap.manifest();
+                let stats = state.store_index.read().await.manifest_stats(manifest);
+                ManifestStatusEntry {
+                    depot_id,
+                    manifest_id: ManifestId(manifest.manifest_id),
+                    branch,
+                    error: None,
+                    chunks_total: stats.chunks_total,
+                    chunks_missing: stats.chunks_missing,
+                    bytes_total: stats.bytes_total,
+                    bytes_missing: stats.bytes_missing,
+                    bytes_missing_compressed: stats.bytes_missing_compressed,
+                    bytes_unique: stats.bytes_unique,
+                }
+            }
+            Err(err) => {
+                tracing::warn!(%depot_id, %gid, %branch, %err, "manifest fetch failed");
+                ManifestStatusEntry {
+                    depot_id,
+                    manifest_id: gid,
+                    branch,
+                    error: Some(err.to_string()),
+                    chunks_total: 0,
+                    chunks_missing: 0,
+                    bytes_total: 0,
+                    bytes_missing: 0,
+                    bytes_missing_compressed: 0,
+                    bytes_unique: 0,
+                }
+            }
+        };
+        out.push(entry);
     }
 
     Ok(Json(out))
