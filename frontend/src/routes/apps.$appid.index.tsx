@@ -140,9 +140,14 @@ function AppDetailBody({
         {info.depots.length === 0 ? (
           <p className="text-slate-500 text-sm">No depots.</p>
         ) : (
-          <div className="space-y-4">
-            {info.depots.map((d) => (
-              <DepotCard key={d.depot_id} depot={d} appid={info.appid} statuses={statusByKey} />
+          <div className="grid grid-cols-[max-content_1fr_max-content_max-content_max-content] gap-y-3 text-sm">
+            {info.depots.map((depot) => (
+              <DepotCard
+                key={depot.depot_id}
+                depot={depot}
+                appid={info.appid}
+                statuses={statusByKey}
+              />
             ))}
           </div>
         )}
@@ -161,7 +166,6 @@ function DepotCard({
   statuses: Map<string, ManifestStatusEntry>;
 }) {
   const tags = [depot.oslist, depot.osarch, depot.language].filter(Boolean) as string[];
-
   const sharedFromLink =
     depot.from_app_id != null ? (
       <Link
@@ -173,13 +177,16 @@ function DepotCard({
         app {depot.from_app_id}
       </Link>
     ) : null;
-
   const hasBody = depot.manifests.length > 0 || !sharedFromLink;
-
   return (
-    <div id={`depot-${depot.depot_id}`} className="border border-slate-800 rounded scroll-mt-4">
+    <div
+      id={`depot-${depot.depot_id}`}
+      className="col-span-full grid grid-cols-subgrid border border-slate-800 rounded scroll-mt-4"
+    >
       <div
-        className={`px-4 py-2 flex items-baseline gap-3 ${hasBody ? "border-b border-slate-800" : ""}`}
+        className={`col-span-full px-4 py-2 flex items-baseline gap-3 ${
+          hasBody ? "border-b border-slate-800" : ""
+        }`}
       >
         <span className="font-mono tabular-nums">{depot.depot_id}</span>
         <span className="text-xs text-slate-400">{tags.join(" · ")}</span>
@@ -197,76 +204,123 @@ function DepotCard({
       </div>
       {depot.manifests.length === 0 ? (
         sharedFromLink ? null : (
-          <p className="px-4 py-3 text-sm text-slate-500">No manifests in this depot.</p>
+          <div className="col-span-full px-4 py-2 text-sm text-slate-500">
+            No manifests in this depot.
+          </div>
         )
       ) : (
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-800 text-slate-400">
-              <th className="px-4 py-2">Branch</th>
-              <th className="px-4 py-2">Manifest ID</th>
-              <th className="px-4 py-2 text-right">Size</th>
-              <th className="px-4 py-2 text-right">Missing</th>
-              <th className="px-4 py-2 text-right">Unique</th>
-            </tr>
-          </thead>
-          <tbody>
-            {depot.manifests.map((m) => {
-              const status = statuses.get(`${depot.depot_id}/${m.gid}/${m.branch}`);
-              return (
-                <tr
-                  key={`${m.branch}-${m.gid}`}
-                  className="border-b border-slate-800 last:border-b-0 hover:bg-slate-800/40"
-                >
-                  <td className="px-4 py-2 font-medium whitespace-nowrap">{m.branch}</td>
-                  <td className="px-4 py-2 font-mono tabular-nums text-xs">
-                    <Link
-                      to="/apps/$appid/depots/$depotId/manifests/$gid"
-                      params={{
-                        appid: String(appid),
-                        depotId: String(depot.depot_id),
-                        gid: m.gid,
-                      }}
-                      search={{ branch: m.branch, offset: 0, limit: 100 }}
-                      className="text-sky-400 hover:underline"
-                    >
-                      {m.gid}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2 text-right tabular-nums">{formatBytes(m.size)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">
-                    {status ? (
-                      status.bytes_missing === 0 ? (
-                        <span className="text-slate-600">—</span>
-                      ) : (
-                        <span className="text-amber-300">
-                          {formatBytes(status.bytes_missing)}{" "}
-                          <span className="text-slate-500">
-                            ({formatBytes(status.bytes_missing_compressed)})
-                          </span>
-                        </span>
-                      )
-                    ) : (
-                      <Skeleton />
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-right tabular-nums text-slate-400">
-                    {status ? (
-                      status.bytes_unique === 0 ? (
-                        <span className="text-slate-600">—</span>
-                      ) : (
-                        formatBytes(status.bytes_unique)
-                      )
-                    ) : (
-                      <Skeleton />
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <>
+          <div className="col-span-full grid grid-cols-subgrid text-slate-400 border-b border-slate-800">
+            <div className="px-4 py-1.5 font-semibold">Branch</div>
+            <div className="px-4 py-1.5 font-semibold">Manifest ID</div>
+            <div className="px-4 py-1.5 font-semibold text-right">Size</div>
+            <div className="px-4 py-1.5 font-semibold text-right">Missing</div>
+            <div className="px-4 py-1.5 font-semibold text-right">Unique</div>
+          </div>
+          {depot.manifests.map((m) => {
+            const status = statuses.get(`${depot.depot_id}/${m.gid}/${m.branch}`);
+            return (
+              <ManifestRow
+                key={`${m.branch}-${m.gid}`}
+                depotId={depot.depot_id}
+                appid={appid}
+                manifest={m}
+                status={status}
+              />
+            );
+          })}
+        </>
       )}
+    </div>
+  );
+}
+
+function ManifestRow({
+  depotId,
+  appid,
+  manifest: m,
+  status,
+}: {
+  depotId: number;
+  appid: number;
+  manifest: { branch: string; gid: string; size: number; download_size: number };
+  status: ManifestStatusEntry | undefined;
+}) {
+  const linkProps = {
+    to: "/apps/$appid/depots/$depotId/manifests/$gid",
+    params: { appid: String(appid), depotId: String(depotId), gid: m.gid },
+    search: { branch: m.branch, offset: 0, limit: 100 },
+    draggable: false,
+    onClick: (e: React.MouseEvent) => {
+      // Don't navigate if the click ended a drag-to-select.
+      if (window.getSelection()?.toString()) {
+        e.preventDefault();
+      }
+    },
+  } as const;
+  const cell = "flex items-center px-4 py-1.5 group-hover:bg-slate-800/40";
+  return (
+    <div className="contents group">
+      <Link {...linkProps} className={`${cell} font-medium whitespace-nowrap`}>
+        {m.branch}
+      </Link>
+      <Link
+        {...linkProps}
+        tabIndex={-1}
+        aria-hidden="true"
+        className={`${cell} font-mono tabular-nums text-xs text-sky-400`}
+      >
+        {m.gid}
+      </Link>
+      <Link
+        {...linkProps}
+        tabIndex={-1}
+        aria-hidden="true"
+        className={`${cell} justify-end tabular-nums whitespace-nowrap`}
+      >
+        {formatBytes(m.size)}
+      </Link>
+      <Link
+        {...linkProps}
+        tabIndex={-1}
+        aria-hidden="true"
+        className={`${cell} justify-end tabular-nums whitespace-nowrap`}
+      >
+        {status ? (
+          status.error ? (
+            <span className="text-red-400" title={status.error}>
+              inaccessible
+            </span>
+          ) : status.bytes_missing === 0 ? (
+            <span className="text-slate-600">—</span>
+          ) : (
+            <span className="text-amber-300">
+              {formatBytes(status.bytes_missing)}{" "}
+              <span className="text-slate-500">
+                ({formatBytes(status.bytes_missing_compressed)})
+              </span>
+            </span>
+          )
+        ) : (
+          <Skeleton />
+        )}
+      </Link>
+      <Link
+        {...linkProps}
+        tabIndex={-1}
+        aria-hidden="true"
+        className={`${cell} justify-end tabular-nums whitespace-nowrap text-slate-400`}
+      >
+        {status ? (
+          status.bytes_unique === 0 ? (
+            <span className="text-slate-600">—</span>
+          ) : (
+            formatBytes(status.bytes_unique)
+          )
+        ) : (
+          <Skeleton />
+        )}
+      </Link>
     </div>
   );
 }

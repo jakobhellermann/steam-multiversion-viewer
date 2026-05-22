@@ -71,6 +71,7 @@ export type ManifestStatusEntry = {
   depot_id: number;
   manifest_id: string;
   branch: string;
+  error: string | null;
   chunks_total: number;
   chunks_missing: number;
   bytes_total: number;
