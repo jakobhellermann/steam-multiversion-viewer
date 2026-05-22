@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
@@ -42,7 +43,6 @@ impl AppState {
             StoreIndex::scan(&store).with_context(|| format!("scanning store {store_root}"))?;
         let store_index = Arc::new(RwLock::new(index));
 
-        tracing::info!(steam_id = %steam.connection.steam_id().steam3(), "logged in");
         Ok(Self {
             steam,
             store,
@@ -61,6 +61,7 @@ impl AppState {
         manifest_gid: ManifestId,
         branch: &str,
     ) -> Result<Snapshot, VfsError> {
+        let started = Instant::now();
         let snap = self
             .store
             .open_depot_manifest(
@@ -71,7 +72,15 @@ impl AppState {
                 branch,
             )
             .await?;
-        self.store_index.write().await.add_manifest(snap.manifest());
+        let fresh = self.store_index.write().await.add_manifest(snap.manifest());
+        tracing::info!(
+            depot_id = %depot_id,
+            gid = %manifest_gid,
+            branch,
+            cached = !fresh,
+            time = ?started.elapsed(),
+            "opened manifest"
+        );
         Ok(snap)
     }
 }

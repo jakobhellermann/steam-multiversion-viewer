@@ -27,6 +27,7 @@ pub struct OwnedGame {
 }
 
 #[utoipa::path(get, path = "/api/library")]
+#[tracing::instrument(skip_all)]
 pub async fn library(State(state): State<AppState>) -> Result<Json<Vec<OwnedGame>>> {
     let req = CPlayer_GetOwnedGames_Request {
         steamid: Some(state.steam.connection.steam_id().into()),
@@ -93,7 +94,7 @@ pub struct DepotManifest {
 }
 
 #[utoipa::path(get, path = "/api/apps/{appid}")]
-#[tracing::instrument(skip(state))]
+#[tracing::instrument(skip_all)]
 pub async fn app_info(
     State(state): State<AppState>,
     Path(appid): Path<AppId>,
@@ -244,7 +245,7 @@ impl From<FileKind> for ManifestFileKind {
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{gid}",
     params(ManifestInfoQuery)
 )]
-#[tracing::instrument(skip(state))]
+#[tracing::instrument(skip_all)]
 pub async fn manifest_info(
     State(state): State<AppState>,
     Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
@@ -271,7 +272,7 @@ pub async fn manifest_info(
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{gid}/files",
     params(ManifestFilesQuery)
 )]
-#[tracing::instrument(skip(state))]
+#[tracing::instrument(skip_all)]
 pub async fn manifest_files(
     State(state): State<AppState>,
     Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
@@ -370,7 +371,7 @@ pub struct ManifestStatusEntry {
 }
 
 #[utoipa::path(get, path = "/api/apps/{appid}/manifests/status")]
-#[tracing::instrument(skip(state))]
+#[tracing::instrument(skip_all)]
 pub async fn manifest_statuses(
     State(state): State<AppState>,
     Path(appid): Path<AppId>,

@@ -76,6 +76,7 @@ fn setup_logging() -> Result<PathBuf> {
             .into()
         });
     let stdout_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .with_filter(stdout_filter);
 

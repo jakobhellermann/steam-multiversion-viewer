@@ -25,6 +25,7 @@ pub struct StoreIndex {
 impl StoreIndex {
     /// Build by enumerating chunks and manifests already on disk.
     pub fn scan(store: &DepotStore) -> Result<Self, std::io::Error> {
+        let started = std::time::Instant::now();
         let mut idx = Self {
             chunks_present: HashSet::new(),
             chunk_refcount: HashMap::new(),
@@ -37,7 +38,9 @@ impl StoreIndex {
 
         for (depot_id_raw, gid_raw) in store.list_manifests()? {
             match store.load_cached_manifest(depot_id_raw, gid_raw) {
-                Ok(Some(m)) => idx.add_manifest(&m),
+                Ok(Some(m)) => {
+                    idx.add_manifest(&m);
+                }
                 Ok(None) => {}
                 Err(err) => {
                     tracing::warn!(
@@ -54,25 +57,28 @@ impl StoreIndex {
             chunks_present = idx.chunks_present.len(),
             referenced_chunks = idx.chunk_refcount.len(),
             manifests = idx.indexed_manifests.len(),
+            time = ?started.elapsed(),
             "store index built"
         );
         Ok(idx)
     }
 
-    /// Fold a manifest's chunks into the refcount index. No-op if we've
-    /// already indexed this (depot_id, manifest_id) pair.
-    pub fn add_manifest(&mut self, m: &Manifest) {
+    /// Fold a manifest's chunks into the refcount index. Returns `true` if
+    /// this was a new entry, `false` if we'd already indexed this
+    /// `(depot_id, manifest_id)` pair.
+    pub fn add_manifest(&mut self, m: &Manifest) -> bool {
         if !self
             .indexed_manifests
             .insert((DepotId(m.depot_id), ManifestId(m.manifest_id)))
         {
-            return;
+            return false;
         }
         for file in &m.files {
             for chunk in &file.chunks {
                 *self.chunk_refcount.entry(chunk.sha).or_insert(0) += 1;
             }
         }
+        true
     }
 
     /// Record that a chunk now exists on disk.

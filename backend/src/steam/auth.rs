@@ -20,7 +20,7 @@ pub async fn login(account: &str, password: &str) -> Result<Connection> {
     let connection = match refresh_token {
         Some(token) => match Connection::access(&server_list, account, &token).await {
             Ok(conn) => {
-                tracing::info!("logged in with cached refresh token");
+                tracing::info!(steam_id = %conn.steam_id().steam3(), "logged in");
                 conn
             }
             Err(err) => {
