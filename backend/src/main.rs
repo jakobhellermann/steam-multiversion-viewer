@@ -1,4 +1,5 @@
 mod config;
+mod downloads;
 mod error;
 mod http;
 mod routes;
@@ -44,6 +45,10 @@ async fn main() -> Result<()> {
         .routes(routes!(routes::manifest_statuses))
         .routes(routes!(routes::manifest_info))
         .routes(routes!(routes::manifest_files))
+        .routes(routes!(routes::manifest_file))
+        .routes(routes!(routes::downloads::manifest_download))
+        .routes(routes!(routes::downloads::downloads_snapshot))
+        .routes(routes!(routes::downloads::downloads_cancel))
         .routes(routes!(routes::get_config, routes::patch_config))
         .split_for_parts();
 
@@ -54,6 +59,10 @@ async fn main() -> Result<()> {
                 let openapi = openapi.clone();
                 async || Json(openapi)
             }),
+        )
+        .route(
+            "/api/downloads/events",
+            get(routes::downloads::downloads_events),
         )
         .route("/api/docs", get(scalar_html))
         .layer(TraceLayer::new_for_http())
@@ -75,9 +84,10 @@ fn setup_logging() -> Result<PathBuf> {
             )
             .into()
         });
+    // Span CLOSE events are useful for perf debugging but spammy on a
+    // busy chunk fetch; keep them in the file log only.
     let stdout_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
-        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .with_filter(stdout_filter);
 
     let dirs = ProjectDirs::from("", "", "steam-multiversion-viewer");

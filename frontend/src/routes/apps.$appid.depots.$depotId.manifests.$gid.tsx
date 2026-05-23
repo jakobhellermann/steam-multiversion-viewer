@@ -1,9 +1,11 @@
 // TODO(ai-review): review for style and correctness
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useMutation, useQuery, keepPreviousData } from "@tanstack/react-query";
 import {
+  downloadManifest,
   fetchManifestFiles,
   fetchManifestInfo,
+  type EnqueueSummary,
   type ManifestFile,
   type ManifestInfo,
 } from "../api";
@@ -37,6 +39,14 @@ function ManifestDetail() {
     queryKey: ["manifest-files", appid, depotId, gid, branch, offset, limit],
     queryFn: () => fetchManifestFiles(appid, depotId, gid, branch, offset, limit),
     placeholderData: keepPreviousData,
+    // chunks_present changes as the download manager makes progress, so
+    // we refetch every time we mount — `staleTime: Infinity` globally
+    // would otherwise hide it.
+    refetchOnMount: "always",
+  });
+
+  const downloadAll = useMutation({
+    mutationFn: () => downloadManifest(appid, depotId, gid, { branch }),
   });
 
   return (
@@ -49,7 +59,16 @@ function ManifestDetail() {
 
       {info.isPending && <p className="text-slate-400">Loading manifest…</p>}
       {info.error && <ErrorBox title="Failed to load manifest" error={info.error as Error} />}
-      {info.data && <ManifestHeader info={info.data} branch={branch} />}
+      {info.data && (
+        <ManifestHeader
+          info={info.data}
+          branch={branch}
+          onDownload={() => downloadAll.mutate()}
+          downloadPending={downloadAll.isPending}
+          downloadResult={downloadAll.data}
+          downloadError={downloadAll.error as Error | null}
+        />
+      )}
 
       <section className="mt-8">
         <div className="flex items-baseline gap-4 mb-3">
@@ -68,7 +87,13 @@ function ManifestDetail() {
 
         {files.data && (
           <>
-            <FilesTable files={files.data.files} />
+            <FilesTable
+              files={files.data.files}
+              appid={appidParam}
+              depotId={depotIdParam}
+              gid={gid}
+              branch={branch}
+            />
             <Pager
               offset={files.data.offset}
               limit={files.data.limit}
@@ -81,10 +106,46 @@ function ManifestDetail() {
   );
 }
 
-function ManifestHeader({ info }: { info: ManifestInfo; branch: string }) {
+function ManifestHeader({
+  info,
+  onDownload,
+  downloadPending,
+  downloadResult,
+  downloadError,
+}: {
+  info: ManifestInfo;
+  branch: string;
+  onDownload: () => void;
+  downloadPending: boolean;
+  downloadResult: EnqueueSummary | undefined;
+  downloadError: Error | null;
+}) {
   return (
     <div>
-      <h1 className="text-2xl font-bold">Manifest</h1>
+      <div className="flex items-start gap-4">
+        <h1 className="text-2xl font-bold">Manifest</h1>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={downloadPending}
+          className="ml-auto px-3 py-1.5 text-sm border border-sky-700 bg-sky-950/40 rounded hover:bg-sky-900/40 disabled:opacity-50"
+        >
+          {downloadPending ? "Enqueuing…" : "Download all"}
+        </button>
+      </div>
+      {downloadResult && (
+        <p className="mt-2 text-xs text-slate-400">
+          {downloadResult.enqueued_chunks > 0
+            ? `Enqueued ${downloadResult.enqueued_chunks.toLocaleString()} chunks (${formatBytes(downloadResult.enqueued_bytes)} compressed).`
+            : "Nothing to download — everything is already cached."}
+          {downloadResult.already_present_chunks > 0 && (
+            <span> {downloadResult.already_present_chunks.toLocaleString()} already on disk.</span>
+          )}
+        </p>
+      )}
+      {downloadError && (
+        <p className="mt-2 text-xs text-red-300">Download failed: {downloadError.message}</p>
+      )}
       <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-slate-400">Manifest ID</dt>
         <dd className="font-mono tabular-nums break-all">{info.manifest_id}</dd>
@@ -103,7 +164,19 @@ function ManifestHeader({ info }: { info: ManifestInfo; branch: string }) {
   );
 }
 
-function FilesTable({ files }: { files: ManifestFile[] }) {
+function FilesTable({
+  files,
+  appid,
+  depotId,
+  gid,
+  branch,
+}: {
+  files: ManifestFile[];
+  appid: string;
+  depotId: string;
+  gid: string;
+  branch: string;
+}) {
   if (files.length === 0) {
     return <p className="text-slate-500 text-sm">No files in this page.</p>;
   }
@@ -118,17 +191,45 @@ function FilesTable({ files }: { files: ManifestFile[] }) {
       </thead>
       <tbody>
         {files.map((f) => (
-          <tr key={f.path} className="border-b border-slate-800 last:border-b-0">
+          <tr
+            key={f.path}
+            className="border-b border-slate-800 last:border-b-0 hover:bg-slate-900/40"
+          >
             <td className="px-3 py-1.5 font-mono text-xs break-all">
-              {f.path}
+              <Link
+                to="/apps/$appid/depots/$depotId/manifests/$gid/file"
+                params={{ appid, depotId, gid }}
+                search={{ branch, path: f.path }}
+                className="text-sky-400 hover:underline"
+              >
+                {f.path}
+              </Link>
               {f.linktarget && <span className="text-slate-500"> → {f.linktarget}</span>}
             </td>
             <td className="px-3 py-1.5 text-right tabular-nums">{formatBytes(f.size)}</td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">{f.chunk_count}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">
+              <ChunkPresence present={f.chunks_present} total={f.chunk_count} />
+            </td>
           </tr>
         ))}
       </tbody>
     </table>
+  );
+}
+
+function ChunkPresence({ present, total }: { present: number; total: number }) {
+  if (total === 0) return <span className="text-slate-600">—</span>;
+  if (present === total)
+    return (
+      <span className="text-emerald-400">
+        {total}/{total}
+      </span>
+    );
+  if (present === 0) return <span className="text-slate-500">0/{total}</span>;
+  return (
+    <span className="text-amber-300">
+      {present}/{total}
+    </span>
   );
 }
 

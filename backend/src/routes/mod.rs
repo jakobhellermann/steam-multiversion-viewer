@@ -18,7 +18,9 @@ use crate::http::ImmutableCache;
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 
-type Result<T, E = ApiError> = std::result::Result<T, E>;
+pub mod downloads;
+
+pub(crate) type Result<T, E = ApiError> = std::result::Result<T, E>;
 
 #[derive(Serialize, ToSchema)]
 pub struct OwnedGame {
@@ -170,7 +172,7 @@ pub async fn app_info(
     }))
 }
 
-fn default_branch() -> String {
+pub(super) fn default_branch() -> String {
     "public".into()
 }
 
@@ -220,6 +222,8 @@ pub struct ManifestFile {
     pub size: u64,
     pub kind: ManifestFileKind,
     pub chunk_count: u32,
+    /// How many of `chunk_count` are present on disk.
+    pub chunks_present: u32,
     pub linktarget: Option<String>,
 }
 
@@ -284,7 +288,7 @@ pub async fn manifest_files(
     State(state): State<AppState>,
     Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestFilesQuery>,
-) -> Result<(ImmutableCache, Json<ManifestFilesPage>)> {
+) -> Result<Json<ManifestFilesPage>> {
     let snapshot = state.open_manifest(appid, depot_id, gid, &q.branch).await?;
     let m = snapshot.manifest();
 
@@ -299,28 +303,31 @@ pub async fn manifest_files(
     let start = q.offset.min(total);
     let end = start.saturating_add(q.limit).min(total);
 
+    let index = state.store_index.read().expect("store_index poisoned");
     let files = visible[start..end]
         .iter()
-        .map(|f| ManifestFile {
-            path: f.path.clone(),
-            size: f.size,
-            kind: f.kind.into(),
-            chunk_count: f.chunks.len() as u32,
-            linktarget: f.linktarget.clone(),
+        .map(|f| {
+            let chunks_present = f.chunks.iter().filter(|c| index.has_chunk(&c.sha)).count() as u32;
+            ManifestFile {
+                path: f.path.clone(),
+                size: f.size,
+                kind: f.kind.into(),
+                chunk_count: f.chunks.len() as u32,
+                chunks_present,
+                linktarget: f.linktarget.clone(),
+            }
         })
         .collect();
+    drop(index);
 
-    Ok((
-        ImmutableCache,
-        Json(ManifestFilesPage {
-            depot_id: DepotId(m.depot_id),
-            manifest_id: ManifestId(m.manifest_id),
-            offset: start,
-            limit: end - start,
-            file_count: total,
-            files,
-        }),
-    ))
+    Ok(Json(ManifestFilesPage {
+        depot_id: DepotId(m.depot_id),
+        manifest_id: ManifestId(m.manifest_id),
+        offset: start,
+        limit: end - start,
+        file_count: total,
+        files,
+    }))
 }
 
 #[derive(Serialize, ToSchema)]
@@ -419,7 +426,11 @@ pub async fn manifest_statuses(
         let entry = match result {
             Ok(snap) => {
                 let manifest = snap.manifest();
-                let stats = state.store_index.read().await.manifest_stats(manifest);
+                let stats = state
+                    .store_index
+                    .read()
+                    .expect("store_index poisoned")
+                    .manifest_stats(manifest);
                 ManifestStatusEntry {
                     depot_id,
                     manifest_id: ManifestId(manifest.manifest_id),
@@ -453,4 +464,144 @@ pub async fn manifest_statuses(
     }
 
     Ok(Json(out))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct FileViewQuery {
+    #[serde(default = "default_branch")]
+    pub branch: String,
+    pub path: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct FileView {
+    pub path: String,
+    pub size: u64,
+    pub kind: ManifestFileKind,
+    pub chunk_count: u32,
+    pub chunks_present: u32,
+    pub linktarget: Option<String>,
+    /// SHA-256-ish guess: "text" | "binary" | "unknown" (kind != File).
+    pub content_kind: FileContentKind,
+    /// Inline UTF-8 content for small text files. `None` means "too large
+    /// to preview" or "not a text-like extension". The caller decides
+    /// whether to offer a fetch/download instead.
+    pub content: Option<String>,
+    /// When `content` is `None` because of a size cap, the cap used (for
+    /// the UI to show "this file is X MiB, preview cap is Y MiB").
+    pub preview_cap_bytes: u64,
+}
+
+#[derive(Serialize, ToSchema, Clone, Copy, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum FileContentKind {
+    Text,
+    Binary,
+    /// Directory / symlink / anything not a regular file.
+    Unknown,
+    /// File is larger than the preview cap; we didn't read it, so we
+    /// can't tell text from binary.
+    TooLarge,
+}
+
+/// Maximum size we'll auto-fetch for inline preview. Above this we just
+/// return metadata so a click on a 2 GiB asset doesn't silently warm
+/// hundreds of chunks.
+const PREVIEW_CAP_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Content-based text/binary heuristic: a NUL byte in the first sniff
+/// window is a hard "binary" signal. Otherwise the bytes must parse as
+/// UTF-8 to count as text.
+fn looks_like_text(bytes: &[u8]) -> bool {
+    const SNIFF: usize = 8192;
+    let head = &bytes[..bytes.len().min(SNIFF)];
+    if head.contains(&0) {
+        return false;
+    }
+    std::str::from_utf8(bytes).is_ok()
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{gid}/file",
+    params(FileViewQuery)
+)]
+#[tracing::instrument(skip_all, fields(path = %q.path))]
+pub async fn manifest_file(
+    State(state): State<AppState>,
+    Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
+    Query(q): Query<FileViewQuery>,
+) -> Result<Json<FileView>> {
+    let snapshot = Arc::new(state.open_manifest(appid, depot_id, gid, &q.branch).await?);
+
+    // Extract everything we need from the borrowed manifest before
+    // handing the snapshot Arc to the download manager.
+    let (file_path, file_size, file_kind, file_linktarget, chunk_count, chunks_for_dl, chunk_shas) = {
+        let manifest = snapshot.manifest();
+        let file = manifest
+            .files
+            .iter()
+            .find(|f| f.path == q.path)
+            .ok_or_else(|| ApiError {
+                status: axum::http::StatusCode::NOT_FOUND,
+                message: format!("file not in manifest: {}", q.path),
+            })?;
+        (
+            file.path.clone(),
+            file.size,
+            ManifestFileKind::from(file.kind),
+            file.linktarget.clone(),
+            file.chunks.len() as u32,
+            file.chunks
+                .iter()
+                .map(|c| (c.sha, u64::from(c.size_compressed)))
+                .collect::<Vec<_>>(),
+            file.chunks.iter().map(|c| c.sha).collect::<Vec<_>>(),
+        )
+    };
+
+    let (content_kind, content) = match file_kind {
+        ManifestFileKind::File if file_size > PREVIEW_CAP_BYTES => {
+            (FileContentKind::TooLarge, None)
+        }
+        ManifestFileKind::File => {
+            // Route the fetch through the DownloadManager so the live
+            // drawer reflects the load and the chunks-present index is
+            // kept consistent. `enqueue_and_wait` returns once every
+            // chunk has either landed on disk (and been recorded in the
+            // index) or failed; `read_full` after that is a pure cache
+            // hit.
+            state
+                .downloads
+                .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
+                .await;
+            let bytes = snapshot.read_full(&file_path).await?;
+            if looks_like_text(&bytes) {
+                match String::from_utf8(bytes.to_vec()) {
+                    Ok(s) => (FileContentKind::Text, Some(s)),
+                    Err(_) => (FileContentKind::Binary, None),
+                }
+            } else {
+                (FileContentKind::Binary, None)
+            }
+        }
+        _ => (FileContentKind::Unknown, None),
+    };
+
+    let chunks_present = {
+        let index = state.store_index.read().expect("store_index poisoned");
+        chunk_shas.iter().filter(|sha| index.has_chunk(sha)).count() as u32
+    };
+
+    Ok(Json(FileView {
+        path: file_path,
+        size: file_size,
+        kind: file_kind,
+        chunk_count,
+        chunks_present,
+        linktarget: file_linktarget,
+        content_kind,
+        content,
+        preview_cap_bytes: PREVIEW_CAP_BYTES,
+    }))
 }

@@ -82,9 +82,12 @@ impl StoreIndex {
     }
 
     /// Record that a chunk now exists on disk.
-    #[allow(dead_code)]
     pub fn mark_chunk_present(&mut self, sha: ChunkHash) {
         self.chunks_present.insert(sha);
+    }
+
+    pub fn has_chunk(&self, sha: &ChunkHash) -> bool {
+        self.chunks_present.contains(sha)
     }
 
     /// Aggregate stats for a single manifest against the current indexes.

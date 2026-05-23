@@ -21,6 +21,9 @@ function AppDetail() {
   const statusQuery = useQuery({
     queryKey: ["manifest-statuses", appid],
     queryFn: () => fetchManifestStatuses(appid),
+    // Per-manifest missing-bytes change as the download manager makes
+    // progress; refetch on every mount.
+    refetchOnMount: "always",
   });
 
   return (

@@ -14,6 +14,7 @@ import { Route as IndexRouteImport } from "./routes/index";
 import { Route as AppsAppidRouteImport } from "./routes/apps.$appid";
 import { Route as AppsAppidIndexRouteImport } from "./routes/apps.$appid.index";
 import { Route as AppsAppidDepotsDepotIdManifestsGidRouteImport } from "./routes/apps.$appid.depots.$depotId.manifests.$gid";
+import { Route as AppsAppidDepotsDepotIdManifestsGidFileRouteImport } from "./routes/apps.$appid.depots.$depotId.manifests.$gid_.file";
 
 const SettingsRoute = SettingsRouteImport.update({
   id: "/settings",
@@ -41,6 +42,12 @@ const AppsAppidDepotsDepotIdManifestsGidRoute =
     path: "/depots/$depotId/manifests/$gid",
     getParentRoute: () => AppsAppidRoute,
   } as any);
+const AppsAppidDepotsDepotIdManifestsGidFileRoute =
+  AppsAppidDepotsDepotIdManifestsGidFileRouteImport.update({
+    id: "/depots/$depotId/manifests/$gid_/file",
+    path: "/depots/$depotId/manifests/$gid/file",
+    getParentRoute: () => AppsAppidRoute,
+  } as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
@@ -48,12 +55,14 @@ export interface FileRoutesByFullPath {
   "/apps/$appid": typeof AppsAppidRouteWithChildren;
   "/apps/$appid/": typeof AppsAppidIndexRoute;
   "/apps/$appid/depots/$depotId/manifests/$gid": typeof AppsAppidDepotsDepotIdManifestsGidRoute;
+  "/apps/$appid/depots/$depotId/manifests/$gid/file": typeof AppsAppidDepotsDepotIdManifestsGidFileRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
   "/settings": typeof SettingsRoute;
   "/apps/$appid": typeof AppsAppidIndexRoute;
   "/apps/$appid/depots/$depotId/manifests/$gid": typeof AppsAppidDepotsDepotIdManifestsGidRoute;
+  "/apps/$appid/depots/$depotId/manifests/$gid/file": typeof AppsAppidDepotsDepotIdManifestsGidFileRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
@@ -62,6 +71,7 @@ export interface FileRoutesById {
   "/apps/$appid": typeof AppsAppidRouteWithChildren;
   "/apps/$appid/": typeof AppsAppidIndexRoute;
   "/apps/$appid/depots/$depotId/manifests/$gid": typeof AppsAppidDepotsDepotIdManifestsGidRoute;
+  "/apps/$appid/depots/$depotId/manifests/$gid_/file": typeof AppsAppidDepotsDepotIdManifestsGidFileRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
@@ -70,16 +80,23 @@ export interface FileRouteTypes {
     | "/settings"
     | "/apps/$appid"
     | "/apps/$appid/"
-    | "/apps/$appid/depots/$depotId/manifests/$gid";
+    | "/apps/$appid/depots/$depotId/manifests/$gid"
+    | "/apps/$appid/depots/$depotId/manifests/$gid/file";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/settings" | "/apps/$appid" | "/apps/$appid/depots/$depotId/manifests/$gid";
+  to:
+    | "/"
+    | "/settings"
+    | "/apps/$appid"
+    | "/apps/$appid/depots/$depotId/manifests/$gid"
+    | "/apps/$appid/depots/$depotId/manifests/$gid/file";
   id:
     | "__root__"
     | "/"
     | "/settings"
     | "/apps/$appid"
     | "/apps/$appid/"
-    | "/apps/$appid/depots/$depotId/manifests/$gid";
+    | "/apps/$appid/depots/$depotId/manifests/$gid"
+    | "/apps/$appid/depots/$depotId/manifests/$gid_/file";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
@@ -125,17 +142,26 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsGidRouteImport;
       parentRoute: typeof AppsAppidRoute;
     };
+    "/apps/$appid/depots/$depotId/manifests/$gid_/file": {
+      id: "/apps/$appid/depots/$depotId/manifests/$gid_/file";
+      path: "/depots/$depotId/manifests/$gid/file";
+      fullPath: "/apps/$appid/depots/$depotId/manifests/$gid/file";
+      preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsGidFileRouteImport;
+      parentRoute: typeof AppsAppidRoute;
+    };
   }
 }
 
 interface AppsAppidRouteChildren {
   AppsAppidIndexRoute: typeof AppsAppidIndexRoute;
   AppsAppidDepotsDepotIdManifestsGidRoute: typeof AppsAppidDepotsDepotIdManifestsGidRoute;
+  AppsAppidDepotsDepotIdManifestsGidFileRoute: typeof AppsAppidDepotsDepotIdManifestsGidFileRoute;
 }
 
 const AppsAppidRouteChildren: AppsAppidRouteChildren = {
   AppsAppidIndexRoute: AppsAppidIndexRoute,
   AppsAppidDepotsDepotIdManifestsGidRoute: AppsAppidDepotsDepotIdManifestsGidRoute,
+  AppsAppidDepotsDepotIdManifestsGidFileRoute: AppsAppidDepotsDepotIdManifestsGidFileRoute,
 };
 
 const AppsAppidRouteWithChildren = AppsAppidRoute._addFileChildren(AppsAppidRouteChildren);

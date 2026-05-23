@@ -1,4 +1,3 @@
-// TODO(ai-review): review for style and correctness
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use utoipa::ToSchema;
 

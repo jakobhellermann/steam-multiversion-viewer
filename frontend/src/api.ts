@@ -100,8 +100,34 @@ export type ManifestFile = {
   size: number;
   kind: ManifestFileKind;
   chunk_count: number;
+  chunks_present: number;
   linktarget: string | null;
 };
+
+export type FileContentKind = "text" | "binary" | "unknown" | "too_large";
+
+export type FileView = {
+  path: string;
+  size: number;
+  kind: ManifestFileKind;
+  chunk_count: number;
+  chunks_present: number;
+  linktarget: string | null;
+  content_kind: FileContentKind;
+  content: string | null;
+  preview_cap_bytes: number;
+};
+
+export function fetchFileView(
+  appid: AppId,
+  depotId: number,
+  gid: string,
+  branch: string,
+  path: string,
+): Promise<FileView> {
+  const qs = new URLSearchParams({ branch, path });
+  return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${gid}/file?${qs}`);
+}
 
 export type ManifestFilesPage = {
   depot_id: number;
@@ -147,6 +173,64 @@ export async function patchConfig(patch: { store_root?: string }): Promise<Confi
     }
     throw new Error(message);
   }
+  return r.json();
+}
+
+export type DownloadStats = {
+  chunks_total: number;
+  chunks_completed: number;
+  chunks_failed: number;
+  bytes_total: number;
+  bytes_completed: number;
+  last_error: string | null;
+};
+
+/// SSE `event: chunks` payload. The backend coalesces per-chunk landings
+/// into per-file `chunks_present` updates so the frontend can patch its
+/// `manifest-files` query cache without a refetch.
+export type ChunkUpdate = {
+  depot_id: number;
+  manifest_id: string;
+  files: { path: string; chunks_present: number }[];
+};
+
+export type EnqueueSummary = {
+  enqueued_chunks: number;
+  enqueued_bytes: number;
+  already_present_chunks: number;
+};
+
+export async function downloadManifest(
+  appid: AppId,
+  depotId: number,
+  gid: string,
+  body: { branch: string; paths?: string[] },
+): Promise<EnqueueSummary> {
+  const r = await fetch(`/api/apps/${appid}/depots/${depotId}/manifests/${gid}/download`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let message = `${r.status} ${r.statusText}`;
+    try {
+      const j = await r.json();
+      if (j && typeof j.error === "string") message = j.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  return r.json();
+}
+
+export function fetchDownloads(): Promise<DownloadStats> {
+  return getJson("/api/downloads");
+}
+
+export async function cancelDownloads(): Promise<DownloadStats> {
+  const r = await fetch("/api/downloads/cancel", { method: "POST" });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
   return r.json();
 }
 

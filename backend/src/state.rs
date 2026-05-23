@@ -1,13 +1,13 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
 use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
 use steam_depot_vfs::fs::DepotSnapshot;
 use steam_depot_vfs::{DepotStore, VfsError};
-use tokio::sync::RwLock;
 
 use crate::config::Config;
+use crate::downloads::DownloadManager;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient, auth};
 use crate::store_index::StoreIndex;
 
@@ -22,6 +22,7 @@ pub struct AppState {
     /// In-memory indexes derived from the on-disk store. Updated when new
     /// manifests are fetched.
     pub store_index: Arc<RwLock<StoreIndex>>,
+    pub downloads: Arc<DownloadManager>,
 }
 
 impl AppState {
@@ -42,12 +43,14 @@ impl AppState {
         let index =
             StoreIndex::scan(&store).with_context(|| format!("scanning store {store_root}"))?;
         let store_index = Arc::new(RwLock::new(index));
+        let downloads = DownloadManager::spawn(store_index.clone());
 
         Ok(Self {
             steam,
             store,
             config: Arc::new(config),
             store_index,
+            downloads,
         })
     }
 
@@ -72,7 +75,11 @@ impl AppState {
                 branch,
             )
             .await?;
-        let fresh = self.store_index.write().await.add_manifest(snap.manifest());
+        let fresh = self
+            .store_index
+            .write()
+            .expect("store_index poisoned")
+            .add_manifest(snap.manifest());
         tracing::info!(
             depot_id = %depot_id,
             gid = %manifest_gid,
