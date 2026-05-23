@@ -114,7 +114,6 @@ function FilesTable({ files }: { files: ManifestFile[] }) {
           <th className="px-3 py-2">Path</th>
           <th className="px-3 py-2 text-right">Size</th>
           <th className="px-3 py-2 text-right">Chunks</th>
-          <th className="px-3 py-2">Kind</th>
         </tr>
       </thead>
       <tbody>
@@ -124,13 +123,8 @@ function FilesTable({ files }: { files: ManifestFile[] }) {
               {f.path}
               {f.linktarget && <span className="text-slate-500"> → {f.linktarget}</span>}
             </td>
-            <td className="px-3 py-1.5 text-right tabular-nums">
-              {f.kind === "file" ? formatBytes(f.size) : <span className="text-slate-600">—</span>}
-            </td>
-            <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">
-              {f.kind === "file" ? f.chunk_count : <span className="text-slate-600">—</span>}
-            </td>
-            <td className="px-3 py-1.5 text-slate-400">{f.kind}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{formatBytes(f.size)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">{f.chunk_count}</td>
           </tr>
         ))}
       </tbody>

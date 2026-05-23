@@ -263,7 +263,13 @@ pub async fn manifest_info(
             creation_time: m.creation_time,
             size_uncompressed: m.size_uncompressed,
             size_compressed: m.size_compressed,
-            file_count: m.files.len(),
+            // Directories are implicit in file paths, so don't count
+            // them — keeps the value consistent with the listing route.
+            file_count: m
+                .files
+                .iter()
+                .filter(|f| !matches!(f.kind, FileKind::Directory))
+                .count(),
         }),
     ))
 }
@@ -282,11 +288,18 @@ pub async fn manifest_files(
     let snapshot = state.open_manifest(appid, depot_id, gid, &q.branch).await?;
     let m = snapshot.manifest();
 
-    let total = m.files.len();
+    // Directories are implicit in file paths — skipping them keeps the
+    // listing scannable and the pagination "10/4000" honest.
+    let visible: Vec<&steam_vent_depot::DepotFile> = m
+        .files
+        .iter()
+        .filter(|f| !matches!(f.kind, FileKind::Directory))
+        .collect();
+    let total = visible.len();
     let start = q.offset.min(total);
     let end = start.saturating_add(q.limit).min(total);
 
-    let files = m.files[start..end]
+    let files = visible[start..end]
         .iter()
         .map(|f| ManifestFile {
             path: f.path.clone(),
