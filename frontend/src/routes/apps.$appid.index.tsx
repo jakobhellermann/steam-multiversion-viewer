@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import {
   fetchAppInfo,
   fetchManifestStatuses,
@@ -57,6 +58,13 @@ function AppDetailBody({
   for (const s of statuses ?? []) {
     statusByKey.set(`${s.depot_id}/${s.manifest_id}/${s.branch}`, s);
   }
+  // Re-honor the URL hash once the depot cards are in the DOM — on first
+  // navigation the browser tries to scroll before our data has loaded.
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash) return;
+    document.getElementById(hash)?.scrollIntoView({ block: "start" });
+  }, []);
   return (
     <>
       <div className="flex gap-6">

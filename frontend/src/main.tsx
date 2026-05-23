@@ -1,6 +1,7 @@
 import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fetchLibrary } from "./api";
 import { routeTree } from "./routeTree.gen";
 
 const queryClient = new QueryClient({
@@ -13,6 +14,9 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Always have the library warm so navigating back is instant.
+queryClient.prefetchQuery({ queryKey: ["library"], queryFn: fetchLibrary });
 
 const router = createRouter({
   routeTree,
