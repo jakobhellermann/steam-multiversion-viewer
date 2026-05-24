@@ -6,7 +6,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0"
-axum = { version = "0.8", default-features = false, features = ["tracing", "http1", "json", "macros", "tokio", "query"] }
+axum = { version = "0.8", default-features = false, features = ["tracing", "http1", "json", "macros", "matched-path", "tokio", "query"] }
 camino = { version = "1.2.2", features = ["serde1"] }
 directories = "5"
 futures-util = "0.3"

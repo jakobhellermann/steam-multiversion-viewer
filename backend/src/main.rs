@@ -11,10 +11,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use axum::Json;
-use axum::response::Html;
+use axum::extract::{MatchedPath, Request};
+use axum::middleware::{self, Next};
+use axum::response::{Html, Response};
 use axum::routing::get;
 use directories::ProjectDirs;
-use tower_http::trace::TraceLayer;
+use std::time::Instant;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -65,7 +67,7 @@ async fn main() -> Result<()> {
             get(routes::downloads::downloads_events),
         )
         .route("/api/docs", get(scalar_html))
-        .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(http_log))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:6556").await?;
@@ -73,6 +75,24 @@ async fn main() -> Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+async fn http_log(req: Request, next: Next) -> Response {
+    let route = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| req.uri().path().to_string());
+    let start = Instant::now();
+    let res = next.run(req).await;
+    let status = res.status();
+    let time = format!("{}ms", start.elapsed().as_millis());
+    if status.is_success() {
+        tracing::info!(route, status = status.as_u16(), time, "request");
+    } else {
+        tracing::warn!(route, status = status.as_u16(), time, "request");
+    }
+    res
 }
 
 fn setup_logging() -> Result<PathBuf> {
