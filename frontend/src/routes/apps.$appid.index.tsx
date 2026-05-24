@@ -1,16 +1,21 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchAppInfo,
+  fetchExtraManifests,
   fetchManifestStatuses,
+  putExtraManifests,
   type AppInfo,
   type DepotEntry,
+  type ExtraManifestEntry,
   type ManifestRef,
   type ManifestStatusEntry,
 } from "../api";
 import { Bytes } from "../Bytes";
 import { ErrorBox } from "../ErrorBox";
+import { parseSteamDbPaste, type ParsedExtra } from "../parseSteamDbPaste";
+import { pinScroll } from "../pinScroll";
 
 export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
 
@@ -21,9 +26,14 @@ function AppDetail() {
     queryKey: ["app", appid],
     queryFn: () => fetchAppInfo(appid),
   });
-  // (depot_id, manifest_id, branch) refs from app_info. Dedup by
-  // (depot_id, manifest_id) — branches that share a gid don't add work,
-  // and the chosen branch only matters for the cache-miss path anyway.
+  const extraQuery = useQuery({
+    queryKey: ["extra-manifests", appid],
+    queryFn: () => fetchExtraManifests(appid),
+  });
+  // (depot_id, manifest_id, branch) refs from app_info + extras. Dedup
+  // by (depot_id, manifest_id) — branches that share a gid don't add
+  // work, and the chosen branch only matters for the cache-miss path
+  // anyway. Extras with no branch fall back to "public".
   const manifestRefs = useMemo<ManifestRef[]>(() => {
     if (!query.data) return [];
     const seen = new Set<string>();
@@ -36,8 +46,18 @@ function AppDetail() {
         refs.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
       }
     }
+    for (const e of extraQuery.data ?? []) {
+      const key = `${e.depot_id}/${e.manifest_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      refs.push({
+        depot_id: e.depot_id,
+        manifest_id: e.manifest_id,
+        branch: e.branch ?? "public",
+      });
+    }
     return refs;
-  }, [query.data]);
+  }, [query.data, extraQuery.data]);
   const statusQuery = useQuery({
     queryKey: ["manifest-statuses", appid, manifestRefs],
     queryFn: () => fetchManifestStatuses(appid, manifestRefs),
@@ -54,6 +74,7 @@ function AppDetail() {
       {query.data && (
         <AppDetailBody
           info={query.data}
+          extras={extraQuery.data ?? []}
           statuses={statusQuery.data}
           statusError={statusQuery.error as Error | null}
         />
@@ -64,13 +85,24 @@ function AppDetail() {
 
 function AppDetailBody({
   info,
+  extras,
   statuses,
   statusError,
 }: {
   info: AppInfo;
+  extras: ExtraManifestEntry[];
   statuses: ManifestStatusEntry[] | undefined;
   statusError: Error | null;
 }) {
+  const extrasByDepot = useMemo(() => {
+    const map = new Map<number, ExtraManifestEntry[]>();
+    for (const e of extras) {
+      const list = map.get(e.depot_id);
+      if (list) list.push(e);
+      else map.set(e.depot_id, [e]);
+    }
+    return map;
+  }, [extras]);
   const statusByKey = new Map<string, ManifestStatusEntry>();
   for (const s of statuses ?? []) {
     statusByKey.set(`${s.depot_id}/${s.manifest_id}`, s);
@@ -177,6 +209,8 @@ function AppDetailBody({
                 appid={info.appid}
                 statuses={statusByKey}
                 branchDescriptions={branchDescriptions}
+                extras={extrasByDepot.get(depot.depot_id) ?? []}
+                allExtras={extras}
               />
             ))}
           </div>
@@ -191,12 +225,17 @@ function DepotCard({
   appid,
   statuses,
   branchDescriptions,
+  extras,
+  allExtras,
 }: {
   depot: DepotEntry;
   appid: number;
   statuses: Map<string, ManifestStatusEntry>;
   branchDescriptions: Map<string, string>;
+  extras: ExtraManifestEntry[];
+  allExtras: ExtraManifestEntry[];
 }) {
+  const [importOpen, setImportOpen] = useState(false);
   const tags = [depot.oslist, depot.osarch, depot.language].filter(Boolean) as string[];
   const sharedFromLink =
     depot.from_app_id != null ? (
@@ -209,7 +248,10 @@ function DepotCard({
         app {depot.from_app_id}
       </Link>
     ) : null;
-  const hasBody = depot.manifests.length > 0 || !sharedFromLink;
+  const hasBody = depot.manifests.length > 0 || !sharedFromLink || extras.length > 0;
+  // Extras only make sense for depots whose content lives here; shared
+  // depots belong to another app entirely.
+  const canTrackExtras = depot.from_app_id == null;
   return (
     <div
       id={`depot-${depot.depot_id}`}
@@ -225,14 +267,15 @@ function DepotCard({
         {sharedFromLink && (
           <span className="text-xs text-slate-500">shared from {sharedFromLink}</span>
         )}
-        <a
-          href={`https://steamdb.info/depot/${depot.depot_id}/manifests/`}
-          target="_blank"
-          rel="noreferrer"
-          className="ml-auto text-xs text-slate-500 hover:text-sky-400 hover:underline"
-        >
-          history on SteamDB ↗
-        </a>
+        {canTrackExtras && (
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="ml-auto text-xs text-slate-500 hover:text-sky-400 hover:underline"
+          >
+            import history from SteamDB ↗︎
+          </button>
+        )}
       </div>
       {depot.manifests.length === 0 ? (
         sharedFromLink ? null : (
@@ -273,7 +316,114 @@ function DepotCard({
           })()}
         </>
       )}
+      {extras.length > 0 && (
+        <ExtrasSection
+          appid={appid}
+          depotId={depot.depot_id}
+          extras={extras}
+          allExtras={allExtras}
+          statuses={statuses}
+        />
+      )}
+      {importOpen && (
+        <ImportExtrasModal
+          appid={appid}
+          depotId={depot.depot_id}
+          existing={allExtras}
+          officialManifests={depot.manifests}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+function ExtrasSection({
+  appid,
+  depotId,
+  extras,
+  allExtras,
+  statuses,
+}: {
+  appid: number;
+  depotId: number;
+  extras: ExtraManifestEntry[];
+  allExtras: ExtraManifestEntry[];
+  statuses: Map<string, ManifestStatusEntry>;
+}) {
+  const queryClient = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const toggle = () => {
+    // Only collapse shrinks the page — that's the case where scrollY
+    // gets yanked, so only run pinScroll then. We measure now, before
+    // React updates the DOM, and restore once the new layout is in.
+    const restore = expanded ? pinScroll(headerRef.current) : null;
+    setExpanded((v) => !v);
+    if (restore) requestAnimationFrame(restore);
+  };
+  const clearAll = useMutation({
+    mutationFn: () =>
+      putExtraManifests(
+        appid,
+        allExtras.filter((e) => e.depot_id !== depotId),
+      ),
+    onSuccess: (next) => {
+      queryClient.setQueryData(["extra-manifests", appid], next);
+    },
+  });
+  return (
+    <>
+      <div
+        ref={headerRef}
+        role="button"
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+        aria-expanded={expanded}
+        className="col-span-full grid grid-cols-subgrid text-xs text-slate-500 border-t border-slate-800 bg-slate-900/40 cursor-pointer hover:text-slate-300 hover:bg-slate-900/60 select-none"
+      >
+        <div className="col-span-4 px-4 py-1.5 flex items-center gap-1">
+          <span className="inline-block w-3 text-slate-500">{expanded ? "▼︎" : "▶︎"}</span>
+          <span>
+            Additional manifests <span className="tabular-nums">({extras.length})</span>
+          </span>
+        </div>
+        <div className="px-4 py-1.5 text-right">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              clearAll.mutate();
+            }}
+            disabled={clearAll.isPending}
+            aria-label="Remove all tracked manifests in this depot"
+            title="Remove all tracked manifests in this depot"
+            className="text-lg leading-none text-slate-500 hover:text-red-400 disabled:opacity-40"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+      {expanded &&
+        extras.map((e) => {
+          const status = statuses.get(`${depotId}/${e.manifest_id}`);
+          return (
+            <ExtraManifestRow
+              key={e.manifest_id}
+              appid={appid}
+              depotId={depotId}
+              extra={e}
+              status={status}
+            />
+          );
+        })}
+    </>
   );
 }
 
@@ -376,6 +526,329 @@ function ManifestRow({
           <Skeleton />
         )}
       </Link>
+    </div>
+  );
+}
+
+function ExtraManifestRow({
+  appid,
+  depotId,
+  extra,
+  status,
+}: {
+  appid: number;
+  depotId: number;
+  extra: ExtraManifestEntry;
+  status: ManifestStatusEntry | undefined;
+}) {
+  const branch = extra.branch ?? "public";
+  const linkProps = {
+    to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
+    params: {
+      appid: String(appid),
+      depotId: String(depotId),
+      manifestId: extra.manifest_id,
+    },
+    search: { branch, offset: 0, limit: 100 },
+    draggable: false,
+    onClick: (e: React.MouseEvent) => {
+      if (window.getSelection()?.toString()) {
+        e.preventDefault();
+      }
+    },
+  } as const;
+  const cell = "px-4 py-1.5";
+  return (
+    <div className="col-span-full grid grid-cols-subgrid items-baseline hover:bg-slate-800/40 group">
+      <Link {...linkProps} className={`${cell} font-medium whitespace-nowrap text-slate-400`}>
+        {extra.branch ?? <span className="text-slate-600 italic">unknown</span>}
+      </Link>
+      <Link
+        {...linkProps}
+        tabIndex={-1}
+        aria-hidden="true"
+        className={`${cell} font-mono tabular-nums text-xs text-sky-400`}
+      >
+        {extra.manifest_id}
+      </Link>
+      <Link
+        {...linkProps}
+        tabIndex={-1}
+        aria-hidden="true"
+        className={`${cell} text-right tabular-nums whitespace-nowrap text-slate-500`}
+      >
+        {status?.error ? (
+          <span className="text-slate-600">—</span>
+        ) : (
+          <Bytes value={status?.bytes_total ?? 0} />
+        )}
+      </Link>
+      <Link
+        {...linkProps}
+        tabIndex={-1}
+        aria-hidden="true"
+        className={`${cell} text-right tabular-nums whitespace-nowrap`}
+      >
+        {status ? (
+          status.error ? (
+            <span className="text-red-400" title={status.error}>
+              inaccessible
+            </span>
+          ) : status.bytes_missing === 0 ? (
+            <span className="text-slate-600">—</span>
+          ) : (
+            <span className="text-amber-300">
+              <Bytes value={status.bytes_missing} />{" "}
+              <span className="text-slate-500">
+                (<Bytes value={status.bytes_missing_compressed} />)
+              </span>
+            </span>
+          )
+        ) : (
+          <Skeleton />
+        )}
+      </Link>
+      <Link
+        {...linkProps}
+        tabIndex={-1}
+        aria-hidden="true"
+        className={`${cell} text-right tabular-nums whitespace-nowrap text-slate-400`}
+      >
+        {status ? (
+          status.bytes_unique === 0 ? (
+            <span className="text-slate-600">—</span>
+          ) : (
+            <Bytes value={status.bytes_unique} />
+          )
+        ) : (
+          <Skeleton />
+        )}
+      </Link>
+    </div>
+  );
+}
+
+function ImportExtrasModal({
+  appid,
+  depotId,
+  existing,
+  officialManifests,
+  onClose,
+}: {
+  appid: number;
+  depotId: number;
+  existing: ExtraManifestEntry[];
+  officialManifests: { branch: string; manifest_id: string }[];
+  onClose: () => void;
+}) {
+  const [text, setText] = useState("");
+  const queryClient = useQueryClient();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    textareaRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    // When the user comes back from another tab (where they copied
+    // text), put focus back on the textarea so ctrl-v lands.
+    const onWindowFocus = () => textareaRef.current?.focus();
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("focus", onWindowFocus);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("focus", onWindowFocus);
+    };
+  }, [onClose]);
+  const parsed = useMemo(() => parseSteamDbPaste(text), [text]);
+  // Identity = manifest_id + branch. We treat a parsed entry as a
+  // duplicate iff the same (manifest_id, branch) already exists on this
+  // depot — either as an official manifest or a tracked extra. Same
+  // manifest_id on a *different* branch is still worth adding (it's a
+  // new (gid, branch) tuple).
+  const existingKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of officialManifests) s.add(`${m.manifest_id}|${m.branch}`);
+    for (const e of existing) {
+      if (e.depot_id === depotId) s.add(`${e.manifest_id}|${e.branch ?? "public"}`);
+    }
+    return s;
+  }, [existing, officialManifests, depotId]);
+  // depotdownloader / download_depot lines carry their own app_id and
+  // depot_id; reject ones that reference a different depot so we don't
+  // silently file them under the wrong card.
+  const matchesDepot = (p: ParsedExtra) =>
+    (p.app_id == null || p.app_id === appid) && (p.depot_id == null || p.depot_id === depotId);
+  const eligible = parsed.filter(matchesDepot);
+  const mismatches = parsed.filter((p) => !matchesDepot(p));
+  const isExisting = (p: ParsedExtra) => existingKeys.has(`${p.manifest_id}|${p.branch}`);
+  const newOnly = eligible.filter((p) => !isExisting(p));
+  const save = useMutation({
+    mutationFn: async () => {
+      // Replace-all endpoint: union of existing + new for this depot,
+      // keeping other depots' entries untouched. Identity is
+      // (manifest_id, branch) so same gid on a different branch can
+      // still be added.
+      const otherDepots = existing.filter((e) => e.depot_id !== depotId);
+      const sameDepot = existing.filter((e) => e.depot_id === depotId);
+      const seen = new Set(sameDepot.map((e) => `${e.manifest_id}|${e.branch ?? "public"}`));
+      for (const p of newOnly) {
+        const key = `${p.manifest_id}|${p.branch}`;
+        if (!seen.has(key)) {
+          sameDepot.push({
+            depot_id: depotId,
+            manifest_id: p.manifest_id,
+            branch: p.branch,
+          });
+          seen.add(key);
+        }
+      }
+      return putExtraManifests(appid, [...otherDepots, ...sameDepot]);
+    },
+    onSuccess: (next) => {
+      queryClient.setQueryData(["extra-manifests", appid], next);
+      onClose();
+    },
+  });
+  return (
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/60"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-160 max-w-[95vw] mx-auto mt-32 mb-16 bg-slate-900 border border-slate-700 rounded shadow-xl">
+        <header className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+          <h3 className="text-base font-semibold">Track manifests in depot {depotId}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="px-1 text-slate-500 hover:text-slate-200 text-lg leading-none"
+          >
+            ×
+          </button>
+        </header>
+        <div className="px-4 py-3 space-y-3 text-sm text-slate-400">
+          <p>
+            SteamDB doesn't expose an API. Open{" "}
+            <a
+              href={`https://steamdb.info/depot/${depotId}/manifests/`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sky-400 hover:underline"
+            >
+              the depot's manifest history
+            </a>{" "}
+            and log in to your steam account.
+          </p>
+          <p>
+            Then{" "}
+            <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">
+              Ctrl+A
+            </kbd>{" "}
+            <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">
+              Ctrl+C
+            </kbd>{" "}
+            the whole page and{" "}
+            <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">
+              Ctrl+V
+            </kbd>{" "}
+            in here.
+          </p>
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                if (newOnly.length > 0 && !save.isPending) save.mutate();
+              }
+            }}
+            spellCheck={false}
+            rows={10}
+            placeholder={
+              "Seen Date     Relative Date     ManifestID\n" +
+              "1 January 2025 – 12:00:00 UTC    1 year ago     1111111111111111111\n" +
+              "2 January 2025 – 12:00:00 UTC    1 year ago     2222222222222222222 public-beta"
+            }
+            className="w-full px-3 py-2 text-xs font-mono bg-slate-950 border border-slate-700 rounded focus:outline-none focus:border-sky-700"
+          />
+          {parsed.length > 0 && (
+            <div className="border border-slate-800 rounded overflow-hidden">
+              <div className="px-3 py-1.5 text-xs text-slate-400 bg-slate-900/60 border-b border-slate-800 flex justify-between">
+                <span>{parsed.length} parsed</span>
+                <span className="text-slate-500">
+                  {newOnly.length} new · {eligible.length - newOnly.length} already tracked
+                  {mismatches.length > 0 && (
+                    <>
+                      {" · "}
+                      <span className="text-amber-400">{mismatches.length} wrong depot</span>
+                    </>
+                  )}
+                </span>
+              </div>
+              <ul tabIndex={-1} className="max-h-48 overflow-auto text-sm">
+                {parsed.map((p) => {
+                  const dup = isExisting(p);
+                  const wrongDepot = !matchesDepot(p);
+                  const mismatchLabel = wrongDepot
+                    ? p.app_id != null && p.app_id !== appid
+                      ? `app ${p.app_id}`
+                      : `depot ${p.depot_id}`
+                    : null;
+                  return (
+                    <li
+                      key={p.manifest_id}
+                      className={`px-3 py-1 flex items-baseline gap-3 ${
+                        wrongDepot ? "text-amber-400/70" : dup ? "text-slate-600" : "text-slate-200"
+                      }`}
+                    >
+                      <span className="font-mono tabular-nums text-xs whitespace-pre">
+                        {p.manifest_id.padStart(20, " ")}
+                      </span>
+                      <span className="text-xs text-slate-400">{p.branch}</span>
+                      {mismatchLabel && (
+                        <span className="ml-auto text-xs text-amber-400">
+                          skipped ({mismatchLabel})
+                        </span>
+                      )}
+                      {!mismatchLabel && dup && (
+                        <span className="ml-auto text-xs text-slate-500">already tracked</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+          {save.error && (
+            <p className="text-xs text-red-300">Save failed: {(save.error as Error).message}</p>
+          )}
+        </div>
+        <footer className="px-4 py-3 border-t border-slate-800 flex items-center gap-2">
+          <span className="text-xs text-slate-500">
+            {newOnly.length === 0
+              ? "Nothing new to add."
+              : `${newOnly.length} new manifest${newOnly.length === 1 ? "" : "s"} ready.`}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-auto px-3 py-1.5 text-sm text-slate-300 hover:text-slate-100"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => save.mutate()}
+            disabled={newOnly.length === 0 || save.isPending}
+            className="px-3 py-1.5 text-sm border border-sky-700 bg-sky-950/40 rounded hover:bg-sky-900/40 disabled:opacity-40"
+          >
+            {save.isPending ? "Saving…" : "Add"}
+          </button>
+        </footer>
+      </div>
     </div>
   );
 }

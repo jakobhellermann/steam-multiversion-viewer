@@ -8,6 +8,7 @@ use steam_depot_vfs::{DepotStore, VfsError};
 
 use crate::config::Config;
 use crate::downloads::DownloadManager;
+use crate::extra_manifests::ExtraManifestsStore;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient, auth};
 use crate::store_index::StoreIndex;
 
@@ -23,6 +24,7 @@ pub struct AppState {
     /// manifests are fetched.
     pub store_index: Arc<RwLock<StoreIndex>>,
     pub downloads: Arc<DownloadManager>,
+    pub extra_manifests: Arc<ExtraManifestsStore>,
 }
 
 impl AppState {
@@ -45,12 +47,18 @@ impl AppState {
         let store_index = Arc::new(RwLock::new(index));
         let downloads = DownloadManager::spawn(store_index.clone());
 
+        let extra_manifests = Arc::new(
+            ExtraManifestsStore::load(&store_root)
+                .with_context(|| format!("loading extra manifests from {store_root}"))?,
+        );
+
         Ok(Self {
             steam,
             store,
             config: Arc::new(config),
             store_index,
             downloads,
+            extra_manifests,
         })
     }
 

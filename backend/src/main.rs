@@ -1,6 +1,7 @@
 mod config;
 mod downloads;
 mod error;
+mod extra_manifests;
 mod http;
 mod routes;
 mod state;
@@ -53,6 +54,11 @@ async fn main() -> Result<()> {
         .routes(routes!(routes::downloads::downloads_snapshot))
         .routes(routes!(routes::downloads::downloads_cancel))
         .routes(routes!(routes::get_config, routes::patch_config))
+        .routes(routes!(
+            routes::get_extra_manifests,
+            routes::put_extra_manifests
+        ))
+        .routes(routes!(routes::delete_extra_manifest))
         .split_for_parts();
 
     let app = api_router

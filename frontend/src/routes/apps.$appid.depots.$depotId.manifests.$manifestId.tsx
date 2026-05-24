@@ -17,6 +17,7 @@ import {
 import { Bytes } from "../Bytes";
 import { ErrorBox } from "../ErrorBox";
 import { formatBytes } from "../format";
+import { pinScroll } from "../pinScroll";
 
 type Search = {
   branch: string;
@@ -306,38 +307,6 @@ function nodeContainsMatch(node: TreeNode, matches: Set<string>): boolean {
 /// the anchor's viewport position after the new layout settles. The
 /// pad shrinks back to nothing as the user scrolls up; once scrollY +
 /// viewport fits within the natural height we drop it entirely.
-function pinScroll(anchor: HTMLElement | null): () => void {
-  const beforeOffset = anchor?.getBoundingClientRect().top;
-  const beforeScroll = window.scrollY;
-  const beforeHeight = document.documentElement.scrollHeight;
-  return () => {
-    document.body.style.minHeight = `${beforeHeight}px`;
-    window.scrollTo(0, beforeScroll);
-    requestAnimationFrame(() => {
-      if (anchor && beforeOffset != null) {
-        const afterOffset = anchor.getBoundingClientRect().top;
-        const delta = afterOffset - beforeOffset;
-        if (delta !== 0) window.scrollBy(0, delta);
-      }
-      const tighten = () => {
-        const currentMin = parseInt(document.body.style.minHeight || "0", 10);
-        if (!currentMin) {
-          window.removeEventListener("scroll", tighten);
-          return;
-        }
-        const needed = window.scrollY + window.innerHeight;
-        if (needed < currentMin) {
-          document.body.style.minHeight = `${needed}px`;
-        } else {
-          document.body.style.minHeight = "";
-          window.removeEventListener("scroll", tighten);
-        }
-      };
-      window.addEventListener("scroll", tighten, { passive: true });
-    });
-  };
-}
-
 function FilesPanel({
   allFiles,
   appid,

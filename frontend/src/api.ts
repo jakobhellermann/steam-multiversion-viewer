@@ -82,6 +82,61 @@ export type ManifestStatusEntry = {
 
 export type ManifestRef = { depot_id: number; manifest_id: string; branch: string };
 
+export type ExtraManifestEntry = {
+  depot_id: number;
+  manifest_id: string;
+  branch: string | null;
+};
+
+export async function fetchExtraManifests(appid: AppId): Promise<ExtraManifestEntry[]> {
+  const r = await fetch(`/api/apps/${appid}/extra_manifests`);
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json();
+}
+
+export async function putExtraManifests(
+  appid: AppId,
+  entries: ExtraManifestEntry[],
+): Promise<ExtraManifestEntry[]> {
+  const r = await fetch(`/api/apps/${appid}/extra_manifests`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ entries }),
+  });
+  if (!r.ok) {
+    let message = `${r.status} ${r.statusText}`;
+    try {
+      const body = await r.json();
+      if (body && typeof body.error === "string") message = body.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  return r.json();
+}
+
+export async function deleteExtraManifest(
+  appid: AppId,
+  depotId: number,
+  manifestId: string,
+): Promise<ExtraManifestEntry[]> {
+  const r = await fetch(`/api/apps/${appid}/extra_manifests/${depotId}/${manifestId}`, {
+    method: "DELETE",
+  });
+  if (!r.ok) {
+    let message = `${r.status} ${r.statusText}`;
+    try {
+      const body = await r.json();
+      if (body && typeof body.error === "string") message = body.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  return r.json();
+}
+
 export async function fetchManifestDiff(
   appid: AppId,
   base: ManifestRef,
