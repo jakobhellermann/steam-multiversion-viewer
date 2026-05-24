@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useCallback, useDeferredValue, useMemo, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   downloadManifest,
   fetchManifestFiles,
@@ -158,6 +158,20 @@ type TreeNode = {
   // Number of file leaves under this node (1 if this node is itself a file).
   fileCount: number;
 };
+
+const NO_EXT = "";
+
+function fileExtension(path: string): string {
+  // Only look at the last segment so a "." in a dir name doesn't count.
+  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  // Strip trailing version suffixes (libfoo.so.1, libfoo.so.1.2) before
+  // picking the extension so versioned shared libs bucket as "so".
+  const stripped = name.replace(/(?:\.\d+)+$/, "");
+  const dot = stripped.lastIndexOf(".");
+  if (dot <= 0) return NO_EXT;
+  return stripped.slice(dot + 1);
+}
 
 function buildTree(files: ManifestFile[]): TreeNode {
   const root: TreeNode = {
@@ -332,6 +346,10 @@ function FilesPanel({
   // (no URL pollution).
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => ["tree-query", depotId, manifestId], [depotId, manifestId]);
+  const extFilterKey = useMemo(
+    () => ["tree-ext-filter", depotId, manifestId],
+    [depotId, manifestId],
+  );
   const expandedKey = useMemo(() => ["tree-expanded", depotId, manifestId], [depotId, manifestId]);
   // Search-mode default-expanded; this set tracks paths the user explicitly
   // collapsed during search so toggle still has an effect there.
@@ -355,6 +373,16 @@ function FilesPanel({
       queryClient.setQueryData(collapsedKey, new Set<string>());
     }
   };
+  // Active extension filter (whitelist). Empty = no filter (show all).
+  // Hydrated from + synced to the query client so it survives the
+  // round-trip to file detail and back, like the path filter.
+  const [extFilter, setExtFilterLocal] = useState<Set<string>>(
+    () => queryClient.getQueryData<Set<string>>(extFilterKey) ?? new Set(),
+  );
+  const setExtFilter = (next: Set<string>) => {
+    setExtFilterLocal(next);
+    queryClient.setQueryData(extFilterKey, next);
+  };
   const expanded =
     useQuery({
       queryKey: expandedKey,
@@ -373,16 +401,30 @@ function FilesPanel({
 
   const tree = useMemo(() => buildTree(allFiles), [allFiles]);
 
+  // Extension → count over all files, sorted by count desc. Files without
+  // a dot in their last segment get bucketed under "(no ext)".
+  const extCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const f of allFiles) {
+      const ext = fileExtension(f.path);
+      counts.set(ext, (counts.get(ext) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [allFiles]);
+
   const matches = useMemo<Set<string> | null>(() => {
     const tokens = deferred.toLowerCase().split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return null;
+    const hasExtFilter = extFilter.size > 0;
+    if (tokens.length === 0 && !hasExtFilter) return null;
     const m = new Set<string>();
     for (const f of allFiles) {
       const path = f.path.toLowerCase();
-      if (tokens.every((t) => path.includes(t))) m.add(f.path);
+      if (tokens.length > 0 && !tokens.every((t) => path.includes(t))) continue;
+      if (hasExtFilter && !extFilter.has(fileExtension(f.path))) continue;
+      m.add(f.path);
     }
     return m;
-  }, [allFiles, deferred]);
+  }, [allFiles, deferred, extFilter]);
 
   const rows = useMemo(
     () => flattenTree(tree, expanded, collapsed, matches),
@@ -499,27 +541,30 @@ function FilesPanel({
           {hasOpenDirs ? "collapse all" : "expand all"}
         </button>
       </div>
-      <div className="relative mb-3">
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter by path…"
-          spellCheck={false}
-          autoCorrect="off"
-          autoCapitalize="off"
-          className="w-full px-3 py-1.5 pr-8 text-sm bg-slate-900 border border-slate-700 rounded focus:outline-none focus:border-sky-700 [&::-webkit-search-cancel-button]:hidden"
-        />
-        {query && (
-          <button
-            type="button"
-            onClick={() => setQuery("")}
-            aria-label="Clear filter"
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 text-slate-500 hover:text-slate-200 text-lg leading-none"
-          >
-            ×
-          </button>
-        )}
+      <div className="flex gap-2 mb-3">
+        <div className="relative flex-1">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter by path…"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
+            className="w-full px-3 py-1.5 pr-8 text-sm bg-slate-900 border border-slate-700 rounded focus:outline-none focus:border-sky-700 [&::-webkit-search-cancel-button]:hidden"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear filter"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 text-slate-500 hover:text-slate-200 text-lg leading-none"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        <ExtensionFilter extCounts={extCounts} selected={extFilter} onChange={setExtFilter} />
       </div>
       <TreeList
         rows={rows}
@@ -651,6 +696,104 @@ const TreeRow = memo(function TreeRow({
     </li>
   );
 });
+
+function ExtensionFilter({
+  extCounts,
+  selected,
+  onChange,
+}: {
+  extCounts: [string, number][];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const toggle = (ext: string) => {
+    const next = new Set(selected);
+    if (next.has(ext)) next.delete(ext);
+    else next.add(ext);
+    onChange(next);
+  };
+  const count = selected.size;
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`px-3 py-1.5 text-sm border rounded whitespace-nowrap ${
+          count > 0
+            ? "border-sky-700 bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
+            : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600"
+        }`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+      >
+        Extensions{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-10 w-48 max-h-80 overflow-auto bg-slate-900 border border-slate-700 rounded shadow-lg">
+          <div className="flex items-center justify-between px-3 py-1.5 text-xs text-slate-400 border-b border-slate-800 sticky top-0 bg-slate-900">
+            <span className="tabular-nums">{extCounts.length} types</span>
+            {count > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange(new Set())}
+                className="text-slate-500 hover:text-slate-200"
+              >
+                clear
+              </button>
+            )}
+          </div>
+          <ul>
+            {extCounts.map(([ext, n]) => {
+              const checked = selected.has(ext);
+              return (
+                <li key={ext}>
+                  <label
+                    onMouseDown={(e) => e.preventDefault()}
+                    className={`flex items-center gap-2 px-3 py-1 text-sm cursor-pointer select-none hover:bg-slate-800/60 ${
+                      checked ? "text-sky-200" : "text-slate-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(ext)}
+                      className="accent-sky-500"
+                    />
+                    <span className="flex-1 truncate">
+                      {ext === NO_EXT ? <span className="italic text-slate-500">none</span> : ext}
+                    </span>
+                    <span className="text-xs text-slate-500 tabular-nums">
+                      {n.toLocaleString()}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function formatTime(unix: number): string {
   if (!unix) return "—";
