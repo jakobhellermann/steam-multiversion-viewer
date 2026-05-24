@@ -15,6 +15,7 @@ import {
   type ManifestRef,
 } from "../api";
 import { isTransformablePath, mediaKindForPath } from "../mediaKind";
+import { highlight, langForMime, langForPath } from "../syntax";
 import { Bytes } from "../Bytes";
 import { CompareMenu, diffTargetKey } from "../CompareMenu";
 import { ErrorBox } from "../ErrorBox";
@@ -363,11 +364,7 @@ function TransformedPreview({ locator }: { locator: FileLocator }) {
   if (query.data == null) {
     return <p className="text-sm text-slate-500">Not transformable.</p>;
   }
-  return (
-    <pre className="p-3 bg-slate-950 border border-slate-800 rounded text-xs whitespace-pre-wrap wrap-break-word font-mono overflow-x-auto">
-      {query.data}
-    </pre>
-  );
+  return <HighlightedPre code={query.data.text} lang={langForMime(query.data.mime)} />;
 }
 
 function FilePreview({
@@ -454,13 +451,36 @@ function FilePreview({
     return (
       <section className={sectionClass}>
         {header}
-        <pre className="p-3 bg-slate-950 border border-slate-800 rounded text-xs whitespace-pre-wrap wrap-break-word font-mono overflow-x-auto">
-          {view.content}
-        </pre>
+        <HighlightedPre code={view.content} lang={langForPath(view.path)} />
       </section>
     );
   }
   return null;
+}
+
+function HighlightedPre({ code, lang }: { code: string; lang: ReturnType<typeof langForPath> }) {
+  const html = useQuery({
+    queryKey: ["syntax-highlight", lang, code.length, code.slice(0, 64)],
+    queryFn: () => (lang ? highlight(code, lang) : Promise.resolve(null)),
+    enabled: lang != null,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  // Shiki emits its own <pre> with the theme background; wrap so our
+  // own padding/border/scroll behavior stays consistent.
+  if (html.data) {
+    return (
+      <div
+        className="text-xs overflow-x-auto rounded border border-slate-800 [&_pre]:!bg-slate-950 [&_pre]:!p-3 [&_pre]:!m-0"
+        dangerouslySetInnerHTML={{ __html: html.data }}
+      />
+    );
+  }
+  return (
+    <pre className="p-3 bg-slate-950 border border-slate-800 rounded text-xs whitespace-pre-wrap wrap-break-word font-mono overflow-x-auto">
+      {code}
+    </pre>
+  );
 }
 
 type DiffSummary = { summary: string; summaryClass: string };

@@ -851,11 +851,13 @@ pub async fn manifest_file_transformed(
             message: format!("no transformer for {file_path}"),
         })?;
 
+    let content_type = format!("{}; charset=utf-8", transformer.output_mime);
+
     // Cache hit short-circuits the (potentially expensive) tool run.
     if let Some(cached) = crate::transform::read_cached(&state.config.store_root, &file_sha)? {
         return Ok((
             ImmutableCache,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            [(header::CONTENT_TYPE, content_type.clone())],
             cached,
         )
             .into_response());
@@ -874,12 +876,7 @@ pub async fn manifest_file_transformed(
                 message: e.to_string(),
             })?;
 
-    Ok((
-        ImmutableCache,
-        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-        text,
-    )
-        .into_response())
+    Ok((ImmutableCache, [(header::CONTENT_TYPE, content_type)], text).into_response())
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]

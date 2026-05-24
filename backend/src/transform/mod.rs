@@ -23,6 +23,7 @@ pub mod tools;
 pub struct CliTool {
     pub cmd: &'static str,
     pub args_before_path: &'static [&'static str],
+    pub output_mime: &'static str,
 }
 
 #[derive(Debug)]

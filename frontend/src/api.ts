@@ -213,6 +213,13 @@ export function fileRawUrl(
   return `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/raw?${qs}`;
 }
 
+export type TransformedFile = {
+  text: string;
+  /// MIME type the backend declared for the output. Frontend uses this
+  /// to pick a syntax highlighter (e.g. `text/x-csharp` → csharp lang).
+  mime: string;
+};
+
 /// Fetch the transformer output (decompiled / disassembled text) for a
 /// file. Backend caches the result on disk keyed by content sha, so
 /// repeats are instant; the first call can take seconds to minutes
@@ -224,14 +231,18 @@ export async function fetchTransformedFile(
   manifestId: string,
   branch: string,
   path: string,
-): Promise<string | null> {
+): Promise<TransformedFile | null> {
   const qs = new URLSearchParams({ branch, path });
   const r = await fetch(
     `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/transformed?${qs}`,
   );
   if (r.status === 415) return null;
   if (!r.ok) throw new Error(await extractErrorMessage(r));
-  return r.text();
+  // content-type comes back as e.g. "text/x-csharp; charset=utf-8";
+  // strip the params so callers can match on the bare type.
+  const mime = (r.headers.get("content-type") ?? "text/plain").split(";")[0].trim();
+  const text = await r.text();
+  return { text, mime };
 }
 
 /// Like fetchFileView but returns null when the file doesn't exist in

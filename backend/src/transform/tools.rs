@@ -24,9 +24,11 @@ pub fn transformer_for(path: &str) -> Option<&'static CliTool> {
 const DUMP_DLL: CliTool = CliTool {
     cmd: "dump-dll",
     args_before_path: &[],
+    output_mime: "text/x-csharp",
 };
 
 const NM_DYNAMIC: CliTool = CliTool {
     cmd: "nm",
     args_before_path: &["-D", "--defined-only", "-C"],
+    output_mime: "text/plain",
 };
