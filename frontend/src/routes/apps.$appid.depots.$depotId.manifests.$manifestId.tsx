@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -25,20 +25,48 @@ import { pinScroll } from "../pinScroll";
 
 type Search = {
   branch: string;
+  /// Diff targets, persisted in the URL so the filter survives reloads
+  /// and is shareable. Comma-separated string of "depot/manifest" or
+  /// bare "manifest" entries (depot resolved from app_info + extras).
+  /// Stored as a string instead of an array so tanstack-router doesn't
+  /// JSON-encode it to `?compare_to=["..."]`.
+  compare_to?: string;
 };
 
 export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$manifestId")({
   validateSearch: (search: Record<string, unknown>): Search => ({
     branch: typeof search.branch === "string" ? search.branch : "public",
+    compare_to:
+      typeof search.compare_to === "string" && search.compare_to ? search.compare_to : undefined,
   }),
   component: ManifestDetail,
 });
 
 function ManifestDetail() {
   const { appid: appidParam, depotId: depotIdParam, manifestId } = Route.useParams();
-  const { branch } = Route.useSearch();
+  const { branch, compare_to } = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
   const appid = Number(appidParam);
   const depotId = Number(depotIdParam);
+  // Diff targets live in the URL so they're shareable + survive reloads.
+  // The CompareMenu uses the local Set form for fast O(1) lookup; we
+  // re-derive it on every render from the comma-separated URL value.
+  const diffTargets = useMemo(
+    () => new Set(compare_to ? compare_to.split(",").filter(Boolean) : []),
+    [compare_to],
+  );
+  const setDiffTargets = useCallback(
+    (next: Set<string>) => {
+      navigate({
+        search: (prev) => ({
+          ...prev,
+          compare_to: next.size === 0 ? undefined : [...next].join(","),
+        }),
+        replace: true,
+      });
+    },
+    [navigate],
+  );
 
   const info = useQuery({
     queryKey: ["manifest-info", appid, depotId, manifestId, branch],
@@ -129,6 +157,8 @@ function ManifestDetail() {
             appInfo={appInfoQuery.data}
             extras={extraQuery.data ?? []}
             statuses={statusQuery.data}
+            diffTargets={diffTargets}
+            setDiffTargets={setDiffTargets}
           />
         )}
       </section>
@@ -358,6 +388,8 @@ function FilesPanel({
   appInfo,
   extras,
   statuses,
+  diffTargets,
+  setDiffTargets,
 }: {
   allFiles: ManifestFile[];
   appid: string;
@@ -367,6 +399,8 @@ function FilesPanel({
   appInfo: AppInfo | undefined;
   extras: ExtraManifestEntry[];
   statuses: ManifestStatusEntry[] | undefined;
+  diffTargets: Set<string>;
+  setDiffTargets: (next: Set<string>) => void;
 }) {
   // Filter and expanded-dirs are per-manifest UI state we want to
   // survive the round-trip to file detail and back. Park both in the
@@ -376,10 +410,6 @@ function FilesPanel({
   const queryKey = useMemo(() => ["tree-query", depotId, manifestId], [depotId, manifestId]);
   const extFilterKey = useMemo(
     () => ["tree-ext-filter", depotId, manifestId],
-    [depotId, manifestId],
-  );
-  const diffTargetsKey = useMemo(
-    () => ["tree-diff-targets", depotId, manifestId],
     [depotId, manifestId],
   );
   const expandedKey = useMemo(() => ["tree-expanded", depotId, manifestId], [depotId, manifestId]);
@@ -417,39 +447,49 @@ function FilesPanel({
   };
   // Active diff targets. Each entry is "depot_id/manifest_id". Empty =
   // no diff filter active. Same cache-hydration pattern as extFilter.
-  const [diffTargets, setDiffTargetsLocal] = useState<Set<string>>(
-    () => queryClient.getQueryData<Set<string>>(diffTargetsKey) ?? new Set(),
-  );
-  const setDiffTargets = (next: Set<string>) => {
-    setDiffTargetsLocal(next);
-    queryClient.setQueryData(diffTargetsKey, next);
-  };
   const diffRefs = useMemo<ManifestRef[]>(() => {
     if (!appInfo || diffTargets.size === 0) return [];
-    const out: ManifestRef[] = [];
-    const seen = new Set<string>();
+    // Index every (depot, manifest) we know about so URL entries can be
+    // matched either by their canonical key (bare manifest in the
+    // current depot, "depot-manifest" otherwise) or as a bare
+    // manifest_id (deep-link convenience across depots too).
+    const all: { depot_id: number; manifest_id: string; branch: string }[] = [];
+    const seenAll = new Set<string>();
     for (const d of appInfo.depots) {
       for (const m of d.manifests) {
-        const key = `${d.depot_id}/${m.manifest_id}`;
-        if (diffTargets.has(key) && !seen.has(key)) {
-          seen.add(key);
-          out.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
-        }
+        const k = `${d.depot_id}-${m.manifest_id}`;
+        if (seenAll.has(k)) continue;
+        seenAll.add(k);
+        all.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
       }
     }
     for (const e of extras) {
-      const key = `${e.depot_id}/${e.manifest_id}`;
-      if (diffTargets.has(key) && !seen.has(key)) {
-        seen.add(key);
-        out.push({
-          depot_id: e.depot_id,
-          manifest_id: e.manifest_id,
-          branch: e.branch ?? "public",
-        });
+      const k = `${e.depot_id}-${e.manifest_id}`;
+      if (seenAll.has(k)) continue;
+      seenAll.add(k);
+      all.push({
+        depot_id: e.depot_id,
+        manifest_id: e.manifest_id,
+        branch: e.branch ?? "public",
+      });
+    }
+    const out: ManifestRef[] = [];
+    const seenRef = new Set<string>();
+    for (const entry of all) {
+      const canonical = diffTargetKey(entry.depot_id, entry.manifest_id, Number(depotId));
+      const composite = `${entry.depot_id}-${entry.manifest_id}`;
+      if (
+        (diffTargets.has(canonical) ||
+          diffTargets.has(entry.manifest_id) ||
+          diffTargets.has(composite)) &&
+        !seenRef.has(composite)
+      ) {
+        seenRef.add(composite);
+        out.push(entry);
       }
     }
     return out;
-  }, [appInfo, extras, diffTargets]);
+  }, [appInfo, extras, diffTargets, depotId]);
   const diffQuery = useQuery({
     queryKey: [
       "manifest-diff",
@@ -926,6 +966,14 @@ type DepotGroup = {
   candidates: CompareCandidate[];
 };
 
+/// Build the URL-safe key used for `compare_to`. Targets in the same
+/// depot as the base get a bare manifest_id, cross-depot targets carry
+/// the depot prefix joined with a dash (so neither slash nor comma need
+/// percent-encoding).
+function diffTargetKey(depotId: number, manifestId: string, currentDepotId: number): string {
+  return depotId === currentDepotId ? manifestId : `${depotId}-${manifestId}`;
+}
+
 function CompareMenu({
   appInfo,
   extras,
@@ -983,28 +1031,28 @@ function CompareMenu({
         if (seenManifest.has(m.manifest_id)) continue;
         seenManifest.add(m.manifest_id);
         if (d.depot_id === currentDepotId && m.manifest_id === currentManifestId) continue;
-        const key = `${d.depot_id}/${m.manifest_id}`;
+        const creationKey = `${d.depot_id}/${m.manifest_id}`;
         groupMap.get(d.depot_id)!.candidates.push({
-          key,
+          key: diffTargetKey(d.depot_id, m.manifest_id, currentDepotId),
           depotId: d.depot_id,
           manifestId: m.manifest_id,
           branch: m.branch,
-          creationTime: creationByKey.get(key) ?? 0,
+          creationTime: creationByKey.get(creationKey) ?? 0,
         });
       }
     }
     for (const e of extras) {
-      const key = `${e.depot_id}/${e.manifest_id}`;
       if (e.depot_id === currentDepotId && e.manifest_id === currentManifestId) continue;
       const group = groupMap.get(e.depot_id);
       if (!group) continue;
       if (group.candidates.some((c) => c.manifestId === e.manifest_id)) continue;
+      const creationKey = `${e.depot_id}/${e.manifest_id}`;
       group.candidates.push({
-        key,
+        key: diffTargetKey(e.depot_id, e.manifest_id, currentDepotId),
         depotId: e.depot_id,
         manifestId: e.manifest_id,
         branch: e.branch ?? "public",
-        creationTime: creationByKey.get(key) ?? 0,
+        creationTime: creationByKey.get(creationKey) ?? 0,
       });
     }
     // Sort each depot's candidates by creation_time desc; manifests we
