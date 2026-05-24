@@ -25,7 +25,9 @@ import { formatBytes } from "../format";
 import { pinScroll } from "../pinScroll";
 
 type Search = {
-  branch: string;
+  /// `undefined` means "default" (which is `public`). Keeping default
+  /// out of the type lets us drop `?branch=public` from URLs.
+  branch?: string;
   /// Diff targets, persisted in the URL so the filter survives reloads
   /// and is shareable. Comma-separated string of "depot/manifest" or
   /// bare "manifest" entries (depot resolved from app_info + extras).
@@ -36,7 +38,8 @@ type Search = {
 
 export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$manifestId")({
   validateSearch: (search: Record<string, unknown>): Search => ({
-    branch: typeof search.branch === "string" ? search.branch : "public",
+    branch:
+      typeof search.branch === "string" && search.branch !== "public" ? search.branch : undefined,
     compare_to:
       typeof search.compare_to === "string" && search.compare_to ? search.compare_to : undefined,
   }),
@@ -45,7 +48,9 @@ export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$ma
 
 function ManifestDetail() {
   const { appid: appidParam, depotId: depotIdParam, manifestId } = Route.useParams();
-  const { branch, compare_to } = Route.useSearch();
+  const search = Route.useSearch();
+  const branch = search.branch ?? "public";
+  const compare_to = search.compare_to;
   const navigate = useNavigate({ from: Route.fullPath });
   const appid = Number(appidParam);
   const depotId = Number(depotIdParam);
@@ -844,7 +849,11 @@ const TreeRow = memo(function TreeRow({
       <Link
         to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
         params={{ appid, depotId, manifestId }}
-        search={{ branch, path: file.path, compare_to: compareTo }}
+        search={{
+          branch: branch === "public" ? undefined : branch,
+          path: file.path,
+          compare_to: compareTo,
+        }}
         className="flex items-baseline gap-1 py-1.5 pr-3 text-sky-400"
         style={{ paddingLeft: indentPx + 16 }}
       >

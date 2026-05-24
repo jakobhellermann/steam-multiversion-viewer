@@ -22,7 +22,8 @@ import { ErrorBox } from "../ErrorBox";
 import { formatBytes, formatDate } from "../format";
 
 type Search = {
-  branch: string;
+  /// Omitted in URL when the default; readers must apply `?? "public"`.
+  branch?: string;
   path: string;
   /// Diff targets, mirrored from the manifest-detail page so the
   /// "compare to" filter survives navigation. Comma-separated list of
@@ -32,7 +33,8 @@ type Search = {
 
 export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$manifestId_/file")({
   validateSearch: (search: Record<string, unknown>): Search => ({
-    branch: typeof search.branch === "string" ? search.branch : "public",
+    branch:
+      typeof search.branch === "string" && search.branch !== "public" ? search.branch : undefined,
     path: typeof search.path === "string" ? search.path : "",
     compare_to:
       typeof search.compare_to === "string" && search.compare_to ? search.compare_to : undefined,
@@ -42,7 +44,9 @@ export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$ma
 
 function FileViewPage() {
   const { appid: appidParam, depotId: depotIdParam, manifestId } = Route.useParams();
-  const { branch, path, compare_to } = Route.useSearch();
+  const search = Route.useSearch();
+  const branch = search.branch ?? "public";
+  const { path, compare_to } = search;
   const navigate = useNavigate({ from: Route.fullPath });
   const appid = Number(appidParam);
   const depotId = Number(depotIdParam);
@@ -181,7 +185,7 @@ function FileViewPage() {
         <Link
           to="/apps/$appid/depots/$depotId/manifests/$manifestId"
           params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
-          search={{ branch, compare_to }}
+          search={{ branch: branch === "public" ? undefined : branch, compare_to }}
           className="hover:underline"
         >
           ← Manifest

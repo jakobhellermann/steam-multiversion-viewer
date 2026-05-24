@@ -445,7 +445,8 @@ function ManifestRow({
   const linkProps = {
     to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
     params: { appid: String(appid), depotId: String(depotId), manifestId: m.manifest_id },
-    search: { branch: m.branch },
+    // Drop ?branch=public from the URL — it's the default everywhere.
+    search: { branch: m.branch === "public" ? undefined : m.branch },
     draggable: false,
     onClick: (e: React.MouseEvent) => {
       // Don't navigate if the click ended a drag-to-select.
@@ -549,7 +550,7 @@ function ExtraManifestRow({
       depotId: String(depotId),
       manifestId: extra.manifest_id,
     },
-    search: { branch },
+    search: { branch: branch === "public" ? undefined : branch },
     draggable: false,
     onClick: (e: React.MouseEvent) => {
       if (window.getSelection()?.toString()) {
