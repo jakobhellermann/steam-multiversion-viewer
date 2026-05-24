@@ -495,16 +495,25 @@ function FilesPanel({
 
   const tree = useMemo(() => buildTree(allFiles), [allFiles]);
 
-  // Extension → count over all files, sorted by count desc. Files without
-  // a dot in their last segment get bucketed under "(no ext)".
+  // Extensions are counted over the files that survive the *other*
+  // filters (path search + diff filter) but *not* the extension filter
+  // itself — otherwise unchecking a type would make all others disappear
+  // from the menu. So a paste-restricted "compare to" run narrows the
+  // extension menu to just the changed types.
   const extCounts = useMemo(() => {
     const counts = new Map<string, number>();
+    const tokens = deferred.toLowerCase().split(/\s+/).filter(Boolean);
     for (const f of allFiles) {
+      if (diffPaths != null && !diffPaths.has(f.path)) continue;
+      if (tokens.length > 0) {
+        const path = f.path.toLowerCase();
+        if (!tokens.every((t) => path.includes(t))) continue;
+      }
       const ext = fileExtension(f.path);
       counts.set(ext, (counts.get(ext) ?? 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [allFiles]);
+  }, [allFiles, diffPaths, deferred]);
 
   const matches = useMemo<Set<string> | null>(() => {
     const tokens = deferred.toLowerCase().split(/\s+/).filter(Boolean);
