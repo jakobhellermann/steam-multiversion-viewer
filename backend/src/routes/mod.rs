@@ -14,7 +14,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::config::Config;
 use crate::error::ApiError;
-use crate::http::ImmutableCache;
+use crate::http::{CacheSeconds, ImmutableCache};
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 
@@ -31,7 +31,9 @@ pub struct OwnedGame {
 
 #[utoipa::path(get, path = "/api/library")]
 #[tracing::instrument(skip_all)]
-pub async fn library(State(state): State<AppState>) -> Result<Json<Vec<OwnedGame>>> {
+pub async fn library(
+    State(state): State<AppState>,
+) -> Result<(CacheSeconds, Json<Vec<OwnedGame>>)> {
     let req = CPlayer_GetOwnedGames_Request {
         steamid: Some(state.steam.connection.steam_id().into()),
         include_appinfo: Some(true),
@@ -51,7 +53,8 @@ pub async fn library(State(state): State<AppState>) -> Result<Json<Vec<OwnedGame
         })
         .collect();
 
-    Ok(Json(games))
+    // Owned-games changes are rare (new purchase, new playtime); 5min cache.
+    Ok((CacheSeconds(300), Json(games)))
 }
 
 #[derive(Serialize, ToSchema)]
@@ -101,7 +104,7 @@ pub struct DepotManifest {
 pub async fn app_info(
     State(state): State<AppState>,
     Path(appid): Path<AppId>,
-) -> Result<Json<AppInfo>> {
+) -> Result<(CacheSeconds, Json<AppInfo>)> {
     let info = state.steam.depot.app_info(appid.0).await?;
 
     let asset_url = |hash: &str, ext: &str| {
@@ -157,19 +160,24 @@ pub async fn app_info(
         })
         .collect();
 
-    Ok(Json(AppInfo {
-        appid,
-        name: info.common.name,
-        r#type: info.common.r#type,
-        developer: info.extended.as_ref().map(|e| e.developer.clone()),
-        publisher: info.extended.as_ref().map(|e| e.publisher.clone()),
-        homepage: info.extended.and_then(|e| e.homepage),
-        logo_url: info.common.logo.as_deref().map(|h| asset_url(h, "jpg")),
-        icon_url: asset_url(&info.common.icon, "jpg"),
-        branches,
-        depots,
-        private_branches: info.depots.private_branches,
-    }))
+    // App metadata is prett ystable; let the browser cache it for 5 minutes
+    // before re-asking.
+    Ok((
+        CacheSeconds(300),
+        Json(AppInfo {
+            appid,
+            name: info.common.name,
+            r#type: info.common.r#type,
+            developer: info.extended.as_ref().map(|e| e.developer.clone()),
+            publisher: info.extended.as_ref().map(|e| e.publisher.clone()),
+            homepage: info.extended.and_then(|e| e.homepage),
+            logo_url: info.common.logo.as_deref().map(|h| asset_url(h, "jpg")),
+            icon_url: asset_url(&info.common.icon, "jpg"),
+            branches,
+            depots,
+            private_branches: info.depots.private_branches,
+        }),
+    ))
 }
 
 pub(super) fn default_branch() -> String {
