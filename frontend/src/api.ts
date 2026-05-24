@@ -70,7 +70,7 @@ export function fetchAppInfo(appid: AppId): Promise<AppInfo> {
 export type ManifestStatusEntry = {
   depot_id: number;
   manifest_id: string;
-  branch: string;
+  /** `"not cached"` if absent locally, or another diagnostic message. */
   error: string | null;
   chunks_total: number;
   chunks_missing: number;
@@ -80,8 +80,29 @@ export type ManifestStatusEntry = {
   bytes_unique: number;
 };
 
-export function fetchManifestStatuses(appid: AppId): Promise<ManifestStatusEntry[]> {
-  return getJson(`/api/apps/${appid}/manifests/status`);
+export type ManifestRef = { depot_id: number; manifest_id: string; branch: string };
+
+export async function fetchManifestStatuses(
+  appid: AppId,
+  manifests: ManifestRef[],
+): Promise<ManifestStatusEntry[]> {
+  if (manifests.length === 0) return [];
+  const r = await fetch(`/api/apps/${appid}/manifests/status`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ manifests }),
+  });
+  if (!r.ok) {
+    let message = `${r.status} ${r.statusText}`;
+    try {
+      const body = await r.json();
+      if (body && typeof body.error === "string") message = body.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  return r.json();
 }
 
 export type ManifestInfo = {

@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import {
   fetchAppInfo,
   fetchManifestStatuses,
   type AppInfo,
   type DepotEntry,
+  type ManifestRef,
   type ManifestStatusEntry,
 } from "../api";
 import { Bytes } from "../Bytes";
@@ -19,9 +20,27 @@ function AppDetail() {
     queryKey: ["app", appid],
     queryFn: () => fetchAppInfo(appid),
   });
+  // (depot_id, manifest_id, branch) refs from app_info. Dedup by
+  // (depot_id, manifest_id) — branches that share a gid don't add work,
+  // and the chosen branch only matters for the cache-miss path anyway.
+  const manifestRefs = useMemo<ManifestRef[]>(() => {
+    if (!query.data) return [];
+    const seen = new Set<string>();
+    const refs: ManifestRef[] = [];
+    for (const d of query.data.depots) {
+      for (const m of d.manifests) {
+        const key = `${d.depot_id}/${m.manifest_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        refs.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
+      }
+    }
+    return refs;
+  }, [query.data]);
   const statusQuery = useQuery({
-    queryKey: ["manifest-statuses", appid],
-    queryFn: () => fetchManifestStatuses(appid),
+    queryKey: ["manifest-statuses", appid, manifestRefs],
+    queryFn: () => fetchManifestStatuses(appid, manifestRefs),
+    enabled: manifestRefs.length > 0,
     // Per-manifest missing-bytes change as the download manager makes
     // progress; refetch on every mount.
     refetchOnMount: "always",
@@ -60,7 +79,7 @@ function AppDetailBody({
 }) {
   const statusByKey = new Map<string, ManifestStatusEntry>();
   for (const s of statuses ?? []) {
-    statusByKey.set(`${s.depot_id}/${s.manifest_id}/${s.branch}`, s);
+    statusByKey.set(`${s.depot_id}/${s.manifest_id}`, s);
   }
   // Re-honor the URL hash once the depot cards are in the DOM — on first
   // navigation the browser tries to scroll before our data has loaded.
@@ -230,7 +249,7 @@ function DepotCard({
             <div className="px-4 py-1.5 font-semibold text-right">Unique</div>
           </div>
           {depot.manifests.map((m) => {
-            const status = statuses.get(`${depot.depot_id}/${m.manifest_id}/${m.branch}`);
+            const status = statuses.get(`${depot.depot_id}/${m.manifest_id}`);
             return (
               <ManifestRow
                 key={`${m.branch}-${m.manifest_id}`}

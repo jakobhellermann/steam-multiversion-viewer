@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::Json;
@@ -386,12 +387,26 @@ pub async fn patch_config(
     Ok(Json(build_config_dto(&state, cfg)))
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct ManifestStatusRequest {
+    pub manifests: Vec<ManifestRef>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ManifestRef {
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
+    /// Needed to mint a manifest-request-code if the manifest isn't cached yet.
+    /// For already-cached entries this is ignored.
+    #[serde(default = "default_branch")]
+    pub branch: String,
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct ManifestStatusEntry {
     pub depot_id: DepotId,
     pub manifest_id: ManifestId,
-    pub branch: String,
-    /// Set when this manifest couldn't be fetched (e.g. restricted branch
+    /// Set when this manifest couldn't be opened (e.g. restricted branch
     /// the account has no license for). Other stats are zeroed.
     pub error: Option<String>,
     pub chunks_total: u32,
@@ -406,37 +421,49 @@ pub struct ManifestStatusEntry {
     pub bytes_unique: u64,
 }
 
-#[utoipa::path(get, path = "/api/apps/{appid}/manifests/status")]
-#[tracing::instrument(skip_all)]
+/// Batch status for the listed manifests. Cached manifests are returned
+/// immediately; uncached ones get fetched from the Steam CDN, which can be
+/// slow on the first call to a fresh app but is fast on subsequent ones.
+/// The `branch` field is only used during the CDN fetch — for cached
+/// entries any value (e.g. "public") works.
+#[utoipa::path(
+    post,
+    path = "/api/apps/{appid}/manifests/status",
+    request_body = ManifestStatusRequest
+)]
+#[tracing::instrument(skip_all, fields(count = body.manifests.len()))]
 pub async fn manifest_statuses(
     State(state): State<AppState>,
     Path(appid): Path<AppId>,
+    Json(body): Json<ManifestStatusRequest>,
 ) -> Result<Json<Vec<ManifestStatusEntry>>> {
-    let info = state.steam.depot.app_info(appid.0).await?;
+    // Dedupe — multiple branches often share a manifest_id, no point asking
+    // the cache (or the CDN) for it twice in one request.
+    let mut seen = HashSet::new();
+    let refs: Vec<&ManifestRef> = body
+        .manifests
+        .iter()
+        .filter(|r| seen.insert((r.depot_id, r.manifest_id)))
+        .collect();
 
-    // Multiple branches may share the same manifest_id, resulting in an
-    // unnecessary open_manifest call.
+    // Cap parallelism — even with mostly-cached calls, eight concurrent
+    // file-reads is plenty. For the cold path, this caps CDN connections.
     let sem = Arc::new(Semaphore::new(8));
     let mut fu = FuturesUnordered::new();
-    for (&depot_id, depot) in &info.depots.depots {
-        let depot_id = DepotId(depot_id);
-        for (branch, m) in &depot.manifests {
-            let branch = branch.clone();
-            let manifest_id = ManifestId(m.gid);
-            let state = &state;
-            let sem = sem.clone();
-            fu.push(async move {
-                let _permit = sem.acquire().await.expect("semaphore not closed");
-                let result = state
-                    .open_manifest(appid, depot_id, manifest_id, &branch)
-                    .await;
-                (depot_id, branch, manifest_id, result)
-            });
-        }
+    for r in refs {
+        let state = &state;
+        let sem = sem.clone();
+        fu.push(async move {
+            let _permit = sem.acquire().await.expect("semaphore not closed");
+            let result = state
+                .open_manifest(appid, r.depot_id, r.manifest_id, &r.branch)
+                .await;
+            (r.depot_id, r.manifest_id, result)
+        });
     }
 
     let mut out = Vec::new();
-    while let Some((depot_id, branch, manifest_id, result)) = fu.next().await {
+    while let Some((depot_id, manifest_id, result)) = fu.next().await {
         let entry = match result {
             Ok(snap) => {
                 let manifest = snap.manifest();
@@ -447,8 +474,7 @@ pub async fn manifest_statuses(
                     .manifest_stats(manifest);
                 ManifestStatusEntry {
                     depot_id,
-                    manifest_id: ManifestId(manifest.manifest_id),
-                    branch,
+                    manifest_id,
                     error: None,
                     chunks_total: stats.chunks_total,
                     chunks_missing: stats.chunks_missing,
@@ -459,11 +485,10 @@ pub async fn manifest_statuses(
                 }
             }
             Err(err) => {
-                tracing::warn!(%depot_id, %manifest_id, %branch, %err, "manifest fetch failed");
+                tracing::warn!(%depot_id, %manifest_id, %err, "manifest open failed");
                 ManifestStatusEntry {
                     depot_id,
                     manifest_id,
-                    branch,
                     error: Some(err.to_string()),
                     chunks_total: 0,
                     chunks_missing: 0,
