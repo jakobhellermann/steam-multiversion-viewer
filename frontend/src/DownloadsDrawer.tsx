@@ -16,6 +16,10 @@ export function DownloadsDrawer() {
   const samples = useRef<{ ts: number; bytes: number }[]>([]);
   const RATE_WINDOW_MS = 3000;
   const [rate, setRate] = useState(0);
+  // Anchor for the overall (start-to-finish) average rate. Captured the
+  // first time we see bytes_completed > 0 and zeroed when stats reset.
+  const runStart = useRef<{ ts: number; bytes: number } | null>(null);
+  const [overallRate, setOverallRate] = useState(0);
   const queryClient = useQueryClient();
   // Throttle `manifest-statuses` / `file-view` invalidations — these
   // still go through the refetch path. `manifest-files` is patched
@@ -55,6 +59,8 @@ export function DownloadsDrawer() {
         s.bytes_completed < samples.current[samples.current.length - 1].bytes
       ) {
         samples.current = [];
+        runStart.current = null;
+        setOverallRate(0);
       }
       samples.current.push({ ts: now, bytes: s.bytes_completed });
       const cutoff = now - RATE_WINDOW_MS;
@@ -67,6 +73,30 @@ export function DownloadsDrawer() {
         const dt = (last.ts - first.ts) / 1000;
         if (dt > 0.1) {
           setRate(Math.max(0, (last.bytes - first.bytes) / dt));
+        }
+      }
+      // Capture the run anchor as early as possible — when bytes_total
+      // is first known. We anchor at the current bytes_completed (often
+      // 0) so the rate represents *this* run only, not a previous one.
+      if (runStart.current == null && s.bytes_total > 0) {
+        runStart.current = { ts: now, bytes: s.bytes_completed };
+      }
+      if (runStart.current != null) {
+        const dt = (now - runStart.current.ts) / 1000;
+        const delivered = s.bytes_completed - runStart.current.bytes;
+        if (dt > 0.05 && delivered > 0) {
+          setOverallRate(delivered / dt);
+        }
+      }
+      // Tiny downloads finish in a single SSE frame; the anchor's `ts`
+      // ends up == now, so the divide above sees dt≈0. Fall back to
+      // bytes_total / something visible — the user is rarely interested
+      // in sub-second precision here.
+      const finished = s.chunks_completed + s.chunks_failed === s.chunks_total;
+      if (finished && runStart.current != null) {
+        const dt = (now - runStart.current.ts) / 1000;
+        if (dt < 0.1 && s.bytes_completed > 0) {
+          setOverallRate(s.bytes_completed / Math.max(dt, 0.1));
         }
       }
       // file-view + manifest-statuses still go through refetch on
@@ -154,9 +184,15 @@ export function DownloadsDrawer() {
         <Row label="Progress">
           <span className="tabular-nums">{pct.toFixed(1)}%</span>
         </Row>
-        <Row label="Rate">
+        <Row label={active ? "Rate" : "Avg rate"}>
           <span className="tabular-nums">
-            {active ? `${formatBytes(rate)}/s` : <span className="text-slate-500">—</span>}
+            {active ? (
+              `${formatBytes(rate)}/s`
+            ) : overallRate > 0 ? (
+              `${formatBytes(overallRate)}/s`
+            ) : (
+              <span className="text-slate-500">—</span>
+            )}
           </span>
         </Row>
         <Row label="ETA">
