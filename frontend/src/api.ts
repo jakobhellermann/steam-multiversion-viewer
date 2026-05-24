@@ -38,7 +38,7 @@ export type DepotEntry = {
 
 export type DepotManifest = {
   branch: string;
-  gid: string;
+  manifest_id: string;
   size: number;
   download_size: number;
 };
@@ -121,12 +121,12 @@ export type FileView = {
 export function fetchFileView(
   appid: AppId,
   depotId: number,
-  gid: string,
+  manifestId: string,
   branch: string,
   path: string,
 ): Promise<FileView> {
   const qs = new URLSearchParams({ branch, path });
-  return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${gid}/file?${qs}`);
+  return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file?${qs}`);
 }
 
 export type ManifestFilesPage = {
@@ -141,11 +141,11 @@ export type ManifestFilesPage = {
 export function fetchManifestInfo(
   appid: AppId,
   depotId: number,
-  gid: string,
+  manifestId: string,
   branch: string,
 ): Promise<ManifestInfo> {
   const qs = new URLSearchParams({ branch });
-  return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${gid}?${qs}`);
+  return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}?${qs}`);
 }
 
 export type Config = {
@@ -203,10 +203,10 @@ export type EnqueueSummary = {
 export async function downloadManifest(
   appid: AppId,
   depotId: number,
-  gid: string,
+  manifestId: string,
   body: { branch: string; paths?: string[] },
 ): Promise<EnqueueSummary> {
-  const r = await fetch(`/api/apps/${appid}/depots/${depotId}/manifests/${gid}/download`, {
+  const r = await fetch(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/download`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -237,7 +237,7 @@ export async function cancelDownloads(): Promise<DownloadStats> {
 export function fetchManifestFiles(
   appid: AppId,
   depotId: number,
-  gid: string,
+  manifestId: string,
   branch: string,
   offset: number,
   limit: number,
@@ -247,5 +247,5 @@ export function fetchManifestFiles(
     offset: String(offset),
     limit: String(limit),
   });
-  return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${gid}/files?${qs}`);
+  return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/files?${qs}`);
 }

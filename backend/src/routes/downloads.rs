@@ -37,17 +37,17 @@ pub struct DownloadManifestBody {
 
 #[utoipa::path(
     post,
-    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{gid}/download",
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/download",
     request_body = DownloadManifestBody
 )]
 #[tracing::instrument(skip_all)]
 pub async fn manifest_download(
     State(state): State<AppState>,
-    Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Json(body): Json<DownloadManifestBody>,
 ) -> Result<Json<EnqueueSummary>> {
     let snapshot = state
-        .open_manifest(appid, depot_id, gid, &body.branch)
+        .open_manifest(appid, depot_id, manifest_id, &body.branch)
         .await?;
     let manifest = snapshot.manifest();
 
@@ -90,7 +90,7 @@ pub async fn manifest_download(
 
     let summary = state.downloads.enqueue(Arc::new(snapshot), chunks).await;
     tracing::info!(
-        %depot_id, %gid, branch = %body.branch,
+        %depot_id, %manifest_id, branch = %body.branch,
         enqueued = summary.enqueued_chunks,
         skipped_present = summary.already_present_chunks,
         bytes = summary.enqueued_bytes,

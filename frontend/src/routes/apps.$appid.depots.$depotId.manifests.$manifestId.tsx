@@ -18,7 +18,7 @@ type Search = {
   limit: number;
 };
 
-export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$gid")({
+export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$manifestId")({
   validateSearch: (search: Record<string, unknown>): Search => ({
     branch: typeof search.branch === "string" ? search.branch : "public",
     offset: typeof search.offset === "number" ? search.offset : 0,
@@ -28,18 +28,18 @@ export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$gi
 });
 
 function ManifestDetail() {
-  const { appid: appidParam, depotId: depotIdParam, gid } = Route.useParams();
+  const { appid: appidParam, depotId: depotIdParam, manifestId } = Route.useParams();
   const { branch, offset, limit } = Route.useSearch();
   const appid = Number(appidParam);
   const depotId = Number(depotIdParam);
 
   const info = useQuery({
-    queryKey: ["manifest-info", appid, depotId, gid, branch],
-    queryFn: () => fetchManifestInfo(appid, depotId, gid, branch),
+    queryKey: ["manifest-info", appid, depotId, manifestId, branch],
+    queryFn: () => fetchManifestInfo(appid, depotId, manifestId, branch),
   });
   const files = useQuery({
-    queryKey: ["manifest-files", appid, depotId, gid, branch, offset, limit],
-    queryFn: () => fetchManifestFiles(appid, depotId, gid, branch, offset, limit),
+    queryKey: ["manifest-files", appid, depotId, manifestId, branch, offset, limit],
+    queryFn: () => fetchManifestFiles(appid, depotId, manifestId, branch, offset, limit),
     placeholderData: keepPreviousData,
     // chunks_present changes as the download manager makes progress, so
     // we refetch every time we mount — `staleTime: Infinity` globally
@@ -48,7 +48,7 @@ function ManifestDetail() {
   });
 
   const downloadAll = useMutation({
-    mutationFn: () => downloadManifest(appid, depotId, gid, { branch }),
+    mutationFn: () => downloadManifest(appid, depotId, manifestId, { branch }),
   });
 
   return (
@@ -93,7 +93,7 @@ function ManifestDetail() {
               files={files.data.files}
               appid={appidParam}
               depotId={depotIdParam}
-              gid={gid}
+              manifestId={manifestId}
               branch={branch}
             />
             <Pager
@@ -174,13 +174,13 @@ function FilesTable({
   files,
   appid,
   depotId,
-  gid,
+  manifestId,
   branch,
 }: {
   files: ManifestFile[];
   appid: string;
   depotId: string;
-  gid: string;
+  manifestId: string;
   branch: string;
 }) {
   if (files.length === 0) {
@@ -203,8 +203,8 @@ function FilesTable({
           >
             <td className="px-3 py-1.5 font-mono text-xs break-all">
               <Link
-                to="/apps/$appid/depots/$depotId/manifests/$gid/file"
-                params={{ appid, depotId, gid }}
+                to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
+                params={{ appid, depotId, manifestId }}
                 search={{ branch, path: f.path }}
                 className="text-sky-400 hover:underline"
               >

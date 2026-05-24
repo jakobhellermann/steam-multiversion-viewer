@@ -61,7 +61,7 @@ impl AppState {
         &self,
         app_id: AppId,
         depot_id: DepotId,
-        manifest_gid: ManifestId,
+        manifest_id: ManifestId,
         branch: &str,
     ) -> Result<Snapshot, VfsError> {
         let started = Instant::now();
@@ -71,7 +71,7 @@ impl AppState {
                 self.steam.clone(),
                 app_id.0,
                 depot_id.0,
-                manifest_gid.0,
+                manifest_id.0,
                 branch,
             )
             .await?;
@@ -82,7 +82,7 @@ impl AppState {
             .add_manifest(snap.manifest());
         tracing::info!(
             depot_id = %depot_id,
-            gid = %manifest_gid,
+            manifest_id = %manifest_id,
             branch,
             cached = !fresh,
             time = ?started.elapsed(),

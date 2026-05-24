@@ -94,7 +94,7 @@ pub struct DepotEntry {
 #[derive(Serialize, ToSchema)]
 pub struct DepotManifest {
     pub branch: String,
-    pub gid: ManifestId,
+    pub manifest_id: ManifestId,
     pub size: u64,
     pub download_size: u64,
 }
@@ -143,7 +143,7 @@ pub async fn app_info(
                 .iter()
                 .map(|(branch, m)| DepotManifest {
                     branch: branch.clone(),
-                    gid: ManifestId(m.gid),
+                    manifest_id: ManifestId(m.gid),
                     size: m.size,
                     download_size: m.download,
                 })
@@ -255,16 +255,18 @@ impl From<FileKind> for ManifestFileKind {
 
 #[utoipa::path(
     get,
-    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{gid}",
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}",
     params(ManifestInfoQuery)
 )]
 #[tracing::instrument(skip_all)]
 pub async fn manifest_info(
     State(state): State<AppState>,
-    Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestInfoQuery>,
 ) -> Result<(ImmutableCache, Json<ManifestInfo>)> {
-    let snapshot = state.open_manifest(appid, depot_id, gid, &q.branch).await?;
+    let snapshot = state
+        .open_manifest(appid, depot_id, manifest_id, &q.branch)
+        .await?;
     let m = snapshot.manifest();
 
     Ok((
@@ -288,16 +290,18 @@ pub async fn manifest_info(
 
 #[utoipa::path(
     get,
-    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{gid}/files",
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/files",
     params(ManifestFilesQuery)
 )]
 #[tracing::instrument(skip_all)]
 pub async fn manifest_files(
     State(state): State<AppState>,
-    Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestFilesQuery>,
 ) -> Result<Json<ManifestFilesPage>> {
-    let snapshot = state.open_manifest(appid, depot_id, gid, &q.branch).await?;
+    let snapshot = state
+        .open_manifest(appid, depot_id, manifest_id, &q.branch)
+        .await?;
     let m = snapshot.manifest();
 
     // Directories are implicit in file paths — skipping them keeps the
@@ -410,27 +414,29 @@ pub async fn manifest_statuses(
 ) -> Result<Json<Vec<ManifestStatusEntry>>> {
     let info = state.steam.depot.app_info(appid.0).await?;
 
-    // Multiple branches may share the same gid, resulting in an unnecessary
-    // open_manifest call.
+    // Multiple branches may share the same manifest_id, resulting in an
+    // unnecessary open_manifest call.
     let sem = Arc::new(Semaphore::new(8));
     let mut fu = FuturesUnordered::new();
     for (&depot_id, depot) in &info.depots.depots {
         let depot_id = DepotId(depot_id);
         for (branch, m) in &depot.manifests {
             let branch = branch.clone();
-            let gid = ManifestId(m.gid);
+            let manifest_id = ManifestId(m.gid);
             let state = &state;
             let sem = sem.clone();
             fu.push(async move {
                 let _permit = sem.acquire().await.expect("semaphore not closed");
-                let result = state.open_manifest(appid, depot_id, gid, &branch).await;
-                (depot_id, branch, gid, result)
+                let result = state
+                    .open_manifest(appid, depot_id, manifest_id, &branch)
+                    .await;
+                (depot_id, branch, manifest_id, result)
             });
         }
     }
 
     let mut out = Vec::new();
-    while let Some((depot_id, branch, gid, result)) = fu.next().await {
+    while let Some((depot_id, branch, manifest_id, result)) = fu.next().await {
         let entry = match result {
             Ok(snap) => {
                 let manifest = snap.manifest();
@@ -453,10 +459,10 @@ pub async fn manifest_statuses(
                 }
             }
             Err(err) => {
-                tracing::warn!(%depot_id, %gid, %branch, %err, "manifest fetch failed");
+                tracing::warn!(%depot_id, %manifest_id, %branch, %err, "manifest fetch failed");
                 ManifestStatusEntry {
                     depot_id,
-                    manifest_id: gid,
+                    manifest_id,
                     branch,
                     error: Some(err.to_string()),
                     chunks_total: 0,
@@ -531,16 +537,20 @@ fn looks_like_text(bytes: &[u8]) -> bool {
 
 #[utoipa::path(
     get,
-    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{gid}/file",
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file",
     params(FileViewQuery)
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
 pub async fn manifest_file(
     State(state): State<AppState>,
-    Path((appid, depot_id, gid)): Path<(AppId, DepotId, ManifestId)>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<FileViewQuery>,
 ) -> Result<Json<FileView>> {
-    let snapshot = Arc::new(state.open_manifest(appid, depot_id, gid, &q.branch).await?);
+    let snapshot = Arc::new(
+        state
+            .open_manifest(appid, depot_id, manifest_id, &q.branch)
+            .await?,
+    );
 
     // Extract everything we need from the borrowed manifest before
     // handing the snapshot Arc to the download manager.

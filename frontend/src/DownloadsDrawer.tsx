@@ -94,8 +94,8 @@ export function DownloadsDrawer() {
         .forEach((query) => {
           const key = query.queryKey as unknown[];
           const depotId = key[2];
-          const gid = key[3];
-          if (depotId !== evt.depot_id || gid !== evt.manifest_id) return;
+          const manifestId = key[3];
+          if (depotId !== evt.depot_id || manifestId !== evt.manifest_id) return;
           queryClient.setQueryData<ManifestFilesPage>(query.queryKey, (old) => {
             if (!old) return old;
             let changed = false;

@@ -10,7 +10,7 @@ type Search = {
   path: string;
 };
 
-export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$gid_/file")({
+export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$manifestId_/file")({
   validateSearch: (search: Record<string, unknown>): Search => ({
     branch: typeof search.branch === "string" ? search.branch : "public",
     path: typeof search.path === "string" ? search.path : "",
@@ -19,15 +19,15 @@ export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$gi
 });
 
 function FileViewPage() {
-  const { appid: appidParam, depotId: depotIdParam, gid } = Route.useParams();
+  const { appid: appidParam, depotId: depotIdParam, manifestId } = Route.useParams();
   const { branch, path } = Route.useSearch();
   const appid = Number(appidParam);
   const depotId = Number(depotIdParam);
   const queryClient = useQueryClient();
 
   const view = useQuery({
-    queryKey: ["file-view", appid, depotId, gid, branch, path],
-    queryFn: () => fetchFileView(appid, depotId, gid, branch, path),
+    queryKey: ["file-view", appid, depotId, manifestId, branch, path],
+    queryFn: () => fetchFileView(appid, depotId, manifestId, branch, path),
     enabled: path.length > 0,
     // chunks_present + auto-fetched content depend on what's on disk, so
     // re-run when navigated back to.
@@ -35,11 +35,13 @@ function FileViewPage() {
   });
 
   const download = useMutation({
-    mutationFn: () => downloadManifest(appid, depotId, gid, { branch, paths: [path] }),
+    mutationFn: () => downloadManifest(appid, depotId, manifestId, { branch, paths: [path] }),
     onSuccess: () => {
       // After enqueuing, the chunks land asynchronously. Don't auto-refetch
       // here; the user can hit Reload once the drawer settles.
-      queryClient.invalidateQueries({ queryKey: ["file-view", appid, depotId, gid, branch, path] });
+      queryClient.invalidateQueries({
+        queryKey: ["file-view", appid, depotId, manifestId, branch, path],
+      });
     },
   });
 
@@ -47,8 +49,8 @@ function FileViewPage() {
     <div className="p-8 max-w-6xl mx-auto">
       <nav className="text-sm text-slate-400 mb-4">
         <Link
-          to="/apps/$appid/depots/$depotId/manifests/$gid"
-          params={{ appid: appidParam, depotId: depotIdParam, gid }}
+          to="/apps/$appid/depots/$depotId/manifests/$manifestId"
+          params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
           search={{ branch, offset: 0, limit: 100 }}
           className="hover:underline"
         >

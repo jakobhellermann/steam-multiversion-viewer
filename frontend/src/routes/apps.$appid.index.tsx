@@ -230,10 +230,10 @@ function DepotCard({
             <div className="px-4 py-1.5 font-semibold text-right">Unique</div>
           </div>
           {depot.manifests.map((m) => {
-            const status = statuses.get(`${depot.depot_id}/${m.gid}/${m.branch}`);
+            const status = statuses.get(`${depot.depot_id}/${m.manifest_id}/${m.branch}`);
             return (
               <ManifestRow
-                key={`${m.branch}-${m.gid}`}
+                key={`${m.branch}-${m.manifest_id}`}
                 depotId={depot.depot_id}
                 appid={appid}
                 manifest={m}
@@ -255,12 +255,12 @@ function ManifestRow({
 }: {
   depotId: number;
   appid: number;
-  manifest: { branch: string; gid: string; size: number; download_size: number };
+  manifest: { branch: string; manifest_id: string; size: number; download_size: number };
   status: ManifestStatusEntry | undefined;
 }) {
   const linkProps = {
-    to: "/apps/$appid/depots/$depotId/manifests/$gid",
-    params: { appid: String(appid), depotId: String(depotId), gid: m.gid },
+    to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
+    params: { appid: String(appid), depotId: String(depotId), manifestId: m.manifest_id },
     search: { branch: m.branch, offset: 0, limit: 100 },
     draggable: false,
     onClick: (e: React.MouseEvent) => {
@@ -282,7 +282,7 @@ function ManifestRow({
         aria-hidden="true"
         className={`${cell} font-mono tabular-nums text-xs text-sky-400`}
       >
-        {m.gid}
+        {m.manifest_id}
       </Link>
       <Link
         {...linkProps}
