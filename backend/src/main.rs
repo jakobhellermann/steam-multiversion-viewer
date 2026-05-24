@@ -7,6 +7,7 @@ mod routes;
 mod state;
 mod steam;
 mod store_index;
+mod transform;
 
 use std::path::{Path, PathBuf};
 
@@ -51,6 +52,7 @@ async fn main() -> Result<()> {
         .routes(routes!(routes::manifest_files))
         .routes(routes!(routes::manifest_file))
         .routes(routes!(routes::manifest_file_raw))
+        .routes(routes!(routes::manifest_file_transformed))
         .routes(routes!(routes::downloads::manifest_download))
         .routes(routes!(routes::downloads::downloads_snapshot))
         .routes(routes!(routes::downloads::downloads_cancel))

@@ -804,6 +804,84 @@ pub async fn manifest_file_raw(
         .into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/transformed",
+    params(FileViewQuery)
+)]
+#[tracing::instrument(skip_all, fields(path = %q.path))]
+pub async fn manifest_file_transformed(
+    State(state): State<AppState>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
+    Query(q): Query<FileViewQuery>,
+) -> Result<Response> {
+    let snapshot = Arc::new(
+        state
+            .open_manifest(appid, depot_id, manifest_id, &q.branch)
+            .await?,
+    );
+
+    let (file_path, file_sha, chunks_for_dl) = {
+        let manifest = snapshot.manifest();
+        let file = manifest
+            .files
+            .iter()
+            .find(|f| f.path == q.path)
+            .ok_or_else(|| ApiError {
+                status: axum::http::StatusCode::NOT_FOUND,
+                message: format!("file not in manifest: {}", q.path),
+            })?;
+        let sha = file.sha.ok_or_else(|| ApiError {
+            status: axum::http::StatusCode::BAD_REQUEST,
+            message: format!("file has no content sha: {}", q.path),
+        })?;
+        (
+            file.path.clone(),
+            sha,
+            file.chunks
+                .iter()
+                .map(|c| (c.sha, u64::from(c.size_compressed)))
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    let transformer =
+        crate::transform::tools::transformer_for(&file_path).ok_or_else(|| ApiError {
+            status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            message: format!("no transformer for {file_path}"),
+        })?;
+
+    // Cache hit short-circuits the (potentially expensive) tool run.
+    if let Some(cached) = crate::transform::read_cached(&state.config.store_root, &file_sha)? {
+        return Ok((
+            ImmutableCache,
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            cached,
+        )
+            .into_response());
+    }
+
+    state
+        .downloads
+        .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
+        .await;
+    let bytes = snapshot.read_full(&file_path).await?;
+    let text =
+        crate::transform::run_and_cache(&state.config.store_root, transformer, &file_sha, &bytes)
+            .await
+            .map_err(|e| ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: e.to_string(),
+            })?;
+
+    Ok((
+        ImmutableCache,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        text,
+    )
+        .into_response())
+}
+
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ExtraManifestEntryDto {
     pub depot_id: DepotId,

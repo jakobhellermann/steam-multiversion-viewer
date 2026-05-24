@@ -17,7 +17,7 @@ steam-depot-vfs = { path = "../../steam-depot-vfs/crates/steam-depot-vfs" }
 steam-vent = "0.5"
 steam-vent-depot = { path = "../../steam-vent-depot" }
 steam-vent-proto = "0.5"
-tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "net", "sync", "signal", "time"] }
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "net", "sync", "signal", "time", "process"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower = { version = "0.5", features = ["timeout"] }
 tower-http = { version = "0.6", features = ["trace"] }
@@ -25,3 +25,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.2"
+zstd = "0.13.3"
