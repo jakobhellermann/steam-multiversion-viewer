@@ -114,7 +114,7 @@ pub async fn app_info(
         )
     };
 
-    let mut branches: Vec<BranchInfo> = info
+    let branches: Vec<BranchInfo> = info
         .depots
         .branches
         .iter()
@@ -125,21 +125,13 @@ pub async fn app_info(
             description: b.description.clone(),
         })
         .collect();
-    // Stable order: public first, then by name.
-    branches.sort_by(|a, b| match (a.name.as_str(), b.name.as_str()) {
-        ("public", "public") => std::cmp::Ordering::Equal,
-        ("public", _) => std::cmp::Ordering::Less,
-        (_, "public") => std::cmp::Ordering::Greater,
-        (l, r) => l.cmp(r),
-    });
 
-    let mut depot_ids: Vec<u32> = info.depots.depots.keys().copied().collect();
-    depot_ids.sort();
-    let depots = depot_ids
-        .into_iter()
-        .map(|id| {
-            let d = &info.depots.depots[&id];
-            let mut manifests: Vec<DepotManifest> = d
+    let depots: Vec<DepotEntry> = info
+        .depots
+        .depots
+        .iter()
+        .map(|(&id, d)| {
+            let manifests: Vec<DepotManifest> = d
                 .manifests
                 .iter()
                 .map(|(branch, m)| DepotManifest {
@@ -149,7 +141,6 @@ pub async fn app_info(
                     download_size: m.download,
                 })
                 .collect();
-            manifests.sort_by(|a, b| a.branch.cmp(&b.branch));
             DepotEntry {
                 depot_id: DepotId(id),
                 oslist: d.config.as_ref().and_then(|c| c.oslist.clone()),
