@@ -2,6 +2,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { downloadManifest, fetchFileView, type FileView } from "../api";
+import { Bytes } from "../Bytes";
+import { formatBytes } from "../format";
 
 type Search = {
   branch: string;
@@ -91,7 +93,9 @@ function FileBody({
     <>
       <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-slate-400">Size</dt>
-        <dd className="tabular-nums">{formatBytes(view.size)}</dd>
+        <dd className="tabular-nums">
+          <Bytes value={view.size} />
+        </dd>
         <dt className="text-slate-400">Chunks on disk</dt>
         <dd className="tabular-nums">
           {view.chunks_present}/{view.chunk_count}
@@ -162,15 +166,4 @@ function FilePreview({ view }: { view: FileView }) {
     );
   }
   return null;
-}
-
-function formatBytes(n: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return i === 0 ? `${n} ${units[0]}` : `${v.toFixed(1)} ${units[i]}`;
 }

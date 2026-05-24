@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ManifestFilesPage } from "./api";
 import { cancelDownloads, type ChunkUpdate, type DownloadStats } from "./api";
+import { formatBytes } from "./format";
 
 /// Live download progress panel, anchored top-right. Visible whenever
 /// stats.chunks_total > 0; dismissed by clicking outside (only when
@@ -224,17 +225,6 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span className="ml-auto">{children}</span>
     </div>
   );
-}
-
-function formatBytes(n: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return i === 0 ? `${Math.round(n)} ${units[0]}` : `${v.toFixed(1)} ${units[i]}`;
 }
 
 function formatEta(secs: number): string {

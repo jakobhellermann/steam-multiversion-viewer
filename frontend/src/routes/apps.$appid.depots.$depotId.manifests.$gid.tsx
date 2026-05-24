@@ -9,6 +9,8 @@ import {
   type ManifestFile,
   type ManifestInfo,
 } from "../api";
+import { Bytes } from "../Bytes";
+import { formatBytes } from "../format";
 
 type Search = {
   branch: string;
@@ -156,9 +158,13 @@ function ManifestHeader({
         <dt className="text-slate-400">Files</dt>
         <dd className="tabular-nums">{info.file_count.toLocaleString()}</dd>
         <dt className="text-slate-400">Size (uncompressed)</dt>
-        <dd className="tabular-nums">{formatBytes(info.size_uncompressed)}</dd>
+        <dd className="tabular-nums">
+          <Bytes value={info.size_uncompressed} />
+        </dd>
         <dt className="text-slate-400">Size (compressed)</dt>
-        <dd className="tabular-nums">{formatBytes(info.size_compressed)}</dd>
+        <dd className="tabular-nums">
+          <Bytes value={info.size_compressed} />
+        </dd>
       </dl>
     </div>
   );
@@ -206,7 +212,9 @@ function FilesTable({
               </Link>
               {f.linktarget && <span className="text-slate-500"> → {f.linktarget}</span>}
             </td>
-            <td className="px-3 py-1.5 text-right tabular-nums">{formatBytes(f.size)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">
+              <Bytes value={f.size} />
+            </td>
             <td className="px-3 py-1.5 text-right tabular-nums text-slate-400">
               <ChunkPresence present={f.chunks_present} total={f.chunk_count} />
             </td>
@@ -299,15 +307,4 @@ function ErrorBox({ title, error }: { title: string; error: Error }) {
 function formatTime(unix: number): string {
   if (!unix) return "—";
   return new Date(unix * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
-}
-
-function formatBytes(n: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return i === 0 ? `${n} ${units[0]}` : `${v.toFixed(1)} ${units[i]}`;
 }

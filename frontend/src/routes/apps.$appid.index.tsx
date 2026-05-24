@@ -8,6 +8,7 @@ import {
   type DepotEntry,
   type ManifestStatusEntry,
 } from "../api";
+import { Bytes } from "../Bytes";
 
 export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
 
@@ -289,7 +290,7 @@ function ManifestRow({
         aria-hidden="true"
         className={`${cell} justify-end tabular-nums whitespace-nowrap`}
       >
-        {formatBytes(m.size)}
+        <Bytes value={m.size} />
       </Link>
       <Link
         {...linkProps}
@@ -306,9 +307,9 @@ function ManifestRow({
             <span className="text-slate-600">—</span>
           ) : (
             <span className="text-amber-300">
-              {formatBytes(status.bytes_missing)}{" "}
+              <Bytes value={status.bytes_missing} />{" "}
               <span className="text-slate-500">
-                ({formatBytes(status.bytes_missing_compressed)})
+                (<Bytes value={status.bytes_missing_compressed} />)
               </span>
             </span>
           )
@@ -326,7 +327,7 @@ function ManifestRow({
           status.bytes_unique === 0 ? (
             <span className="text-slate-600">—</span>
           ) : (
-            formatBytes(status.bytes_unique)
+            <Bytes value={status.bytes_unique} />
           )
         ) : (
           <Skeleton />
@@ -343,15 +344,4 @@ function Skeleton() {
 function formatTime(unix: number | null): string {
   if (!unix) return "—";
   return new Date(unix * 1000).toISOString().slice(0, 10);
-}
-
-function formatBytes(n: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return i === 0 ? `${n} ${units[0]}` : `${v.toFixed(1)} ${units[i]}`;
 }
