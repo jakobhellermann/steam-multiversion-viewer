@@ -78,6 +78,8 @@ export type ManifestStatusEntry = {
   bytes_missing: number;
   bytes_missing_compressed: number;
   bytes_unique: number;
+  /** Steam-side manifest creation time (unix seconds). 0 when `error` is set. */
+  creation_time: number;
 };
 
 export type ManifestRef = { depot_id: number; manifest_id: string; branch: string };

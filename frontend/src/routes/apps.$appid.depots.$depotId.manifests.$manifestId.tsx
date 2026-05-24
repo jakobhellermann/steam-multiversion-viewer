@@ -5,14 +5,18 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import {
   downloadManifest,
   fetchAppInfo,
+  fetchExtraManifests,
   fetchManifestDiff,
   fetchManifestFiles,
   fetchManifestInfo,
+  fetchManifestStatuses,
   type AppInfo,
   type EnqueueSummary,
+  type ExtraManifestEntry,
   type ManifestFile,
   type ManifestInfo,
   type ManifestRef,
+  type ManifestStatusEntry,
 } from "../api";
 import { Bytes } from "../Bytes";
 import { ErrorBox } from "../ErrorBox";
@@ -44,11 +48,47 @@ function ManifestDetail() {
     queryKey: ["manifest-files", appid, depotId, manifestId, branch],
     queryFn: () => fetchManifestFiles(appid, depotId, manifestId, branch),
   });
-  // Needed by the "changed compared to…" filter so the user can pick any
-  // other manifest in the app as a diff target.
+  // Needed by the "compare to…" menu so the user can pick any other
+  // manifest in the app (official or user-tracked) as a diff target.
   const appInfoQuery = useQuery({
     queryKey: ["app", appid],
     queryFn: () => fetchAppInfo(appid),
+  });
+  const extraQuery = useQuery({
+    queryKey: ["extra-manifests", appid],
+    queryFn: () => fetchExtraManifests(appid),
+  });
+  // Statuses give us creation_time per manifest so the compare-with
+  // submenu can sort by date. We reuse the same query key as the app
+  // detail page so the cache is shared.
+  const compareRefs = useMemo<ManifestRef[]>(() => {
+    if (!appInfoQuery.data) return [];
+    const seen = new Set<string>();
+    const refs: ManifestRef[] = [];
+    for (const d of appInfoQuery.data.depots) {
+      for (const m of d.manifests) {
+        const key = `${d.depot_id}/${m.manifest_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        refs.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
+      }
+    }
+    for (const e of extraQuery.data ?? []) {
+      const key = `${e.depot_id}/${e.manifest_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      refs.push({
+        depot_id: e.depot_id,
+        manifest_id: e.manifest_id,
+        branch: e.branch ?? "public",
+      });
+    }
+    return refs;
+  }, [appInfoQuery.data, extraQuery.data]);
+  const statusQuery = useQuery({
+    queryKey: ["manifest-statuses", appid, compareRefs],
+    queryFn: () => fetchManifestStatuses(appid, compareRefs),
+    enabled: compareRefs.length > 0,
   });
 
   const downloadAll = useMutation({
@@ -87,6 +127,8 @@ function ManifestDetail() {
             manifestId={manifestId}
             branch={branch}
             appInfo={appInfoQuery.data}
+            extras={extraQuery.data ?? []}
+            statuses={statusQuery.data}
           />
         )}
       </section>
@@ -314,6 +356,8 @@ function FilesPanel({
   manifestId,
   branch,
   appInfo,
+  extras,
+  statuses,
 }: {
   allFiles: ManifestFile[];
   appid: string;
@@ -321,6 +365,8 @@ function FilesPanel({
   manifestId: string;
   branch: string;
   appInfo: AppInfo | undefined;
+  extras: ExtraManifestEntry[];
+  statuses: ManifestStatusEntry[] | undefined;
 }) {
   // Filter and expanded-dirs are per-manifest UI state we want to
   // survive the round-trip to file detail and back. Park both in the
@@ -381,16 +427,29 @@ function FilesPanel({
   const diffRefs = useMemo<ManifestRef[]>(() => {
     if (!appInfo || diffTargets.size === 0) return [];
     const out: ManifestRef[] = [];
+    const seen = new Set<string>();
     for (const d of appInfo.depots) {
       for (const m of d.manifests) {
         const key = `${d.depot_id}/${m.manifest_id}`;
-        if (diffTargets.has(key)) {
+        if (diffTargets.has(key) && !seen.has(key)) {
+          seen.add(key);
           out.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
         }
       }
     }
+    for (const e of extras) {
+      const key = `${e.depot_id}/${e.manifest_id}`;
+      if (diffTargets.has(key) && !seen.has(key)) {
+        seen.add(key);
+        out.push({
+          depot_id: e.depot_id,
+          manifest_id: e.manifest_id,
+          branch: e.branch ?? "public",
+        });
+      }
+    }
     return out;
-  }, [appInfo, diffTargets]);
+  }, [appInfo, extras, diffTargets]);
   const diffQuery = useQuery({
     queryKey: [
       "manifest-diff",
@@ -409,6 +468,9 @@ function FilesPanel({
     enabled: diffRefs.length > 0,
     staleTime: Infinity,
     gcTime: 10 * 60 * 1000,
+    // Keep the previous diff visible while a new selection refetches so
+    // the tree doesn't flash back to "all files" in between.
+    placeholderData: (prev) => prev,
   });
   const diffPaths = useMemo<Set<string> | null>(() => {
     if (diffTargets.size === 0) return null;
@@ -599,8 +661,10 @@ function FilesPanel({
           )}
         </div>
         {appInfo && (
-          <DiffFilter
+          <CompareMenu
             appInfo={appInfo}
+            extras={extras}
+            statuses={statuses}
             currentDepotId={Number(depotId)}
             currentManifestId={manifestId}
             selected={diffTargets}
@@ -840,8 +904,24 @@ function ExtensionFilter({
   );
 }
 
-function DiffFilter({
+type CompareCandidate = {
+  key: string;
+  depotId: number;
+  manifestId: string;
+  branch: string;
+  creationTime: number;
+};
+
+type DepotGroup = {
+  depotId: number;
+  label: string;
+  candidates: CompareCandidate[];
+};
+
+function CompareMenu({
   appInfo,
+  extras,
+  statuses,
   currentDepotId,
   currentManifestId,
   selected,
@@ -850,6 +930,8 @@ function DiffFilter({
   error,
 }: {
   appInfo: AppInfo;
+  extras: ExtraManifestEntry[];
+  statuses: ManifestStatusEntry[] | undefined;
   currentDepotId: number;
   currentManifestId: string;
   selected: Set<string>;
@@ -858,6 +940,7 @@ function DiffFilter({
   error: Error | null;
 }) {
   const [open, setOpen] = useState(false);
+  const [activeDepotId, setActiveDepotId] = useState<number | null>(currentDepotId);
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -876,36 +959,76 @@ function DiffFilter({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-  // Flat list of candidate manifests, excluding the current one. Dedup
-  // by (depot, manifest) — a manifest_id shared between two branches is
-  // the same file set, no point listing it twice.
-  const candidates = useMemo(() => {
-    const out: {
-      key: string;
-      depotId: number;
-      manifestId: string;
-      branch: string;
-      depotTag: string;
-    }[] = [];
-    const seen = new Set<string>();
+  // Group every known manifest (official + tracked) under its depot. Per
+  // entry we keep creation_time from manifest_statuses (0 if unknown)
+  // so each depot's submenu can sort chronologically.
+  const groups = useMemo<DepotGroup[]>(() => {
+    const creationByKey = new Map<string, number>();
+    for (const s of statuses ?? []) {
+      creationByKey.set(`${s.depot_id}/${s.manifest_id}`, s.creation_time);
+    }
+    const groupMap = new Map<number, DepotGroup>();
     for (const d of appInfo.depots) {
       const tag = [d.oslist, d.osarch, d.language].filter(Boolean).join(" · ");
+      const label = tag ? `depot ${d.depot_id} · ${tag}` : `depot ${d.depot_id}`;
+      groupMap.set(d.depot_id, { depotId: d.depot_id, label, candidates: [] });
+      const seenManifest = new Set<string>();
       for (const m of d.manifests) {
-        const key = `${d.depot_id}/${m.manifest_id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
+        if (seenManifest.has(m.manifest_id)) continue;
+        seenManifest.add(m.manifest_id);
         if (d.depot_id === currentDepotId && m.manifest_id === currentManifestId) continue;
-        out.push({
+        const key = `${d.depot_id}/${m.manifest_id}`;
+        groupMap.get(d.depot_id)!.candidates.push({
           key,
           depotId: d.depot_id,
           manifestId: m.manifest_id,
           branch: m.branch,
-          depotTag: tag,
+          creationTime: creationByKey.get(key) ?? 0,
         });
       }
     }
-    return out;
-  }, [appInfo, currentDepotId, currentManifestId]);
+    for (const e of extras) {
+      const key = `${e.depot_id}/${e.manifest_id}`;
+      if (e.depot_id === currentDepotId && e.manifest_id === currentManifestId) continue;
+      const group = groupMap.get(e.depot_id);
+      if (!group) continue;
+      if (group.candidates.some((c) => c.manifestId === e.manifest_id)) continue;
+      group.candidates.push({
+        key,
+        depotId: e.depot_id,
+        manifestId: e.manifest_id,
+        branch: e.branch ?? "public",
+        creationTime: creationByKey.get(key) ?? 0,
+      });
+    }
+    // Sort each depot's candidates by creation_time desc; manifests we
+    // haven't fetched yet (creation_time 0) bubble to the bottom.
+    for (const g of groupMap.values()) {
+      g.candidates.sort((a, b) => {
+        if (b.creationTime !== a.creationTime) return b.creationTime - a.creationTime;
+        return a.manifestId.localeCompare(b.manifestId);
+      });
+    }
+    // Sort groups: current depot first, then by depot id.
+    return [...groupMap.values()]
+      .filter((g) => g.candidates.length > 0)
+      .sort((a, b) => {
+        if (a.depotId === currentDepotId) return -1;
+        if (b.depotId === currentDepotId) return 1;
+        return a.depotId - b.depotId;
+      });
+  }, [appInfo, extras, statuses, currentDepotId, currentManifestId]);
+
+  // If our previously-active depot stopped having candidates, fall back
+  // to the first available group.
+  useEffect(() => {
+    if (!open) return;
+    if (!groups.find((g) => g.depotId === activeDepotId)) {
+      setActiveDepotId(groups[0]?.depotId ?? null);
+    }
+  }, [open, groups, activeDepotId]);
+
+  const activeGroup = groups.find((g) => g.depotId === activeDepotId) ?? groups[0];
   const toggle = (key: string) => {
     const next = new Set(selected);
     if (next.has(key)) next.delete(key);
@@ -927,68 +1050,123 @@ function DiffFilter({
         aria-expanded={open}
         title="Show only files that differ from selected manifests"
       >
-        Changed vs{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
+        Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
         {loading && <span className="ml-2 text-xs text-slate-400">…</span>}
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-10 w-96 max-h-96 overflow-auto bg-slate-900 border border-slate-700 rounded shadow-lg">
-          <div className="flex items-center justify-between px-3 py-1.5 text-xs text-slate-400 border-b border-slate-800 sticky top-0 bg-slate-900">
-            <span>compare with…</span>
-            {count > 0 && (
-              <button
-                type="button"
-                onClick={() => onChange(new Set())}
-                className="text-slate-500 hover:text-slate-200"
-              >
-                clear
-              </button>
+        <div className="absolute -right-[100px] top-full mt-1 z-10 flex w-[640px] max-h-96 bg-slate-900 border border-slate-700 rounded shadow-lg overflow-hidden">
+          <div className="w-56 border-r border-slate-800 overflow-auto">
+            <div className="flex items-center justify-between px-3 py-1.5 text-xs text-slate-400 border-b border-slate-800 sticky top-0 bg-slate-900">
+              <span>compare to…</span>
+              {count > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onChange(new Set())}
+                  className="text-slate-500 hover:text-slate-200"
+                >
+                  clear
+                </button>
+              )}
+            </div>
+            {groups.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-slate-500">No other manifests.</p>
+            ) : (
+              <ul>
+                {groups.map((g) => {
+                  const isActive = g.depotId === activeGroup?.depotId;
+                  const selectedHere = g.candidates.reduce(
+                    (n, c) => n + (selected.has(c.key) ? 1 : 0),
+                    0,
+                  );
+                  return (
+                    <li key={g.depotId}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveDepotId(g.depotId)}
+                        className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 ${
+                          isActive
+                            ? "bg-slate-800 text-slate-100"
+                            : "text-slate-300 hover:bg-slate-800/60"
+                        }`}
+                      >
+                        <span className="flex-1 min-w-0">
+                          <span className="block truncate">
+                            {g.depotId === currentDepotId ? (
+                              <span>This depot</span>
+                            ) : (
+                              <span>depot {g.depotId}</span>
+                            )}
+                          </span>
+                          <span className="block text-xs text-slate-500 truncate">{g.label}</span>
+                        </span>
+                        <span className="text-xs text-slate-500 tabular-nums">
+                          {selectedHere > 0 ? `${selectedHere}/` : ""}
+                          {g.candidates.length}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
-          {error && (
-            <p className="px-3 py-2 text-xs text-red-300 border-b border-slate-800">
-              Diff failed: {error.message}
-            </p>
-          )}
-          {candidates.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-slate-500">No other manifests in this app.</p>
-          ) : (
-            <ul>
-              {candidates.map((c) => {
-                const checked = selected.has(c.key);
-                return (
-                  <li key={c.key}>
-                    <label
-                      onMouseDown={(e) => e.preventDefault()}
-                      className={`flex items-center gap-2 px-3 py-1 text-sm cursor-pointer select-none hover:bg-slate-800/60 ${
-                        checked ? "text-sky-200" : "text-slate-300"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggle(c.key)}
-                        className="accent-sky-500"
-                      />
-                      <span className="flex-1 min-w-0">
-                        <span className="block truncate">
-                          {c.branch}
-                          <span className="text-xs text-slate-500"> · depot {c.depotId}</span>
+          <div className="flex-1 overflow-auto">
+            {error && (
+              <p className="px-3 py-2 text-xs text-red-300 border-b border-slate-800">
+                Diff failed: {error.message}
+              </p>
+            )}
+            {!activeGroup ? (
+              <p className="px-3 py-2 text-sm text-slate-500">Pick a depot on the left.</p>
+            ) : (
+              <ul>
+                {activeGroup.candidates.map((c) => {
+                  const checked = selected.has(c.key);
+                  return (
+                    <li key={c.key}>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => toggle(c.key)}
+                        aria-pressed={checked}
+                        className={`w-full flex items-center gap-2 px-3 py-1 text-sm cursor-pointer select-none text-left ${
+                          checked
+                            ? "bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
+                            : "text-slate-300 hover:bg-slate-800/60"
+                        }`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`inline-block w-3 text-center ${
+                            checked ? "text-sky-400" : "text-transparent"
+                          }`}
+                        >
+                          ✓
                         </span>
-                        {c.depotTag && (
-                          <span className="block text-xs text-slate-500 truncate">
-                            {c.depotTag}
+                        <span className="flex-1 min-w-0">
+                          <span className="block truncate">{c.branch}</span>
+                          <span
+                            className={`block text-xs truncate ${
+                              checked ? "text-sky-400/70" : "text-slate-500"
+                            }`}
+                          >
+                            {c.creationTime > 0 ? formatDate(c.creationTime) : "date unknown"}
                           </span>
-                        )}
-                      </span>
-                      <span className="text-xs text-slate-500 font-mono tabular-nums">
-                        {c.manifestId.slice(0, 8)}…
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                        </span>
+                        <span
+                          className={`text-xs font-mono tabular-nums ${
+                            checked ? "text-sky-400/70" : "text-slate-500"
+                          }`}
+                        >
+                          {c.manifestId.slice(0, 8)}…
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -998,4 +1176,11 @@ function DiffFilter({
 function formatTime(unix: number): string {
   if (!unix) return "—";
   return new Date(unix * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+}
+
+const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+
+function formatDate(unix: number): string {
+  if (!unix) return "—";
+  return dateFormatter.format(new Date(unix * 1000));
 }

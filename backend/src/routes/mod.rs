@@ -384,6 +384,10 @@ pub struct ManifestStatusEntry {
     /// Bytes currently on disk that are only referenced by this manifest
     /// (i.e. what you'd reclaim by deleting it).
     pub bytes_unique: u64,
+    /// Manifest creation time (Steam-side timestamp, unix seconds). Lets
+    /// the frontend sort tracked manifests chronologically without
+    /// having to open each one again. Zero when `error` is set.
+    pub creation_time: u32,
 }
 
 /// Batch status for the listed manifests. Cached manifests are returned
@@ -447,6 +451,7 @@ pub async fn manifest_statuses(
                     bytes_missing: stats.bytes_missing,
                     bytes_missing_compressed: stats.bytes_missing_compressed,
                     bytes_unique: stats.bytes_unique,
+                    creation_time: manifest.creation_time,
                 }
             }
             Err(err) => {
@@ -461,6 +466,7 @@ pub async fn manifest_statuses(
                     bytes_missing: 0,
                     bytes_missing_compressed: 0,
                     bytes_unique: 0,
+                    creation_time: 0,
                 }
             }
         };
