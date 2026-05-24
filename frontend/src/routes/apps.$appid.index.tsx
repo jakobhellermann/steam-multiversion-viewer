@@ -75,6 +75,10 @@ function AppDetailBody({
   for (const s of statuses ?? []) {
     statusByKey.set(`${s.depot_id}/${s.manifest_id}`, s);
   }
+  const branchDescriptions = new Map<string, string>();
+  for (const b of info.branches) {
+    if (b.description) branchDescriptions.set(b.name, b.description);
+  }
   // Re-honor the URL hash once the depot cards are in the DOM — on first
   // navigation the browser tries to scroll before our data has loaded.
   useEffect(() => {
@@ -172,6 +176,7 @@ function AppDetailBody({
                 depot={depot}
                 appid={info.appid}
                 statuses={statusByKey}
+                branchDescriptions={branchDescriptions}
               />
             ))}
           </div>
@@ -185,10 +190,12 @@ function DepotCard({
   depot,
   appid,
   statuses,
+  branchDescriptions,
 }: {
   depot: DepotEntry;
   appid: number;
   statuses: Map<string, ManifestStatusEntry>;
+  branchDescriptions: Map<string, string>;
 }) {
   const tags = [depot.oslist, depot.osarch, depot.language].filter(Boolean) as string[];
   const sharedFromLink =
@@ -259,6 +266,7 @@ function DepotCard({
                   manifest={m}
                   status={status}
                   duplicate={duplicate}
+                  branchDescription={branchDescriptions.get(m.branch)}
                 />
               );
             });
@@ -275,12 +283,14 @@ function ManifestRow({
   manifest: m,
   status,
   duplicate,
+  branchDescription,
 }: {
   depotId: number;
   appid: number;
   manifest: { branch: string; manifest_id: string; size: number; download_size: number };
   status: ManifestStatusEntry | undefined;
   duplicate: boolean;
+  branchDescription: string | undefined;
 }) {
   const linkProps = {
     to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
@@ -302,7 +312,11 @@ function ManifestRow({
     <div
       className={`col-span-full grid grid-cols-subgrid items-baseline hover:bg-slate-800/40 group ${rowMute}`}
     >
-      <Link {...linkProps} className={`${cell} font-medium whitespace-nowrap`}>
+      <Link
+        {...linkProps}
+        title={branchDescription}
+        className={`${cell} font-medium whitespace-nowrap`}
+      >
         {m.branch}
       </Link>
       <Link
