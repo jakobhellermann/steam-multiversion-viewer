@@ -9,11 +9,12 @@ import {
   fetchFileView,
   fetchFileViewOptional,
   fetchManifestStatuses,
+  fetchTransformedFile,
   fileRawUrl,
   type FileView,
   type ManifestRef,
 } from "../api";
-import { mediaKindForPath } from "../mediaKind";
+import { isTransformablePath, mediaKindForPath } from "../mediaKind";
 import { Bytes } from "../Bytes";
 import { CompareMenu, diffTargetKey } from "../CompareMenu";
 import { ErrorBox } from "../ErrorBox";
@@ -228,6 +229,13 @@ function FileViewPage() {
                   creationTime={status?.creation_time ?? 0}
                   query={targetViews[i]}
                   rawSrc={fileRawUrl(appid, ref.depot_id, ref.manifest_id, ref.branch, path)}
+                  locator={{
+                    appid,
+                    depotId: ref.depot_id,
+                    manifestId: ref.manifest_id,
+                    branch: ref.branch,
+                    path,
+                  }}
                 />
               );
             })}
@@ -239,6 +247,7 @@ function FileViewPage() {
         <FilePreview
           view={view.data}
           rawSrc={fileRawUrl(appid, depotId, manifestId, branch, path)}
+          locator={{ appid, depotId, manifestId, branch, path }}
         />
       )}
     </div>
@@ -314,9 +323,57 @@ function MediaPlayer({ kind, src }: { kind: "audio" | "video"; src: string }) {
   );
 }
 
+type FileLocator = {
+  appid: number;
+  depotId: number;
+  manifestId: string;
+  branch: string;
+  path: string;
+};
+
+function TransformedPreview({ locator }: { locator: FileLocator }) {
+  const query = useQuery({
+    queryKey: [
+      "file-transformed",
+      locator.appid,
+      locator.depotId,
+      locator.manifestId,
+      locator.branch,
+      locator.path,
+    ],
+    queryFn: () =>
+      fetchTransformedFile(
+        locator.appid,
+        locator.depotId,
+        locator.manifestId,
+        locator.branch,
+        locator.path,
+      ),
+  });
+  if (query.isPending) {
+    return <p className="text-sm text-slate-500">Decompiling… (first run can take a while)</p>;
+  }
+  if (query.error) {
+    return (
+      <p className="text-sm text-red-300">
+        Decompile failed: {query.error instanceof Error ? query.error.message : String(query.error)}
+      </p>
+    );
+  }
+  if (query.data == null) {
+    return <p className="text-sm text-slate-500">Not transformable.</p>;
+  }
+  return (
+    <pre className="p-3 bg-slate-950 border border-slate-800 rounded text-xs whitespace-pre-wrap wrap-break-word font-mono overflow-x-auto">
+      {query.data}
+    </pre>
+  );
+}
+
 function FilePreview({
   view,
   rawSrc,
+  locator,
   showHeader = true,
 }: {
   view: FileView;
@@ -324,6 +381,9 @@ function FilePreview({
   /// looks like an image/audio/video, this is what the browser fetches
   /// directly. Omitted on the base preview during loading.
   rawSrc?: string;
+  /// Identity passed to the transformer query so a .dll can be
+  /// auto-decompiled (and a spinner shown while we wait).
+  locator?: FileLocator;
   showHeader?: boolean;
 }) {
   if (view.kind !== "file") {
@@ -363,6 +423,14 @@ function FilePreview({
     );
   }
   if (view.content_kind === "binary") {
+    if (locator && isTransformablePath(view.path)) {
+      return (
+        <section className={sectionClass}>
+          {header}
+          <TransformedPreview locator={locator} />
+        </section>
+      );
+    }
     return (
       <section className={sectionClass}>
         {header}
@@ -428,12 +496,14 @@ function DiffTargetBlock({
   creationTime,
   query,
   rawSrc,
+  locator,
 }: {
   base: FileView | null;
   ref_: ManifestRef;
   creationTime: number;
   query: { data: FileView | null | undefined; isPending: boolean; error: unknown };
   rawSrc: string;
+  locator: FileLocator;
 }) {
   const [open, setOpen] = useState(false);
   const target = query.data;
@@ -482,7 +552,9 @@ function DiffTargetBlock({
               link target: {base.linktarget ?? "—"} → {target.linktarget ?? "—"}
             </p>
           )}
-          {target && <FilePreview view={target} rawSrc={rawSrc} showHeader={false} />}
+          {target && (
+            <FilePreview view={target} rawSrc={rawSrc} locator={locator} showHeader={false} />
+          )}
         </div>
       )}
     </div>

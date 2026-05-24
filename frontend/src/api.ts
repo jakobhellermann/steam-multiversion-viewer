@@ -213,6 +213,27 @@ export function fileRawUrl(
   return `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/raw?${qs}`;
 }
 
+/// Fetch the transformer output (decompiled / disassembled text) for a
+/// file. Backend caches the result on disk keyed by content sha, so
+/// repeats are instant; the first call can take seconds to minutes
+/// depending on the tool (ilspycmd on a big assembly takes ~30s+).
+/// Returns null when the backend has no transformer for this extension.
+export async function fetchTransformedFile(
+  appid: AppId,
+  depotId: number,
+  manifestId: string,
+  branch: string,
+  path: string,
+): Promise<string | null> {
+  const qs = new URLSearchParams({ branch, path });
+  const r = await fetch(
+    `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/transformed?${qs}`,
+  );
+  if (r.status === 415) return null;
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.text();
+}
+
 /// Like fetchFileView but returns null when the file doesn't exist in
 /// the target manifest (404) instead of throwing — useful for the
 /// "compare to" diff view where "not present" is meaningful.

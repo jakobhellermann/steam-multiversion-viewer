@@ -12,13 +12,27 @@ const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "m4v"]);
 /// extension alone. Browser support varies; this matches what every
 /// modern desktop browser handles out of the box.
 export function mediaKindForPath(path: string): MediaKind {
-  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  const name = slash >= 0 ? path.slice(slash + 1) : path;
-  const dot = name.lastIndexOf(".");
-  if (dot < 0) return null;
-  const ext = name.slice(dot + 1).toLowerCase();
+  const ext = extOf(path);
+  if (!ext) return null;
   if (IMAGE_EXTS.has(ext)) return "image";
   if (AUDIO_EXTS.has(ext)) return "audio";
   if (VIDEO_EXTS.has(ext)) return "video";
   return null;
+}
+
+const TRANSFORMABLE_EXTS = new Set(["dll", "exe", "so"]);
+
+/// Mirrors the backend's transformer dispatch — true when the file
+/// extension has a registered text transformer (e.g. ilspycmd).
+export function isTransformablePath(path: string): boolean {
+  const ext = extOf(path);
+  return ext != null && TRANSFORMABLE_EXTS.has(ext);
+}
+
+function extOf(path: string): string | null {
+  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return null;
+  return name.slice(dot + 1).toLowerCase();
 }
