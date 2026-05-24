@@ -248,18 +248,27 @@ function DepotCard({
             <div className="px-4 py-1.5 font-semibold text-right">Missing</div>
             <div className="px-4 py-1.5 font-semibold text-right">Unique</div>
           </div>
-          {depot.manifests.map((m) => {
-            const status = statuses.get(`${depot.depot_id}/${m.manifest_id}`);
-            return (
-              <ManifestRow
-                key={`${m.branch}-${m.manifest_id}`}
-                depotId={depot.depot_id}
-                appid={appid}
-                manifest={m}
-                status={status}
-              />
-            );
-          })}
+          {(() => {
+            // Two branches often point at the same manifest gid (public ==
+            // public-beta when no beta is active). Mute the second+ occurrence
+            // so the duplicate doesn't draw the eye.
+            const seenManifests = new Set<string>();
+            return depot.manifests.map((m) => {
+              const status = statuses.get(`${depot.depot_id}/${m.manifest_id}`);
+              const duplicate = seenManifests.has(m.manifest_id);
+              seenManifests.add(m.manifest_id);
+              return (
+                <ManifestRow
+                  key={`${m.branch}-${m.manifest_id}`}
+                  depotId={depot.depot_id}
+                  appid={appid}
+                  manifest={m}
+                  status={status}
+                  duplicate={duplicate}
+                />
+              );
+            });
+          })()}
         </>
       )}
     </div>
@@ -271,11 +280,13 @@ function ManifestRow({
   appid,
   manifest: m,
   status,
+  duplicate,
 }: {
   depotId: number;
   appid: number;
   manifest: { branch: string; manifest_id: string; size: number; download_size: number };
   status: ManifestStatusEntry | undefined;
+  duplicate: boolean;
 }) {
   const linkProps = {
     to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
@@ -290,8 +301,13 @@ function ManifestRow({
     },
   } as const;
   const cell = "px-4 py-1.5";
+  // Mute repeat occurrences of the same manifest_id within a depot
+  // (e.g. public and public-beta share a gid when no beta is active).
+  const rowMute = duplicate ? "opacity-50" : "";
   return (
-    <div className="col-span-full grid grid-cols-subgrid items-baseline hover:bg-slate-800/40 group">
+    <div
+      className={`col-span-full grid grid-cols-subgrid items-baseline hover:bg-slate-800/40 group ${rowMute}`}
+    >
       <Link {...linkProps} className={`${cell} font-medium whitespace-nowrap`}>
         {m.branch}
       </Link>
