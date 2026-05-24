@@ -1,8 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { ManifestFilesPage } from "./api";
-import { cancelDownloads, type ChunkUpdate, type DownloadStats } from "./api";
+import { cancelDownloads, type DownloadStats } from "./api";
 import { formatBytes } from "./format";
 
 /// Live download progress panel, anchored top-right. Visible whenever
@@ -82,34 +81,10 @@ export function DownloadsDrawer() {
         queryClient.invalidateQueries({ queryKey: ["manifest-statuses"] });
       }
     };
-    const onChunks = (e: MessageEvent) => {
-      const evt = JSON.parse(e.data) as ChunkUpdate;
-      // Patch every currently-cached `manifest-files` page that matches
-      // this manifest. setQueryData returns undefined when nothing is
-      // cached for the key — no-op cost when no manifest page is open.
-      const updates = new Map(evt.files.map((f) => [f.path, f.chunks_present]));
-      queryClient
-        .getQueryCache()
-        .findAll({ queryKey: ["manifest-files"] })
-        .forEach((query) => {
-          const key = query.queryKey as unknown[];
-          const depotId = key[2];
-          const manifestId = key[3];
-          if (depotId !== evt.depot_id || manifestId !== evt.manifest_id) return;
-          queryClient.setQueryData<ManifestFilesPage>(query.queryKey, (old) => {
-            if (!old) return old;
-            let changed = false;
-            const files = old.files.map((f) => {
-              const next = updates.get(f.path);
-              if (next != null && next !== f.chunks_present) {
-                changed = true;
-                return { ...f, chunks_present: next };
-              }
-              return f;
-            });
-            return changed ? { ...old, files } : old;
-          });
-        });
+    const onChunks = (_e: MessageEvent) => {
+      // Per-file chunk presence used to be patched into the manifest-files
+      // cache here. Files are now an immutable query without chunks_present;
+      // a separate file-status query (TODO) will be patched instead.
     };
     es.addEventListener("stats", onStats);
     es.addEventListener("chunks", onChunks);
@@ -209,7 +184,7 @@ export function DownloadsDrawer() {
           </div>
         )}
         {stats.last_error && (
-          <p className="mt-2 text-xs text-red-300 break-words">
+          <p className="mt-2 text-xs text-red-300 wrap-break-word">
             last error: <span className="font-mono">{stats.last_error}</span>
           </p>
         )}

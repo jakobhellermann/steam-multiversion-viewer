@@ -121,7 +121,6 @@ export type ManifestFile = {
   size: number;
   kind: ManifestFileKind;
   chunk_count: number;
-  chunks_present: number;
   linktarget: string | null;
 };
 
@@ -150,12 +149,9 @@ export function fetchFileView(
   return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file?${qs}`);
 }
 
-export type ManifestFilesPage = {
+export type ManifestFiles = {
   depot_id: number;
   manifest_id: string;
-  offset: number;
-  limit: number;
-  file_count: number;
   files: ManifestFile[];
 };
 
@@ -260,13 +256,7 @@ export function fetchManifestFiles(
   depotId: number,
   manifestId: string,
   branch: string,
-  offset: number,
-  limit: number,
-): Promise<ManifestFilesPage> {
-  const qs = new URLSearchParams({
-    branch,
-    offset: String(offset),
-    limit: String(limit),
-  });
+): Promise<ManifestFiles> {
+  const qs = new URLSearchParams({ branch });
   return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/files?${qs}`);
 }

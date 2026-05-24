@@ -10,6 +10,7 @@ import {
   type ManifestStatusEntry,
 } from "../api";
 import { Bytes } from "../Bytes";
+import { ErrorBox } from "../ErrorBox";
 
 export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
 
@@ -49,14 +50,7 @@ function AppDetail() {
   return (
     <div className="p-8 max-w-4xl mx-auto">
       {query.isPending && <p className="text-slate-400">Loading…</p>}
-      {query.error && (
-        <div className="mt-4 p-4 border border-red-900 bg-red-950/40 rounded">
-          <p className="text-red-400 font-medium mb-1">Failed to load app info</p>
-          <p className="text-red-300 text-sm font-mono break-words">
-            {(query.error as Error).message}
-          </p>
-        </div>
-      )}
+      {query.error && <ErrorBox title="Failed to load app info" error={query.error as Error} />}
       {query.data && (
         <AppDetailBody
           info={query.data}

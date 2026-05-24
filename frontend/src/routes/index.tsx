@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { fetchLibrary, type OwnedGame } from "../api";
+import { ErrorBox } from "../ErrorBox";
 
 export const Route = createFileRoute("/")({ component: Home });
 
@@ -64,14 +65,7 @@ function Home() {
           ))}
         </tbody>
       </table>
-      {query.error && (
-        <div className="mt-4 p-4 border border-red-900 bg-red-950/40 rounded">
-          <p className="text-red-400 font-medium mb-1">Failed to load library</p>
-          <p className="text-red-300 text-sm font-mono break-words">
-            {(query.error as Error).message}
-          </p>
-        </div>
-      )}
+      {query.error && <ErrorBox title="Failed to load library" error={query.error as Error} />}
     </div>
   );
 }

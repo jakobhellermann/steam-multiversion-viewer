@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { downloadManifest, fetchFileView, type FileView } from "../api";
 import { Bytes } from "../Bytes";
+import { ErrorBox } from "../ErrorBox";
 import { formatBytes } from "../format";
 
 type Search = {
@@ -51,7 +52,7 @@ function FileViewPage() {
         <Link
           to="/apps/$appid/depots/$depotId/manifests/$manifestId"
           params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
-          search={{ branch, offset: 0, limit: 100 }}
+          search={{ branch }}
           className="hover:underline"
         >
           ← Manifest
@@ -61,14 +62,7 @@ function FileViewPage() {
       <h1 className="font-mono text-sm break-all">{path}</h1>
 
       {view.isPending && <p className="mt-4 text-slate-400">Loading…</p>}
-      {view.error && (
-        <div className="mt-4 p-4 border border-red-900 bg-red-950/40 rounded">
-          <p className="text-red-400 font-medium mb-1">Failed to load file</p>
-          <p className="text-red-300 text-sm font-mono break-words">
-            {(view.error as Error).message}
-          </p>
-        </div>
-      )}
+      {view.error && <ErrorBox title="Failed to load file" error={view.error as Error} />}
 
       {view.data && (
         <FileBody
@@ -161,7 +155,7 @@ function FilePreview({ view }: { view: FileView }) {
     return (
       <section className="mt-6">
         <h2 className="text-sm font-semibold text-slate-400 mb-2">Preview</h2>
-        <pre className="p-3 bg-slate-950 border border-slate-800 rounded text-xs whitespace-pre-wrap break-words font-mono overflow-x-auto">
+        <pre className="p-3 bg-slate-950 border border-slate-800 rounded text-xs whitespace-pre-wrap wrap-break-word font-mono overflow-x-auto">
           {view.content}
         </pre>
       </section>

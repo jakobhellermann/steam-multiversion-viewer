@@ -176,10 +176,6 @@ pub(super) fn default_branch() -> String {
     "public".into()
 }
 
-fn default_limit() -> usize {
-    100
-}
-
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct ManifestInfoQuery {
     #[serde(default = "default_branch")]
@@ -190,10 +186,6 @@ pub struct ManifestInfoQuery {
 pub struct ManifestFilesQuery {
     #[serde(default = "default_branch")]
     pub branch: String,
-    #[serde(default)]
-    pub offset: usize,
-    #[serde(default = "default_limit")]
-    pub limit: usize,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -207,12 +199,9 @@ pub struct ManifestInfo {
 }
 
 #[derive(Serialize, ToSchema)]
-pub struct ManifestFilesPage {
+pub struct ManifestFiles {
     pub depot_id: DepotId,
     pub manifest_id: ManifestId,
-    pub offset: usize,
-    pub limit: usize,
-    pub file_count: usize,
     pub files: Vec<ManifestFile>,
 }
 
@@ -222,8 +211,6 @@ pub struct ManifestFile {
     pub size: u64,
     pub kind: ManifestFileKind,
     pub chunk_count: u32,
-    /// How many of `chunk_count` are present on disk.
-    pub chunks_present: u32,
     pub linktarget: Option<String>,
 }
 
@@ -290,48 +277,35 @@ pub async fn manifest_files(
     State(state): State<AppState>,
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestFilesQuery>,
-) -> Result<Json<ManifestFilesPage>> {
+) -> Result<(ImmutableCache, Json<ManifestFiles>)> {
     let snapshot = state
         .open_manifest(appid, depot_id, manifest_id, &q.branch)
         .await?;
     let m = snapshot.manifest();
 
     // Directories are implicit in file paths — skipping them keeps the
-    // listing scannable and the pagination "10/4000" honest.
-    let visible: Vec<&steam_vent_depot::DepotFile> = m
+    // listing scannable.
+    let files = m
         .files
         .iter()
         .filter(|f| !matches!(f.kind, FileKind::Directory))
-        .collect();
-    let total = visible.len();
-    let start = q.offset.min(total);
-    let end = start.saturating_add(q.limit).min(total);
-
-    let index = state.store_index.read().expect("store_index poisoned");
-    let files = visible[start..end]
-        .iter()
-        .map(|f| {
-            let chunks_present = f.chunks.iter().filter(|c| index.has_chunk(&c.sha)).count() as u32;
-            ManifestFile {
-                path: f.path.clone(),
-                size: f.size,
-                kind: f.kind.into(),
-                chunk_count: f.chunks.len() as u32,
-                chunks_present,
-                linktarget: f.linktarget.clone(),
-            }
+        .map(|f| ManifestFile {
+            path: f.path.clone(),
+            size: f.size,
+            kind: f.kind.into(),
+            chunk_count: f.chunks.len() as u32,
+            linktarget: f.linktarget.clone(),
         })
         .collect();
-    drop(index);
 
-    Ok(Json(ManifestFilesPage {
-        depot_id: DepotId(m.depot_id),
-        manifest_id: ManifestId(m.manifest_id),
-        offset: start,
-        limit: end - start,
-        file_count: total,
-        files,
-    }))
+    Ok((
+        ImmutableCache,
+        Json(ManifestFiles {
+            depot_id: DepotId(m.depot_id),
+            manifest_id: ManifestId(m.manifest_id),
+            files,
+        }),
+    ))
 }
 
 #[derive(Serialize, ToSchema)]
