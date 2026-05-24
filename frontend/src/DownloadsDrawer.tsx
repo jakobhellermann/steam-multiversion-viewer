@@ -30,6 +30,44 @@ export function DownloadsDrawer() {
 
   const activeNow =
     stats != null && stats.chunks_completed + stats.chunks_failed < stats.chunks_total;
+
+  // Auto-dismiss once nothing new has happened for a few seconds. We
+  // store the timestamp at which the panel went idle so the progress bar
+  // below the panel can render a smooth countdown without a separate
+  // ticker. Once the countdown elapses we trigger the exit animation,
+  // then call cancelDownloads() to clear backend state on the next tick.
+  const IDLE_TIMEOUT_MS = 2000;
+  const EXIT_DURATION_MS = 250;
+  const [idleSince, setIdleSince] = useState<number | null>(null);
+  const [exiting, setExiting] = useState(false);
+  useEffect(() => {
+    if (!stats || stats.chunks_total === 0) {
+      setIdleSince(null);
+      setExiting(false);
+      return;
+    }
+    if (activeNow) {
+      setIdleSince(null);
+      setExiting(false);
+      return;
+    }
+    setIdleSince((prev) => prev ?? performance.now());
+  }, [stats, activeNow]);
+  useEffect(() => {
+    if (idleSince == null) return;
+    const remaining = idleSince + IDLE_TIMEOUT_MS - performance.now();
+    const t = window.setTimeout(() => setExiting(true), Math.max(0, remaining));
+    return () => window.clearTimeout(t);
+  }, [idleSince]);
+  useEffect(() => {
+    if (!exiting) return;
+    const t = window.setTimeout(() => {
+      cancelDownloads().catch(() => {
+        /* SSE will redeliver state regardless */
+      });
+    }, EXIT_DURATION_MS);
+    return () => window.clearTimeout(t);
+  }, [exiting]);
   // Click outside (when settled) dismisses the panel entirely by
   // resetting backend stats. Active downloads ignore this so live
   // progress + cancel UI persist as the user clicks around the app.
@@ -139,7 +177,12 @@ export function DownloadsDrawer() {
   const active = done < stats.chunks_total;
 
   return (
-    <div ref={rootRef} className="fixed top-3 right-3 z-50 w-80">
+    <div
+      ref={rootRef}
+      className={`fixed top-3 right-3 z-50 w-80 transition-opacity duration-[250ms] motion-reduce:transition-none ${
+        exiting ? "opacity-0" : "opacity-100"
+      }`}
+    >
       <div className="flex items-stretch bg-slate-900 border border-slate-700 rounded-t shadow px-3 py-2 gap-3">
         <span
           className={`self-center inline-block h-2 w-2 rounded-full ${active ? "bg-sky-400 animate-pulse" : stats.chunks_failed > 0 ? "bg-amber-400" : "bg-emerald-400"}`}
@@ -225,6 +268,27 @@ export function DownloadsDrawer() {
           </p>
         )}
       </div>
+      {idleSince != null && (
+        <div className="h-px bg-slate-800 overflow-hidden">
+          <div
+            key={idleSince}
+            className="h-full bg-slate-600"
+            style={{ animation: `download-idle-bar ${IDLE_TIMEOUT_MS}ms linear forwards` }}
+          />
+        </div>
+      )}
+      <style>{`
+        @keyframes download-idle-bar {
+          from { width: 0%; }
+          to   { width: 100%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          @keyframes download-idle-bar {
+            from { width: 0%; }
+            to   { width: 0%; }
+          }
+        }
+      `}</style>
     </div>
   );
 }
