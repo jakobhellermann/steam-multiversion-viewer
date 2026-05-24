@@ -678,7 +678,6 @@ function FilesPanel({
             currentManifestId={manifestId}
             selected={diffTargets}
             onChange={setDiffTargets}
-            loading={diffQuery.isFetching}
             error={diffQuery.error as Error | null}
           />
         )}
@@ -935,7 +934,6 @@ function CompareMenu({
   currentManifestId,
   selected,
   onChange,
-  loading,
   error,
 }: {
   appInfo: AppInfo;
@@ -945,7 +943,6 @@ function CompareMenu({
   currentManifestId: string;
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
-  loading: boolean;
   error: Error | null;
 }) {
   const [open, setOpen] = useState(false);
@@ -1060,7 +1057,6 @@ function CompareMenu({
         title="Show only files that differ from selected manifests"
       >
         Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
-        {loading && <span className="ml-2 text-xs text-slate-400">…</span>}
       </button>
       {open && (
         <div className="absolute -right-[100px] top-full mt-1 z-10 flex w-[640px] max-h-96 bg-slate-900 border border-slate-700 rounded shadow-lg overflow-hidden">
