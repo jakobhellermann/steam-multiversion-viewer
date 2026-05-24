@@ -470,6 +470,125 @@ pub async fn manifest_statuses(
     Ok(Json(out))
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct ManifestDiffRequest {
+    /// The manifest whose paths we report. A path is included if the file
+    /// under that path differs from *any* of the listed others (added,
+    /// removed, or content-changed).
+    pub base: ManifestRef,
+    pub others: Vec<ManifestRef>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ManifestDiffResponse {
+    /// Paths in `base` that differ from at least one `other`. Includes
+    /// paths missing in `base` but present in some `other` ("removed").
+    pub changed_paths: Vec<String>,
+}
+
+/// Symmetric path-level diff between a base manifest and a set of others.
+/// Returns every path that, in at least one of the other manifests, is
+/// either missing or has a different content fingerprint. Identity is
+/// `(kind, size, sha, linktarget)`; absence on either side counts as a
+/// difference.
+#[utoipa::path(
+    post,
+    path = "/api/apps/{appid}/manifests/diff",
+    request_body = ManifestDiffRequest
+)]
+#[tracing::instrument(skip_all, fields(others = body.others.len()))]
+pub async fn manifest_diff(
+    State(state): State<AppState>,
+    Path(appid): Path<AppId>,
+    Json(body): Json<ManifestDiffRequest>,
+) -> Result<Json<ManifestDiffResponse>> {
+    let base_snap = state
+        .open_manifest(
+            appid,
+            body.base.depot_id,
+            body.base.manifest_id,
+            &body.base.branch,
+        )
+        .await?;
+
+    // Open all `other` manifests in parallel — pulling them one by one
+    // on a cold cache adds up fast when comparing across many depots.
+    let sem = Arc::new(Semaphore::new(8));
+    let mut fu = FuturesUnordered::new();
+    let mut seen = HashSet::new();
+    for r in &body.others {
+        if !seen.insert((r.depot_id, r.manifest_id)) {
+            continue;
+        }
+        if (r.depot_id, r.manifest_id) == (body.base.depot_id, body.base.manifest_id) {
+            // Comparing a manifest against itself yields nothing.
+            continue;
+        }
+        let state = &state;
+        let sem = sem.clone();
+        let depot_id = r.depot_id;
+        let manifest_id = r.manifest_id;
+        let branch = r.branch.clone();
+        fu.push(async move {
+            let _permit = sem.acquire().await.expect("semaphore not closed");
+            state
+                .open_manifest(appid, depot_id, manifest_id, &branch)
+                .await
+        });
+    }
+
+    let base = base_snap.manifest();
+    let mut base_by_path: std::collections::HashMap<&str, &steam_vent_depot::DepotFile> =
+        std::collections::HashMap::with_capacity(base.files.len());
+    for f in &base.files {
+        if matches!(f.kind, FileKind::Directory) {
+            continue;
+        }
+        base_by_path.insert(f.path.as_str(), f);
+    }
+
+    // Identity tuple used to decide "same content". Files without a sha
+    // (e.g. symlinks) still get a stable fingerprint via the rest.
+    fn fp(f: &steam_vent_depot::DepotFile) -> (FileKind, u64, Option<[u8; 20]>, Option<&str>) {
+        (f.kind, f.size, f.sha, f.linktarget.as_deref())
+    }
+
+    let mut changed: HashSet<String> = HashSet::new();
+    while let Some(result) = fu.next().await {
+        let snap = result?;
+        let other = snap.manifest();
+        let mut other_paths: HashSet<&str> = HashSet::with_capacity(other.files.len());
+        for f in &other.files {
+            if matches!(f.kind, FileKind::Directory) {
+                continue;
+            }
+            other_paths.insert(f.path.as_str());
+            match base_by_path.get(f.path.as_str()) {
+                None => {
+                    // Present in `other`, absent in `base` — counts as a
+                    // change of `base`'s view (the file would "appear").
+                    changed.insert(f.path.clone());
+                }
+                Some(base_f) => {
+                    if fp(base_f) != fp(f) {
+                        changed.insert(f.path.clone());
+                    }
+                }
+            }
+        }
+        // Paths in `base` that this `other` does not have at all.
+        for path in base_by_path.keys() {
+            if !other_paths.contains(path) {
+                changed.insert((*path).to_owned());
+            }
+        }
+    }
+
+    let mut changed_paths: Vec<String> = changed.into_iter().collect();
+    changed_paths.sort();
+    Ok(Json(ManifestDiffResponse { changed_paths }))
+}
+
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct FileViewQuery {
     #[serde(default = "default_branch")]

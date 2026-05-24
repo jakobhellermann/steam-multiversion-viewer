@@ -4,11 +4,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   downloadManifest,
+  fetchAppInfo,
+  fetchManifestDiff,
   fetchManifestFiles,
   fetchManifestInfo,
+  type AppInfo,
   type EnqueueSummary,
   type ManifestFile,
   type ManifestInfo,
+  type ManifestRef,
 } from "../api";
 import { Bytes } from "../Bytes";
 import { ErrorBox } from "../ErrorBox";
@@ -38,6 +42,12 @@ function ManifestDetail() {
   const files = useQuery({
     queryKey: ["manifest-files", appid, depotId, manifestId, branch],
     queryFn: () => fetchManifestFiles(appid, depotId, manifestId, branch),
+  });
+  // Needed by the "changed compared to…" filter so the user can pick any
+  // other manifest in the app as a diff target.
+  const appInfoQuery = useQuery({
+    queryKey: ["app", appid],
+    queryFn: () => fetchAppInfo(appid),
   });
 
   const downloadAll = useMutation({
@@ -75,6 +85,7 @@ function ManifestDetail() {
             depotId={depotIdParam}
             manifestId={manifestId}
             branch={branch}
+            appInfo={appInfoQuery.data}
           />
         )}
       </section>
@@ -333,12 +344,14 @@ function FilesPanel({
   depotId,
   manifestId,
   branch,
+  appInfo,
 }: {
   allFiles: ManifestFile[];
   appid: string;
   depotId: string;
   manifestId: string;
   branch: string;
+  appInfo: AppInfo | undefined;
 }) {
   // Filter and expanded-dirs are per-manifest UI state we want to
   // survive the round-trip to file detail and back. Park both in the
@@ -348,6 +361,10 @@ function FilesPanel({
   const queryKey = useMemo(() => ["tree-query", depotId, manifestId], [depotId, manifestId]);
   const extFilterKey = useMemo(
     () => ["tree-ext-filter", depotId, manifestId],
+    [depotId, manifestId],
+  );
+  const diffTargetsKey = useMemo(
+    () => ["tree-diff-targets", depotId, manifestId],
     [depotId, manifestId],
   );
   const expandedKey = useMemo(() => ["tree-expanded", depotId, manifestId], [depotId, manifestId]);
@@ -383,6 +400,52 @@ function FilesPanel({
     setExtFilterLocal(next);
     queryClient.setQueryData(extFilterKey, next);
   };
+  // Active diff targets. Each entry is "depot_id/manifest_id". Empty =
+  // no diff filter active. Same cache-hydration pattern as extFilter.
+  const [diffTargets, setDiffTargetsLocal] = useState<Set<string>>(
+    () => queryClient.getQueryData<Set<string>>(diffTargetsKey) ?? new Set(),
+  );
+  const setDiffTargets = (next: Set<string>) => {
+    setDiffTargetsLocal(next);
+    queryClient.setQueryData(diffTargetsKey, next);
+  };
+  const diffRefs = useMemo<ManifestRef[]>(() => {
+    if (!appInfo || diffTargets.size === 0) return [];
+    const out: ManifestRef[] = [];
+    for (const d of appInfo.depots) {
+      for (const m of d.manifests) {
+        const key = `${d.depot_id}/${m.manifest_id}`;
+        if (diffTargets.has(key)) {
+          out.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
+        }
+      }
+    }
+    return out;
+  }, [appInfo, diffTargets]);
+  const diffQuery = useQuery({
+    queryKey: [
+      "manifest-diff",
+      appid,
+      depotId,
+      manifestId,
+      branch,
+      diffRefs.map((r) => `${r.depot_id}/${r.manifest_id}`).join(","),
+    ],
+    queryFn: () =>
+      fetchManifestDiff(
+        Number(appid),
+        { depot_id: Number(depotId), manifest_id: manifestId, branch },
+        diffRefs,
+      ),
+    enabled: diffRefs.length > 0,
+    staleTime: Infinity,
+    gcTime: 10 * 60 * 1000,
+  });
+  const diffPaths = useMemo<Set<string> | null>(() => {
+    if (diffTargets.size === 0) return null;
+    if (!diffQuery.data) return null;
+    return new Set(diffQuery.data);
+  }, [diffTargets, diffQuery.data]);
   const expanded =
     useQuery({
       queryKey: expandedKey,
@@ -415,16 +478,18 @@ function FilesPanel({
   const matches = useMemo<Set<string> | null>(() => {
     const tokens = deferred.toLowerCase().split(/\s+/).filter(Boolean);
     const hasExtFilter = extFilter.size > 0;
-    if (tokens.length === 0 && !hasExtFilter) return null;
+    const hasDiffFilter = diffPaths != null;
+    if (tokens.length === 0 && !hasExtFilter && !hasDiffFilter) return null;
     const m = new Set<string>();
     for (const f of allFiles) {
       const path = f.path.toLowerCase();
       if (tokens.length > 0 && !tokens.every((t) => path.includes(t))) continue;
       if (hasExtFilter && !extFilter.has(fileExtension(f.path))) continue;
+      if (hasDiffFilter && !diffPaths!.has(f.path)) continue;
       m.add(f.path);
     }
     return m;
-  }, [allFiles, deferred, extFilter]);
+  }, [allFiles, deferred, extFilter, diffPaths]);
 
   const rows = useMemo(
     () => flattenTree(tree, expanded, collapsed, matches),
@@ -564,6 +629,17 @@ function FilesPanel({
             </button>
           )}
         </div>
+        {appInfo && (
+          <DiffFilter
+            appInfo={appInfo}
+            currentDepotId={Number(depotId)}
+            currentManifestId={manifestId}
+            selected={diffTargets}
+            onChange={setDiffTargets}
+            loading={diffQuery.isFetching}
+            error={diffQuery.error as Error | null}
+          />
+        )}
         <ExtensionFilter extCounts={extCounts} selected={extFilter} onChange={setExtFilter} />
       </div>
       <TreeList
@@ -789,6 +865,161 @@ function ExtensionFilter({
               );
             })}
           </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffFilter({
+  appInfo,
+  currentDepotId,
+  currentManifestId,
+  selected,
+  onChange,
+  loading,
+  error,
+}: {
+  appInfo: AppInfo;
+  currentDepotId: number;
+  currentManifestId: string;
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  loading: boolean;
+  error: Error | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  // Flat list of candidate manifests, excluding the current one. Dedup
+  // by (depot, manifest) — a manifest_id shared between two branches is
+  // the same file set, no point listing it twice.
+  const candidates = useMemo(() => {
+    const out: {
+      key: string;
+      depotId: number;
+      manifestId: string;
+      branch: string;
+      depotTag: string;
+    }[] = [];
+    const seen = new Set<string>();
+    for (const d of appInfo.depots) {
+      const tag = [d.oslist, d.osarch, d.language].filter(Boolean).join(" · ");
+      for (const m of d.manifests) {
+        const key = `${d.depot_id}/${m.manifest_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (d.depot_id === currentDepotId && m.manifest_id === currentManifestId) continue;
+        out.push({
+          key,
+          depotId: d.depot_id,
+          manifestId: m.manifest_id,
+          branch: m.branch,
+          depotTag: tag,
+        });
+      }
+    }
+    return out;
+  }, [appInfo, currentDepotId, currentManifestId]);
+  const toggle = (key: string) => {
+    const next = new Set(selected);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    onChange(next);
+  };
+  const count = selected.size;
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`px-3 py-1.5 text-sm border rounded whitespace-nowrap ${
+          count > 0
+            ? "border-sky-700 bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
+            : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600"
+        }`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Show only files that differ from selected manifests"
+      >
+        Changed vs{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
+        {loading && <span className="ml-2 text-xs text-slate-400">…</span>}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-10 w-96 max-h-96 overflow-auto bg-slate-900 border border-slate-700 rounded shadow-lg">
+          <div className="flex items-center justify-between px-3 py-1.5 text-xs text-slate-400 border-b border-slate-800 sticky top-0 bg-slate-900">
+            <span>compare with…</span>
+            {count > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange(new Set())}
+                className="text-slate-500 hover:text-slate-200"
+              >
+                clear
+              </button>
+            )}
+          </div>
+          {error && (
+            <p className="px-3 py-2 text-xs text-red-300 border-b border-slate-800">
+              Diff failed: {error.message}
+            </p>
+          )}
+          {candidates.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-slate-500">No other manifests in this app.</p>
+          ) : (
+            <ul>
+              {candidates.map((c) => {
+                const checked = selected.has(c.key);
+                return (
+                  <li key={c.key}>
+                    <label
+                      onMouseDown={(e) => e.preventDefault()}
+                      className={`flex items-center gap-2 px-3 py-1 text-sm cursor-pointer select-none hover:bg-slate-800/60 ${
+                        checked ? "text-sky-200" : "text-slate-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggle(c.key)}
+                        className="accent-sky-500"
+                      />
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate">
+                          {c.branch}
+                          <span className="text-xs text-slate-500"> · depot {c.depotId}</span>
+                        </span>
+                        {c.depotTag && (
+                          <span className="block text-xs text-slate-500 truncate">
+                            {c.depotTag}
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-xs text-slate-500 font-mono tabular-nums">
+                        {c.manifestId.slice(0, 8)}…
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
     </div>

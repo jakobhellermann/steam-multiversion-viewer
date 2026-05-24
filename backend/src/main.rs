@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
         .routes(routes!(routes::library))
         .routes(routes!(routes::app_info))
         .routes(routes!(routes::manifest_statuses))
+        .routes(routes!(routes::manifest_diff))
         .routes(routes!(routes::manifest_info))
         .routes(routes!(routes::manifest_files))
         .routes(routes!(routes::manifest_file))

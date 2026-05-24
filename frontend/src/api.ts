@@ -82,6 +82,31 @@ export type ManifestStatusEntry = {
 
 export type ManifestRef = { depot_id: number; manifest_id: string; branch: string };
 
+export async function fetchManifestDiff(
+  appid: AppId,
+  base: ManifestRef,
+  others: ManifestRef[],
+): Promise<string[]> {
+  if (others.length === 0) return [];
+  const r = await fetch(`/api/apps/${appid}/manifests/diff`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ base, others }),
+  });
+  if (!r.ok) {
+    let message = `${r.status} ${r.statusText}`;
+    try {
+      const body = await r.json();
+      if (body && typeof body.error === "string") message = body.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  const body: { changed_paths: string[] } = await r.json();
+  return body.changed_paths;
+}
+
 export async function fetchManifestStatuses(
   appid: AppId,
   manifests: ManifestRef[],
