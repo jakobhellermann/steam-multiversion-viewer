@@ -32,3 +32,11 @@ export function formatBytesPrecise(n: number): string {
   }
   return i === 0 ? `${n} ${BYTE_UNITS[0]}` : `${v.toFixed(3)} ${BYTE_UNITS[i]}`;
 }
+
+const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+
+/// Locale-aware short date for unix-second timestamps. Returns "—" for zero.
+export function formatDate(unix: number): string {
+  if (!unix) return "—";
+  return dateFormatter.format(new Date(unix * 1000));
+}

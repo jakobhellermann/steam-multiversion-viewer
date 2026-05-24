@@ -43,18 +43,22 @@ export type DepotManifest = {
   download_size: number;
 };
 
+async function extractErrorMessage(r: Response): Promise<string> {
+  let message = `${r.status} ${r.statusText}`;
+  try {
+    const body = await r.json();
+    if (body && typeof body.error === "string") message = body.error;
+  } catch {
+    const text = await r.text().catch(() => "");
+    if (text) message = text;
+  }
+  return message;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const r = await fetch(path);
   if (!r.ok) {
-    let message = `${r.status} ${r.statusText}`;
-    try {
-      const body = await r.json();
-      if (body && typeof body.error === "string") message = body.error;
-    } catch {
-      const text = await r.text().catch(() => "");
-      if (text) message = text;
-    }
-    throw new Error(message);
+    throw new Error(await extractErrorMessage(r));
   }
   return r.json();
 }
@@ -105,16 +109,7 @@ export async function putExtraManifests(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ entries }),
   });
-  if (!r.ok) {
-    let message = `${r.status} ${r.statusText}`;
-    try {
-      const body = await r.json();
-      if (body && typeof body.error === "string") message = body.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(message);
-  }
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
   return r.json();
 }
 
@@ -126,16 +121,7 @@ export async function deleteExtraManifest(
   const r = await fetch(`/api/apps/${appid}/extra_manifests/${depotId}/${manifestId}`, {
     method: "DELETE",
   });
-  if (!r.ok) {
-    let message = `${r.status} ${r.statusText}`;
-    try {
-      const body = await r.json();
-      if (body && typeof body.error === "string") message = body.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(message);
-  }
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
   return r.json();
 }
 
@@ -150,16 +136,7 @@ export async function fetchManifestDiff(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ base, others }),
   });
-  if (!r.ok) {
-    let message = `${r.status} ${r.statusText}`;
-    try {
-      const body = await r.json();
-      if (body && typeof body.error === "string") message = body.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(message);
-  }
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
   const body: { changed_paths: string[] } = await r.json();
   return body.changed_paths;
 }
@@ -174,16 +151,7 @@ export async function fetchManifestStatuses(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ manifests }),
   });
-  if (!r.ok) {
-    let message = `${r.status} ${r.statusText}`;
-    try {
-      const body = await r.json();
-      if (body && typeof body.error === "string") message = body.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(message);
-  }
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
   return r.json();
 }
 
@@ -231,6 +199,23 @@ export function fetchFileView(
   return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file?${qs}`);
 }
 
+/// Like fetchFileView but returns null when the file doesn't exist in
+/// the target manifest (404) instead of throwing — useful for the
+/// "compare to" diff view where "not present" is meaningful.
+export async function fetchFileViewOptional(
+  appid: AppId,
+  depotId: number,
+  manifestId: string,
+  branch: string,
+  path: string,
+): Promise<FileView | null> {
+  const qs = new URLSearchParams({ branch, path });
+  const r = await fetch(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file?${qs}`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
 export type ManifestFiles = {
   depot_id: number;
   manifest_id: string;
@@ -262,16 +247,7 @@ export async function patchConfig(patch: { store_root?: string }): Promise<Confi
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (!r.ok) {
-    let message = `${r.status} ${r.statusText}`;
-    try {
-      const body = await r.json();
-      if (body && typeof body.error === "string") message = body.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(message);
-  }
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
   return r.json();
 }
 
