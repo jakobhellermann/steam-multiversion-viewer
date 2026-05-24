@@ -199,6 +199,20 @@ export function fetchFileView(
   return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file?${qs}`);
 }
 
+/// URL to the raw bytes of a file in a manifest. Backend streams the
+/// file with a best-effort Content-Type (mime_guess by extension), so
+/// `<img src=…>` / `<audio src=…>` work for browser-known media types.
+export function fileRawUrl(
+  appid: AppId,
+  depotId: number,
+  manifestId: string,
+  branch: string,
+  path: string,
+): string {
+  const qs = new URLSearchParams({ branch, path });
+  return `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/raw?${qs}`;
+}
+
 /// Like fetchFileView but returns null when the file doesn't exist in
 /// the target manifest (404) instead of throwing — useful for the
 /// "compare to" diff view where "not present" is meaningful.

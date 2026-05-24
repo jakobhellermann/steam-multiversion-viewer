@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   downloadManifest,
   fetchAppInfo,
@@ -9,9 +9,11 @@ import {
   fetchFileView,
   fetchFileViewOptional,
   fetchManifestStatuses,
+  fileRawUrl,
   type FileView,
   type ManifestRef,
 } from "../api";
+import { mediaKindForPath } from "../mediaKind";
 import { Bytes } from "../Bytes";
 import { CompareMenu, diffTargetKey } from "../CompareMenu";
 import { ErrorBox } from "../ErrorBox";
@@ -225,6 +227,7 @@ function FileViewPage() {
                   ref_={ref}
                   creationTime={status?.creation_time ?? 0}
                   query={targetViews[i]}
+                  rawSrc={fileRawUrl(appid, ref.depot_id, ref.manifest_id, ref.branch, path)}
                 />
               );
             })}
@@ -232,7 +235,12 @@ function FileViewPage() {
         </section>
       )}
 
-      {view.data && <FilePreview view={view.data} />}
+      {view.data && (
+        <FilePreview
+          view={view.data}
+          rawSrc={fileRawUrl(appid, depotId, manifestId, branch, path)}
+        />
+      )}
     </div>
   );
 }
@@ -278,7 +286,46 @@ function FileMeta({
   );
 }
 
-function FilePreview({ view, showHeader = true }: { view: FileView; showHeader?: boolean }) {
+function MediaPlayer({ kind, src }: { kind: "audio" | "video"; src: string }) {
+  const ref = useRef<HTMLMediaElement>(null);
+  // Auto-focus the player on mount so space immediately toggles play.
+  // Without focus, space scrolls the page instead.
+  useEffect(() => {
+    ref.current?.focus();
+  }, [src]);
+  const className = kind === "audio" ? "w-full" : "max-w-full bg-slate-950 rounded";
+  if (kind === "audio") {
+    return (
+      <audio
+        ref={ref as React.RefObject<HTMLAudioElement>}
+        src={src}
+        controls
+        className={className}
+      />
+    );
+  }
+  return (
+    <video
+      ref={ref as React.RefObject<HTMLVideoElement>}
+      src={src}
+      controls
+      className={className}
+    />
+  );
+}
+
+function FilePreview({
+  view,
+  rawSrc,
+  showHeader = true,
+}: {
+  view: FileView;
+  /// URL to the raw bytes for media rendering. When the file extension
+  /// looks like an image/audio/video, this is what the browser fetches
+  /// directly. Omitted on the base preview during loading.
+  rawSrc?: string;
+  showHeader?: boolean;
+}) {
   if (view.kind !== "file") {
     return null;
   }
@@ -286,6 +333,35 @@ function FilePreview({ view, showHeader = true }: { view: FileView; showHeader?:
     <h2 className="text-sm font-semibold text-slate-400 mb-2">Preview</h2>
   ) : null;
   const sectionClass = showHeader ? "mt-6" : "";
+  const media = rawSrc ? mediaKindForPath(view.path) : null;
+  if (media === "image") {
+    return (
+      <section className={sectionClass}>
+        {header}
+        <img
+          src={rawSrc}
+          alt={view.path}
+          className="max-w-full bg-slate-950 border border-slate-800 rounded"
+        />
+      </section>
+    );
+  }
+  if (media === "audio" && rawSrc) {
+    return (
+      <section className={sectionClass}>
+        {header}
+        <MediaPlayer kind="audio" src={rawSrc} />
+      </section>
+    );
+  }
+  if (media === "video" && rawSrc) {
+    return (
+      <section className={sectionClass}>
+        {header}
+        <MediaPlayer kind="video" src={rawSrc} />
+      </section>
+    );
+  }
   if (view.content_kind === "binary") {
     return (
       <section className={sectionClass}>
@@ -351,11 +427,13 @@ function DiffTargetBlock({
   ref_,
   creationTime,
   query,
+  rawSrc,
 }: {
   base: FileView | null;
   ref_: ManifestRef;
   creationTime: number;
   query: { data: FileView | null | undefined; isPending: boolean; error: unknown };
+  rawSrc: string;
 }) {
   const [open, setOpen] = useState(false);
   const target = query.data;
@@ -404,7 +482,7 @@ function DiffTargetBlock({
               link target: {base.linktarget ?? "—"} → {target.linktarget ?? "—"}
             </p>
           )}
-          {target && <FilePreview view={target} showHeader={false} />}
+          {target && <FilePreview view={target} rawSrc={rawSrc} showHeader={false} />}
         </div>
       )}
     </div>
