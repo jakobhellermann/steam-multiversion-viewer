@@ -199,6 +199,11 @@ function FileViewPage() {
             currentManifestId={manifestId}
             selected={diffTargets}
             onChange={setDiffTargets}
+            fileContext={{
+              appid,
+              base: { depot_id: depotId, manifest_id: manifestId, branch },
+              path,
+            }}
           />
         )}
       </div>

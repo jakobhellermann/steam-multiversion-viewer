@@ -1,7 +1,23 @@
 // TODO(ai-review): review for style and correctness
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AppInfo, ExtraManifestEntry, ManifestStatusEntry } from "./api";
+import {
+  fetchFileDiffTargets,
+  type AppInfo,
+  type ExtraManifestEntry,
+  type ManifestRef,
+  type ManifestStatusEntry,
+} from "./api";
 import { formatDate } from "./format";
+
+/// File-context the file-view page hands in so the menu can hide
+/// manifests whose version of this single file is identical to the
+/// base. Drives a `POST /file/diff-targets` query.
+export type FileContext = {
+  appid: number;
+  base: ManifestRef;
+  path: string;
+};
 
 type CompareCandidate = {
   key: string;
@@ -34,6 +50,7 @@ export function CompareMenu({
   selected,
   onChange,
   error,
+  fileContext,
 }: {
   appInfo: AppInfo;
   extras: ExtraManifestEntry[];
@@ -43,6 +60,10 @@ export function CompareMenu({
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
   error?: Error | null;
+  /// When set, the menu filters out manifests where the file at
+  /// `fileContext.path` is identical to the base — only `different`
+  /// and `missing` candidates remain.
+  fileContext?: FileContext;
 }) {
   const [open, setOpen] = useState(false);
   const [activeDepotId, setActiveDepotId] = useState<number | null>(currentDepotId);
@@ -124,16 +145,73 @@ export function CompareMenu({
       });
   }, [appInfo, extras, statuses, currentDepotId, currentManifestId]);
 
+  // When the menu is bound to a specific file (file-view page), ask the
+  // backend which candidates have a *different* version of that file.
+  // We only enable the query while the menu is open so opening a file
+  // doesn't burn a round trip per page load.
+  const others = useMemo<ManifestRef[]>(() => {
+    if (!fileContext) return [];
+    return groups.flatMap((g) =>
+      g.candidates.map((c) => ({
+        depot_id: c.depotId,
+        manifest_id: c.manifestId,
+        branch: c.branch,
+      })),
+    );
+  }, [fileContext, groups]);
+  const fileDiff = useQuery({
+    queryKey: [
+      "file-diff-targets",
+      fileContext?.appid,
+      fileContext?.base.depot_id,
+      fileContext?.base.manifest_id,
+      fileContext?.path,
+      others.map((r) => `${r.depot_id}/${r.manifest_id}`).join(","),
+    ],
+    queryFn: () =>
+      fetchFileDiffTargets(fileContext!.appid, fileContext!.base, others, fileContext!.path),
+    enabled: open && fileContext != null && others.length > 0,
+    staleTime: Infinity,
+    // Closing + reopening the menu would otherwise reset `data` to
+    // undefined and flash the "Checking…" empty state again.
+    placeholderData: (prev) => prev,
+  });
+  const fileStatusByKey = useMemo(() => {
+    const map = new Map<string, "same" | "different" | "missing">();
+    if (!fileDiff.data) return map;
+    for (const s of fileDiff.data) {
+      const key = diffTargetKey(s.depot_id, s.manifest_id, currentDepotId);
+      map.set(key, s.status);
+    }
+    return map;
+  }, [fileDiff.data, currentDepotId]);
+
+  const visibleGroups = useMemo<DepotGroup[]>(() => {
+    if (!fileContext) return groups;
+    // Until the diff-targets query returns, don't render anything —
+    // otherwise the menu briefly shows every manifest and then collapses
+    // to the filtered subset, which looks like a flicker.
+    if (!fileDiff.data) return [];
+    const filtered = groups.map((g) => ({
+      ...g,
+      candidates: g.candidates.filter((c) => fileStatusByKey.get(c.key) !== "same"),
+    }));
+    // Hide empty *other* depots but keep "this depot" — the right pane
+    // can then explicitly say "no different manifests in this depot"
+    // instead of the whole menu collapsing to "nothing".
+    return filtered.filter((g) => g.depotId === currentDepotId || g.candidates.length > 0);
+  }, [groups, fileContext, fileDiff.data, fileStatusByKey, currentDepotId]);
+
   // If our previously-active depot stopped having candidates, fall back
   // to the first available group.
   useEffect(() => {
     if (!open) return;
-    if (!groups.find((g) => g.depotId === activeDepotId)) {
-      setActiveDepotId(groups[0]?.depotId ?? null);
+    if (!visibleGroups.find((g) => g.depotId === activeDepotId)) {
+      setActiveDepotId(visibleGroups[0]?.depotId ?? null);
     }
-  }, [open, groups, activeDepotId]);
+  }, [open, visibleGroups, activeDepotId]);
 
-  const activeGroup = groups.find((g) => g.depotId === activeDepotId) ?? groups[0];
+  const activeGroup = visibleGroups.find((g) => g.depotId === activeDepotId) ?? visibleGroups[0];
   const toggle = (key: string) => {
     const next = new Set(selected);
     if (next.has(key)) next.delete(key);
@@ -172,11 +250,17 @@ export function CompareMenu({
                 </button>
               )}
             </div>
-            {groups.length === 0 ? (
-              <p className="px-3 py-2 text-sm text-slate-500">No other manifests.</p>
+            {visibleGroups.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-slate-500">
+                {fileContext && fileDiff.isFetching
+                  ? "Checking which manifests differ…"
+                  : fileContext
+                    ? "No manifests where this file differs."
+                    : "No other manifests."}
+              </p>
             ) : (
               <ul>
-                {groups.map((g) => {
+                {visibleGroups.map((g) => {
                   const isActive = g.depotId === activeGroup?.depotId;
                   const selectedHere = g.candidates.reduce(
                     (n, c) => n + (selected.has(c.key) ? 1 : 0),
@@ -222,6 +306,12 @@ export function CompareMenu({
             )}
             {!activeGroup ? (
               <p className="px-3 py-2 text-sm text-slate-500">Pick a depot on the left.</p>
+            ) : activeGroup.candidates.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-slate-500">
+                {fileContext
+                  ? "No manifests where this file differs."
+                  : "No manifests in this depot."}
+              </p>
             ) : (
               <ul>
                 {activeGroup.candidates.map((c) => {

@@ -597,11 +597,147 @@ pub async fn manifest_diff(
     Ok(Json(ManifestDiffResponse { changed_paths }))
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct FileDiffTargetsRequest {
+    pub base: ManifestRef,
+    pub others: Vec<ManifestRef>,
+    pub path: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct FileDiffTargetsResponse {
+    /// For each `other` manifest, whether the file at `path` differs
+    /// from the base (`different`), doesn't exist there (`missing`), or
+    /// is identical (`same`). Identity is the file's content sha (with
+    /// kind/linktarget tie-breakers for non-file or symlink entries).
+    pub statuses: Vec<FileDiffTargetStatus>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct FileDiffTargetStatus {
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
+    pub status: FileDiffStatus,
+}
+
+#[derive(Serialize, ToSchema, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum FileDiffStatus {
+    Same,
+    Different,
+    Missing,
+}
+
+/// Per-target diff status for a single file across many manifests.
+/// Lets the compare-to menu hide manifests that have the exact same
+/// version of the focused file. Cheaper than asking the frontend to
+/// fan-out file-view queries; one round trip and the heavy lifting
+/// happens server-side where the manifests are already in cache.
+#[utoipa::path(
+    post,
+    path = "/api/apps/{appid}/file/diff-targets",
+    request_body = FileDiffTargetsRequest
+)]
+#[tracing::instrument(skip_all, fields(path = %body.path, others = body.others.len()))]
+pub async fn file_diff_targets(
+    State(state): State<AppState>,
+    Path(appid): Path<AppId>,
+    Json(body): Json<FileDiffTargetsRequest>,
+) -> Result<Json<FileDiffTargetsResponse>> {
+    let base_snap = state
+        .open_manifest(
+            appid,
+            body.base.depot_id,
+            body.base.manifest_id,
+            &body.base.branch,
+        )
+        .await?;
+    let base_file = base_snap
+        .manifest()
+        .files
+        .iter()
+        .find(|f| f.path == body.path)
+        .cloned();
+
+    // Identity tuple — same as manifest_diff, scoped to one file.
+    let base_fp = base_file
+        .as_ref()
+        .map(|f| (f.kind, f.size, f.sha, f.linktarget.clone()));
+
+    let sem = Arc::new(Semaphore::new(8));
+    let mut fu = FuturesUnordered::new();
+    let mut seen = HashSet::new();
+    for r in &body.others {
+        if !seen.insert((r.depot_id, r.manifest_id)) {
+            continue;
+        }
+        let state = &state;
+        let sem = sem.clone();
+        let depot_id = r.depot_id;
+        let manifest_id = r.manifest_id;
+        let branch = r.branch.clone();
+        fu.push(async move {
+            let _permit = sem.acquire().await.expect("semaphore not closed");
+            let result = state
+                .open_manifest(appid, depot_id, manifest_id, &branch)
+                .await;
+            (depot_id, manifest_id, result)
+        });
+    }
+
+    let path = body.path.as_str();
+    let mut statuses = Vec::new();
+    while let Some((depot_id, manifest_id, result)) = fu.next().await {
+        let status = match result {
+            Ok(snap) => {
+                let file = snap
+                    .manifest()
+                    .files
+                    .iter()
+                    .find(|f| f.path == path)
+                    .cloned();
+                let other_fp = file.map(|f| (f.kind, f.size, f.sha, f.linktarget));
+                match (&base_fp, &other_fp) {
+                    (Some(b), Some(o)) if b == o => FileDiffStatus::Same,
+                    (None, None) => FileDiffStatus::Same,
+                    (_, None) => FileDiffStatus::Missing,
+                    (None, Some(_)) => FileDiffStatus::Different,
+                    (Some(_), Some(_)) => FileDiffStatus::Different,
+                }
+            }
+            Err(err) => {
+                tracing::warn!(%depot_id, %manifest_id, %err, "open_manifest failed in file diff");
+                // Treat a fetch error as "different" so the user still
+                // sees the candidate — they can investigate.
+                FileDiffStatus::Different
+            }
+        };
+        statuses.push(FileDiffTargetStatus {
+            depot_id,
+            manifest_id,
+            status,
+        });
+    }
+
+    Ok(Json(FileDiffTargetsResponse { statuses }))
+}
+
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct FileViewQuery {
     #[serde(default = "default_branch")]
     pub branch: String,
     pub path: String,
+    /// When false, skip the chunk download and inline-content fetch and
+    /// just return metadata (size, sha, kind, chunks_present). The
+    /// default is true so existing callers keep their auto-fetch
+    /// behavior. Used by the compare menu to peek at all candidate
+    /// shas without warming hundreds of files.
+    #[serde(default = "default_true")]
+    pub auto_fetch: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Serialize, ToSchema)]
@@ -612,6 +748,10 @@ pub struct FileView {
     pub chunk_count: u32,
     pub chunks_present: u32,
     pub linktarget: Option<String>,
+    /// Steam-side content sha1 of the file, hex-encoded. Stable identity
+    /// for "is this the same file?" comparisons across manifests. None
+    /// when the manifest doesn't carry one (e.g. symlinks).
+    pub sha: Option<String>,
     /// SHA-256-ish guess: "text" | "binary" | "unknown" (kind != File).
     pub content_kind: FileContentKind,
     /// Inline UTF-8 content for small text files. `None` means "too large
@@ -671,7 +811,16 @@ pub async fn manifest_file(
 
     // Extract everything we need from the borrowed manifest before
     // handing the snapshot Arc to the download manager.
-    let (file_path, file_size, file_kind, file_linktarget, chunk_count, chunks_for_dl, chunk_shas) = {
+    let (
+        file_path,
+        file_size,
+        file_kind,
+        file_linktarget,
+        file_sha,
+        chunk_count,
+        chunks_for_dl,
+        chunk_shas,
+    ) = {
         let manifest = snapshot.manifest();
         let file = manifest
             .files
@@ -686,6 +835,7 @@ pub async fn manifest_file(
             file.size,
             ManifestFileKind::from(file.kind),
             file.linktarget.clone(),
+            file.sha.map(hex_encode),
             file.chunks.len() as u32,
             file.chunks
                 .iter()
@@ -695,32 +845,39 @@ pub async fn manifest_file(
         )
     };
 
-    let (content_kind, content) = match file_kind {
-        ManifestFileKind::File if file_size > PREVIEW_CAP_BYTES => {
-            (FileContentKind::TooLarge, None)
-        }
-        ManifestFileKind::File => {
-            // Route the fetch through the DownloadManager so the live
-            // drawer reflects the load and the chunks-present index is
-            // kept consistent. `enqueue_and_wait` returns once every
-            // chunk has either landed on disk (and been recorded in the
-            // index) or failed; `read_full` after that is a pure cache
-            // hit.
-            state
-                .downloads
-                .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
-                .await;
-            let bytes = snapshot.read_full(&file_path).await?;
-            if looks_like_text(&bytes) {
-                match String::from_utf8(bytes.to_vec()) {
-                    Ok(s) => (FileContentKind::Text, Some(s)),
-                    Err(_) => (FileContentKind::Binary, None),
-                }
-            } else {
-                (FileContentKind::Binary, None)
+    let (content_kind, content) = if !q.auto_fetch {
+        // Caller wants metadata only — skip the download + content read.
+        // content_kind is best-effort by extension/size only; we leave
+        // it as Unknown so the frontend doesn't render anything.
+        (FileContentKind::Unknown, None)
+    } else {
+        match file_kind {
+            ManifestFileKind::File if file_size > PREVIEW_CAP_BYTES => {
+                (FileContentKind::TooLarge, None)
             }
+            ManifestFileKind::File => {
+                // Route the fetch through the DownloadManager so the live
+                // drawer reflects the load and the chunks-present index is
+                // kept consistent. `enqueue_and_wait` returns once every
+                // chunk has either landed on disk (and been recorded in the
+                // index) or failed; `read_full` after that is a pure cache
+                // hit.
+                state
+                    .downloads
+                    .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
+                    .await;
+                let bytes = snapshot.read_full(&file_path).await?;
+                if looks_like_text(&bytes) {
+                    match String::from_utf8(bytes.to_vec()) {
+                        Ok(s) => (FileContentKind::Text, Some(s)),
+                        Err(_) => (FileContentKind::Binary, None),
+                    }
+                } else {
+                    (FileContentKind::Binary, None)
+                }
+            }
+            _ => (FileContentKind::Unknown, None),
         }
-        _ => (FileContentKind::Unknown, None),
     };
 
     let chunks_present = {
@@ -735,10 +892,20 @@ pub async fn manifest_file(
         chunk_count,
         chunks_present,
         linktarget: file_linktarget,
+        sha: file_sha,
         content_kind,
         content,
         preview_cap_bytes: PREVIEW_CAP_BYTES,
     }))
+}
+
+fn hex_encode(bytes: [u8; 20]) -> String {
+    let mut s = String::with_capacity(40);
+    for b in bytes {
+        use std::fmt::Write as _;
+        write!(&mut s, "{b:02x}").expect("write to String");
+    }
+    s
 }
 
 #[utoipa::path(

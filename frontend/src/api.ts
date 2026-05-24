@@ -141,6 +141,35 @@ export async function fetchManifestDiff(
   return body.changed_paths;
 }
 
+export type FileDiffStatus = "same" | "different" | "missing";
+
+export type FileDiffTargetStatus = {
+  depot_id: number;
+  manifest_id: string;
+  status: FileDiffStatus;
+};
+
+/// Ask the backend which of the candidate manifests have a *different*
+/// (or missing) version of the file at `path`. Used by the compare-to
+/// menu on the file-view page so the user only sees manifests where
+/// the focused file actually changed.
+export async function fetchFileDiffTargets(
+  appid: AppId,
+  base: ManifestRef,
+  others: ManifestRef[],
+  path: string,
+): Promise<FileDiffTargetStatus[]> {
+  if (others.length === 0) return [];
+  const r = await fetch(`/api/apps/${appid}/file/diff-targets`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ base, others, path }),
+  });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  const body: { statuses: FileDiffTargetStatus[] } = await r.json();
+  return body.statuses;
+}
+
 export async function fetchManifestStatuses(
   appid: AppId,
   manifests: ManifestRef[],
