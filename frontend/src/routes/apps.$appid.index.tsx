@@ -270,9 +270,9 @@ function ManifestRow({
       }
     },
   } as const;
-  const cell = "flex items-center px-4 py-1.5 group-hover:bg-slate-800/40";
+  const cell = "px-4 py-1.5";
   return (
-    <div className="contents group">
+    <div className="col-span-full grid grid-cols-subgrid items-baseline hover:bg-slate-800/40 group">
       <Link {...linkProps} className={`${cell} font-medium whitespace-nowrap`}>
         {m.branch}
       </Link>
@@ -288,7 +288,7 @@ function ManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} justify-end tabular-nums whitespace-nowrap`}
+        className={`${cell} text-right tabular-nums whitespace-nowrap`}
       >
         <Bytes value={m.size} />
       </Link>
@@ -296,7 +296,7 @@ function ManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} justify-end tabular-nums whitespace-nowrap`}
+        className={`${cell} text-right tabular-nums whitespace-nowrap`}
       >
         {status ? (
           status.error ? (
@@ -321,7 +321,7 @@ function ManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} justify-end tabular-nums whitespace-nowrap text-slate-400`}
+        className={`${cell} text-right tabular-nums whitespace-nowrap text-slate-400`}
       >
         {status ? (
           status.bytes_unique === 0 ? (
