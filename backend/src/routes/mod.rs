@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::http::header;
+use axum::response::{IntoResponse as _, Response};
 use camino::Utf8PathBuf;
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
@@ -737,6 +739,69 @@ pub async fn manifest_file(
         content,
         preview_cap_bytes: PREVIEW_CAP_BYTES,
     }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/raw",
+    params(FileViewQuery)
+)]
+#[tracing::instrument(skip_all, fields(path = %q.path))]
+pub async fn manifest_file_raw(
+    State(state): State<AppState>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
+    Query(q): Query<FileViewQuery>,
+) -> Result<Response> {
+    let snapshot = Arc::new(
+        state
+            .open_manifest(appid, depot_id, manifest_id, &q.branch)
+            .await?,
+    );
+
+    let (file_path, file_kind, chunks_for_dl) = {
+        let manifest = snapshot.manifest();
+        let file = manifest
+            .files
+            .iter()
+            .find(|f| f.path == q.path)
+            .ok_or_else(|| ApiError {
+                status: axum::http::StatusCode::NOT_FOUND,
+                message: format!("file not in manifest: {}", q.path),
+            })?;
+        (
+            file.path.clone(),
+            ManifestFileKind::from(file.kind),
+            file.chunks
+                .iter()
+                .map(|c| (c.sha, u64::from(c.size_compressed)))
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    if !matches!(file_kind, ManifestFileKind::File) {
+        return Err(ApiError {
+            status: axum::http::StatusCode::BAD_REQUEST,
+            message: format!("not a file: {file_path}"),
+        });
+    }
+
+    state
+        .downloads
+        .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
+        .await;
+    // PERF: read_full buffers the entire file in memory before we send a
+    // byte. Fine for the typical image/audio asset, but a 2 GiB bundle
+    // would blow up here. Switch to a streaming reader on DepotSnapshot
+    // and pipe it into an axum Body once the use case shows up.
+    let bytes = snapshot.read_full(&file_path).await?;
+
+    let mime = mime_guess::from_path(&file_path).first_or_octet_stream();
+    Ok((
+        ImmutableCache,
+        [(header::CONTENT_TYPE, mime.as_ref().to_string())],
+        bytes.to_vec(),
+    )
+        .into_response())
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
