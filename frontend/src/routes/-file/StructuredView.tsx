@@ -1,5 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchFileStructured, fetchStructuredNodeContent, type StructuredNode } from "../../api";
@@ -102,19 +103,30 @@ function Tree({ root, locator }: { root: StructuredNode; locator: FileLocator })
   }, []);
 
   const treeRef = useRef<HTMLDivElement | null>(null);
+  // Virtualize so a fully-expanded scene (≈8k rows) doesn't try to
+  // mount every <div role=treeitem> on each toggle. Row size is fixed
+  // by `leading-6` on TreeRow (24px); we don't bother measuring.
+  const virtualizer = useVirtualizer({
+    count: visibleRows.length,
+    getScrollElement: () => treeRef.current,
+    estimateSize: () => 24,
+    overscan: 12,
+  });
+
   // Bring the focused row into view when arrow-keys move it.
+  const focusedIdx = useMemo(
+    () => visibleRows.findIndex((r) => r.node.id === focusedId),
+    [visibleRows, focusedId],
+  );
   useEffect(() => {
-    const el = treeRef.current?.querySelector<HTMLElement>(
-      `[data-node-id="${cssEscape(focusedId)}"]`,
-    );
-    el?.scrollIntoView({ block: "nearest" });
-  }, [focusedId]);
+    if (focusedIdx >= 0) virtualizer.scrollToIndex(focusedIdx, { align: "auto" });
+  }, [focusedIdx, virtualizer]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       // Follow the WAI-ARIA tree keyboard pattern:
       // https://www.w3.org/WAI/ARIA/apg/patterns/treeview/
-      const idx = visibleRows.findIndex((r) => r.node.id === focusedId);
+      const idx = focusedIdx;
       if (idx < 0) return;
       const row = visibleRows[idx];
       const hasChildren = row.node.children.length > 0;
@@ -163,7 +175,7 @@ function Tree({ root, locator }: { root: StructuredNode; locator: FileLocator })
       }
       e.preventDefault();
     },
-    [visibleRows, focusedId, expandedIds, parentById, setExpanded],
+    [visibleRows, focusedIdx, expandedIds, parentById, setExpanded],
   );
 
   const activateRow = useCallback(
@@ -191,17 +203,37 @@ function Tree({ root, locator }: { root: StructuredNode; locator: FileLocator })
         onKeyDown={onKeyDown}
         className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-2 focus:outline-none"
       >
-        {visibleRows.map((row) => (
-          <TreeRow
-            key={row.node.id}
-            row={row}
-            expanded={expandedIds.has(row.node.id)}
-            focused={row.node.id === focusedId}
-            selected={row.node.id === selectedId}
-            onActivate={activateRow}
-            onFocus={setFocusedId}
-          />
-        ))}
+        {/* Spacer keeps the scroll thumb honest while we render only
+            the rows in view. Items are absolute-positioned by the
+            virtualizer's reported offset. */}
+        <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
+          {virtualizer.getVirtualItems().map((vi) => {
+            const row = visibleRows[vi.index];
+            return (
+              <div
+                key={row.node.id}
+                ref={virtualizer.measureElement}
+                data-index={vi.index}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  transform: `translateY(${vi.start}px)`,
+                }}
+              >
+                <TreeRow
+                  row={row}
+                  expanded={expandedIds.has(row.node.id)}
+                  focused={row.node.id === focusedId}
+                  selected={row.node.id === selectedId}
+                  onActivate={activateRow}
+                  onFocus={setFocusedId}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
       <div className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-3">
         {selectedId ? (
@@ -279,15 +311,6 @@ function TreeRow({
       </span>
     </div>
   );
-}
-
-/// Escape an id for use in a CSS attribute selector. The structured-id
-/// scheme uses `:` which is a CSS combinator if unescaped.
-function cssEscape(id: string): string {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(id);
-  }
-  return id.replace(/(["\\:.])/g, "\\$1");
 }
 
 function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: string }) {
