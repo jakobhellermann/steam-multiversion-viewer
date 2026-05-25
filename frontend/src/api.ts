@@ -309,7 +309,6 @@ export async function fetchFileStructured(
   const qs = new URLSearchParams({ branch, path });
   const r = await fetch(
     `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/structured?${qs}`,
-    { method: "POST" },
   );
   if (!r.ok) throw new Error(await extractErrorMessage(r));
   return r.json();
@@ -324,14 +323,9 @@ export async function fetchStructuredNodeContent(
   path: string,
   nodeId: string,
 ): Promise<NodeContent> {
-  const qs = new URLSearchParams({ branch, path });
+  const qs = new URLSearchParams({ branch, path, node_id: nodeId });
   const r = await fetch(
     `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/structured/node?${qs}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ node_id: nodeId }),
-    },
   );
   if (!r.ok) throw new Error(await extractErrorMessage(r));
   return r.json();

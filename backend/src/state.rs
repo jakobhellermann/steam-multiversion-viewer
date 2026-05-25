@@ -101,7 +101,7 @@ impl AppState {
             .write()
             .expect("store_index poisoned")
             .add_manifest(app_id, snap.manifest());
-        tracing::info!(
+        tracing::trace!(
             depot_id = %depot_id,
             manifest_id = %manifest_id,
             branch,

@@ -9,7 +9,6 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
-use utoipa::ToSchema;
 
 use crate::error::ApiError;
 use crate::http::ImmutableCache;
@@ -25,7 +24,7 @@ use super::{FileViewQuery, Result};
 /// structured representation today — callers should fall back to the
 /// plain text preview / transformer in that case.
 #[utoipa::path(
-    post,
+    get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured",
     params(FileViewQuery)
 )]
@@ -113,24 +112,25 @@ pub async fn manifest_file_structured(
     }
 }
 
-#[derive(Deserialize, ToSchema)]
-pub struct NodeContentRequest {
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct NodeContentQuery {
+    #[serde(default = "crate::routes::default_branch")]
+    pub branch: String,
+    pub path: String,
     pub node_id: String,
 }
 
 /// Lazy per-node content.
 #[utoipa::path(
-    post,
+    get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured/node",
-    params(FileViewQuery),
-    request_body = NodeContentRequest,
+    params(NodeContentQuery)
 )]
-#[tracing::instrument(skip_all, fields(path = %q.path, node_id = %body.node_id))]
+#[tracing::instrument(skip_all, fields(path = %q.path, node_id = %q.node_id))]
 pub async fn manifest_file_structured_node(
     State(state): State<AppState>,
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
-    Query(q): Query<FileViewQuery>,
-    Json(body): Json<NodeContentRequest>,
+    Query(q): Query<NodeContentQuery>,
 ) -> Result<(ImmutableCache, Json<NodeContent>)> {
     let snapshot = Arc::new(
         state
@@ -154,7 +154,7 @@ pub async fn manifest_file_structured_node(
             // Resolve the node id to a path-id; non-object ids
             // (section headers, class-stats rows) get an empty body so
             // the frontend hides the panel.
-            let Some(path_id) = crate::unity::tree::parse_object_node_id(&body.node_id) else {
+            let Some(path_id) = crate::unity::tree::parse_object_node_id(&q.node_id) else {
                 return Ok((
                     ImmutableCache,
                     Json(NodeContent {
@@ -187,7 +187,7 @@ pub async fn manifest_file_structured_node(
         Some(Transformer::Dll) => {
             // `type:<fully-qualified-name>` → ilspy -t. Anything else
             // (namespace nodes, file root) has no body.
-            let Some(type_name) = body.node_id.strip_prefix("type:") else {
+            let Some(type_name) = q.node_id.strip_prefix("type:") else {
                 return Ok((
                     ImmutableCache,
                     Json(NodeContent {
