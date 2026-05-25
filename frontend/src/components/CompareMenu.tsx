@@ -7,8 +7,8 @@ import {
   type ExtraManifestEntry,
   type ManifestRef,
   type ManifestStatusEntry,
-} from "./api";
-import { formatDate } from "./format";
+} from "../api";
+import { formatDate } from "../lib/format";
 
 /// File-context the file-view page hands in so the menu can hide
 /// manifests whose version of this single file is identical to the

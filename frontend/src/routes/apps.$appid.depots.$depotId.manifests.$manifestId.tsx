@@ -18,12 +18,12 @@ import {
   type ManifestRef,
   type ManifestStatusEntry,
 } from "../api";
-import { Bytes } from "../Bytes";
-import { CompareMenu, diffTargetKey } from "../CompareMenu";
-import { ErrorBox } from "../ErrorBox";
-import { formatBytes } from "../format";
-import { markShowImmediately } from "../downloadsUiSignal";
-import { pinScroll } from "../pinScroll";
+import { Bytes } from "../components/Bytes";
+import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
+import { ErrorBox } from "../components/ErrorBox";
+import { formatBytes } from "../lib/format";
+import { markShowImmediately } from "../lib/downloadsUiSignal";
+import { pinScroll } from "../lib/pinScroll";
 
 type Search = {
   /// `undefined` means "default" (which is `public`). Keeping default

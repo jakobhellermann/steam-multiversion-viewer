@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-import { formatBytes, formatBytesPrecise } from "./format";
+import { formatBytes, formatBytesPrecise } from "../lib/format";
 
 /// Render a byte count with the compact IEC formatting, more precise value as tooltip.
 export function Bytes({ value }: { value: number }) {

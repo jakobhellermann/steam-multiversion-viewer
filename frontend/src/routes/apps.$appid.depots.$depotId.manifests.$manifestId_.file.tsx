@@ -14,13 +14,13 @@ import {
   type FileView,
   type ManifestRef,
 } from "../api";
-import { isTransformablePath, mediaKindForPath } from "../mediaKind";
-import { highlight, langForMime, langForPath } from "../syntax";
-import { Bytes } from "../Bytes";
-import { CompareMenu, diffTargetKey } from "../CompareMenu";
-import { ErrorBox } from "../ErrorBox";
-import { markShowImmediately } from "../downloadsUiSignal";
-import { formatBytes, formatDate } from "../format";
+import { isTransformablePath, mediaKindForPath } from "../lib/mediaKind";
+import { highlight, langForMime, langForPath } from "../lib/syntax";
+import { Bytes } from "../components/Bytes";
+import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
+import { ErrorBox } from "../components/ErrorBox";
+import { markShowImmediately } from "../lib/downloadsUiSignal";
+import { formatBytes, formatDate } from "../lib/format";
 
 type Search = {
   /// Omitted in URL when the default; readers must apply `?? "public"`.

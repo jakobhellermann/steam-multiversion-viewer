@@ -1,9 +1,9 @@
 // TODO(ai-review): review for style and correctness
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { cancelDownloads, type DownloadStats } from "./api";
-import { consumeShowImmediately } from "./downloadsUiSignal";
-import { formatBytes } from "./format";
+import { cancelDownloads, type DownloadStats } from "../api";
+import { consumeShowImmediately } from "../lib/downloadsUiSignal";
+import { formatBytes } from "../lib/format";
 
 /// Live download progress panel, anchored top-right. Visible whenever
 /// stats.chunks_total > 0; dismissed by clicking outside (only when

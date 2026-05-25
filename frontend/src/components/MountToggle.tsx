@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { fetchMountStatus, startMount, stopMount } from "./api";
+import { fetchMountStatus, startMount, stopMount } from "../api";
 
 /// Header icon-button that toggles the FUSE mount. Sky-blue when the
 /// mount is up, slate when idle; hover-title shows the current

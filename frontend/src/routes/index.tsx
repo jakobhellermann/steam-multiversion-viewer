@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { fetchLibrary, type OwnedGame } from "../api";
-import { ErrorBox } from "../ErrorBox";
+import { ErrorBox } from "../components/ErrorBox";
 
 export const Route = createFileRoute("/")({ component: Home });
 

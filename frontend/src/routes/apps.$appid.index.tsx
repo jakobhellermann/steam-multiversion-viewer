@@ -12,10 +12,10 @@ import {
   type ManifestRef,
   type ManifestStatusEntry,
 } from "../api";
-import { Bytes } from "../Bytes";
-import { ErrorBox } from "../ErrorBox";
-import { parseSteamDbPaste, type ParsedExtra } from "../parseSteamDbPaste";
-import { pinScroll } from "../pinScroll";
+import { Bytes } from "../components/Bytes";
+import { ErrorBox } from "../components/ErrorBox";
+import { parseSteamDbPaste, type ParsedExtra } from "../lib/parseSteamDbPaste";
+import { pinScroll } from "../lib/pinScroll";
 
 export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
 
