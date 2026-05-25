@@ -29,16 +29,33 @@ type Search = {
   /// "compare to" filter survives navigation. Comma-separated list of
   /// "depot-manifest" or bare "manifest" entries.
   compare_to?: string;
+  /// Structured-view path search query (token-AND over node labels).
+  q?: string;
+  /// Structured-view facet whitelist. One entry per facet key as
+  /// `f.<key>=<v1>,<v2>,…`. Keys are format-defined ("class", "kind",
+  /// …); the validator preserves whatever the URL carries.
+  [facet: `f.${string}`]: string | undefined;
 };
 
 export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$manifestId_/file")({
-  validateSearch: (search: Record<string, unknown>): Search => ({
-    branch:
-      typeof search.branch === "string" && search.branch !== "public" ? search.branch : undefined,
-    path: typeof search.path === "string" ? search.path : "",
-    compare_to:
-      typeof search.compare_to === "string" && search.compare_to ? search.compare_to : undefined,
-  }),
+  validateSearch: (search: Record<string, unknown>): Search => {
+    const out: Search = {
+      branch:
+        typeof search.branch === "string" && search.branch !== "public" ? search.branch : undefined,
+      path: typeof search.path === "string" ? search.path : "",
+      compare_to:
+        typeof search.compare_to === "string" && search.compare_to ? search.compare_to : undefined,
+      q: typeof search.q === "string" && search.q ? search.q : undefined,
+    };
+    // Pass `f.*` keys through verbatim — see [`StructuredView`] for the
+    // shape; absent entries mean "no whitelist for this facet".
+    for (const [k, v] of Object.entries(search)) {
+      if (k.startsWith("f.") && typeof v === "string" && v) {
+        (out as Record<string, string>)[k] = v;
+      }
+    }
+    return out;
+  },
   component: FileViewPage,
 });
 

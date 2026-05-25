@@ -129,6 +129,7 @@ fn build_root_node<R: EnvResolver, P: TypeTreeProvider>(
         )),
         default_collapsed: false,
         children: vec![class_stats, hierarchy.node, loose],
+        ..Default::default()
     })
 }
 
@@ -167,6 +168,7 @@ fn build_class_stats_section(counts: &BTreeMap<ClassId, usize>) -> Node {
         // Long noisy list — collapse it so the user has to opt in.
         default_collapsed: true,
         children,
+        ..Default::default()
     }
 }
 
@@ -219,6 +221,7 @@ fn build_hierarchy_section<R: EnvResolver, P: TypeTreeProvider>(
             badge: Some(format!("{root_count} {}", pluralize(root_count, "root"))),
             default_collapsed: false,
             children: roots,
+            ..Default::default()
         },
         covered,
     })
@@ -295,6 +298,7 @@ fn build_gameobject_node<R: EnvResolver, P: TypeTreeProvider>(
         badge,
         default_collapsed: false,
         children,
+        ..Default::default()
     })
 }
 
@@ -320,6 +324,7 @@ fn build_loose_section<R: EnvResolver, P: TypeTreeProvider>(
         badge: Some(format!("{count}")),
         default_collapsed: false,
         children,
+        ..Default::default()
     })
 }
 
@@ -339,7 +344,11 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     class_id: ClassId,
     with_pathid_badge: bool,
 ) -> Result<Node> {
-    let label = if matches!(class_id, ClassId::MonoBehaviour) {
+    // `class` facet drives the frontend filter. For MonoBehaviours
+    // that's the script name (user-mental "the class"), for everything
+    // else the engine class id. Falls back to the engine class id when
+    // the script reference is missing.
+    let class_label = if matches!(class_id, ClassId::MonoBehaviour) {
         let handle = file.object_at::<MonoBehaviour>(path_id)?;
         match handle.mono_script()? {
             Some(script) => script.full_name().into_owned(),
@@ -348,7 +357,8 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     } else {
         format!("{class_id:?}")
     };
-    let mut node = Node::leaf(format!("obj:{path_id}"), label, "component");
+    let mut node = Node::leaf(format!("obj:{path_id}"), &class_label, "component")
+        .with_facet("class", &class_label);
     if with_pathid_badge {
         node = node.with_badge(format!("[{path_id}]"));
     }

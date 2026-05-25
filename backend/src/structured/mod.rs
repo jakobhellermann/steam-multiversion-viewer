@@ -9,13 +9,15 @@
 //! served by a separate route keyed on the node id, so the initial
 //! tree response can stay small even for files with thousands of nodes.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 use utoipa::ToSchema;
 
 /// One entry in a structured tree. Nodes are recursive — children
 /// follow the same shape — and frontend-opaque: the only thing the UI
 /// knows about `kind` is what icon to show.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
 pub struct Node {
     /// Stable identifier inside its `StructuredTree`, used by the
     /// node-content endpoint to fetch lazy detail. Format is up to the
@@ -37,6 +39,12 @@ pub struct Node {
     /// open immediately.
     #[serde(default, skip_serializing_if = "is_false")]
     pub default_collapsed: bool,
+    /// Faceted attributes the frontend turns into filter chips. Each
+    /// key becomes one dropdown ("class", "kind", …), each value one
+    /// selectable bucket. Format-specific — the renderer doesn't
+    /// interpret keys, just groups by them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub facets: BTreeMap<String, String>,
     /// Direct children. Empty for leaves.
     pub children: Vec<Node>,
 }
@@ -54,6 +62,7 @@ impl Node {
             kind: kind.into(),
             badge: None,
             default_collapsed: false,
+            facets: BTreeMap::new(),
             children: Vec::new(),
         }
     }
@@ -65,6 +74,11 @@ impl Node {
 
     pub fn collapsed_by_default(mut self) -> Self {
         self.default_collapsed = true;
+        self
+    }
+
+    pub fn with_facet(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.facets.insert(key.into(), value.into());
         self
     }
 }

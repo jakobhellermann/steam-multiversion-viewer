@@ -39,15 +39,16 @@ export function FilePreview({
   const sectionClass = showHeader ? "mt-6" : "";
 
   // Structured view wins over everything else — files that have one
-  // (unity scenes, eventually bundles) are useless as raw text.
+  // (unity scenes, eventually bundles) are useless as raw text. It
+  // renders its own "Preview" header alongside the match counter so
+  // both pieces of info live in one row.
   if (view.structured) {
     // Take the remaining vertical space inside the file route so
     // StructuredView can fill it. Without `min-h-0` the flex item
     // would refuse to shrink below its intrinsic content height.
     return (
       <section className={`${sectionClass} flex min-h-0 flex-1 flex-col`}>
-        {header}
-        <StructuredView locator={locator} />
+        <StructuredView locator={locator} showHeader={showHeader} />
       </section>
     );
   }

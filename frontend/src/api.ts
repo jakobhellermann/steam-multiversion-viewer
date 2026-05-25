@@ -271,6 +271,10 @@ export type StructuredNode = {
   /// Frontend honors the flag verbatim — never decides expansion
   /// based on `kind` or `id`.
   default_collapsed?: boolean;
+  /// Faceted attributes — each key is a filter dimension the frontend
+  /// surfaces as a dropdown (multi-select whitelist). Format-specific;
+  /// the renderer doesn't interpret keys.
+  facets?: Record<string, string>;
   children: StructuredNode[];
 };
 

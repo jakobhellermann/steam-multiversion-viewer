@@ -65,6 +65,7 @@ fn build_root(file_label: &str, entities: &[EntityEntry]) -> Node {
         badge: Some(format!("{} entities", entities.len())),
         default_collapsed: false,
         children,
+        ..Default::default()
     }
 }
 
@@ -142,6 +143,7 @@ impl NsBuilder {
             badge: Some(format!("{count}")),
             default_collapsed: false,
             children: self.into_children(),
+            ..Default::default()
         }
     }
 }
@@ -150,13 +152,18 @@ fn leaf_node(entity: &EntityEntry) -> Node {
     // Leaf labels show just the last segment — the parent namespace
     // chain is already implied by indentation in the tree.
     let (_, leaf) = split_namespace(&entity.name);
+    let kind = entity.kind.as_str();
     Node {
         id: format!("type:{}", entity.name),
         label: leaf.to_string(),
-        kind: entity.kind.as_str().to_string(),
-        badge: None,
-        default_collapsed: false,
-        children: Vec::new(),
+        kind: kind.to_string(),
+        // Same string in `kind` and in the `kind` facet, but the facet
+        // is what the frontend filter UI uses; `kind` is just the
+        // renderer hint. Cheap to duplicate.
+        facets: [("kind".to_string(), kind.to_string())]
+            .into_iter()
+            .collect(),
+        ..Default::default()
     }
 }
 
