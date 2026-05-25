@@ -124,13 +124,18 @@ export function DownloadsDrawer() {
       setStats(s);
       const now = performance.now();
       // Drop the buffer on reset (cancel zeroes bytes_completed); a
-      // shrinking value would otherwise produce a negative slope.
+      // shrinking value would otherwise produce a negative slope. Also
+      // reset the invalidation watermark — otherwise the next run's
+      // completedDelta stays ≤0 (lastCompletedSeen is stale from the
+      // previous run) and file-view never gets invalidated again.
       if (
         samples.current.length > 0 &&
         s.bytes_completed < samples.current[samples.current.length - 1].bytes
       ) {
         samples.current = [];
         runStart.current = null;
+        lastCompletedSeen.current = 0;
+        lastInvalidate.current = 0;
         setOverallRate(0);
       }
       samples.current.push({ ts: now, bytes: s.bytes_completed });
