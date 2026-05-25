@@ -57,7 +57,14 @@ export function StructuredView({
     );
   }
 
-  return <Tree root={tree.data.root} locator={locator} showHeader={showHeader} />;
+  // Rebuild the tree component when the file under us changes —
+  // expanded-set, focus, virtualizer scroll position etc are all
+  // per-file, so a fresh React instance is the right semantics.
+  // Otherwise tanstack-router happily keeps the previous file's state
+  // around when only the `?path=` search param changes.
+  return (
+    <Tree key={locator.path} root={tree.data.root} locator={locator} showHeader={showHeader} />
+  );
 }
 
 // DOM-id helper. Node ids can contain `:` / `.` / `<` / `>` which are
