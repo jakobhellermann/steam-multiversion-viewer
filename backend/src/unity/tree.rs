@@ -28,13 +28,14 @@ use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::handle::SerializedFileHandle;
 use rabex_env::rabex::objects::ClassId;
-use rabex_env::rabex::objects::pptr::PathId;
+use rabex_env::rabex::objects::pptr::{FileId, PPtr, PathId};
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
 use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
+use serde_value::Value;
 use steam_depot_vfs::chunk_store::ChunkStore;
 use steam_depot_vfs::fs::DepotManifestStore;
 
@@ -83,8 +84,12 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     // with "invalid type: byte array". serde_json then re-encodes
     // Bytes(Vec<u8>) as a JSON array of integers, matching what `jq`
     // already does for similar cases.
-    let object = file.object_at::<serde_value::Value>(path_id)?;
-    let value = object.read()?;
+    let object = file.object_at::<Value>(path_id)?;
+    let mut value = object.read()?;
+    // Replace each `{m_FileID, m_PathID}` blob with a human-readable
+    // `{ $target, type, file? }` form so the diff/preview shows what
+    // a pptr points at rather than a raw 64-bit path-id.
+    qualify_pptrs(&file, &mut value);
     Ok(serde_json::to_string_pretty(&value)?)
 }
 
@@ -363,4 +368,175 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
         node = node.with_badge(format!("[{path_id}]"));
     }
     Ok(node)
+}
+
+// ---- pptr qualification --------------------------------------------------
+//
+// Replace every `{m_FileID, m_PathID}` blob in a deserialised object with a
+// human-readable `{ $target, type, file? }` form. Inspired by istaan-diff-
+// unity's `qualify_pptrs`. Failures are swallowed per-pptr — a bad ref
+// shouldn't break the whole preview. We keep an explicit visited set so a
+// cycle in a self-referential graph doesn't recurse forever.
+
+fn qualify_pptrs<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    value: &mut Value,
+) {
+    replace_pptrs(value, &mut |pptr| qualify_one(file, pptr));
+}
+
+fn qualify_one<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    pptr: PPtr,
+) -> Value {
+    let Some(pptr) = pptr.optional() else {
+        return Value::Unit;
+    };
+    let obj = match file.deref(pptr.typed::<Value>()) {
+        Ok(o) => o,
+        Err(_) => return pptr_placeholder(pptr, "unresolved"),
+    };
+    let class_id = format!("{:?}", obj.class_id());
+    let target = obj
+        .read()
+        .ok()
+        .map(|data| display_name(&obj, &data))
+        .unwrap_or_else(|| "(unreadable)".to_string());
+
+    let mut map = BTreeMap::new();
+    map.insert(svalue_str("$target"), svalue_str(&target));
+    map.insert(svalue_str("type"), svalue_str(&class_id));
+    if !pptr.is_local()
+        && let Some(ext) = pptr.file_identifier(file.file)
+    {
+        map.insert(svalue_str("file"), svalue_str(&ext.pathName));
+    }
+    Value::Map(map)
+}
+
+fn pptr_placeholder(pptr: PPtr, reason: &str) -> Value {
+    let mut map = BTreeMap::new();
+    map.insert(
+        svalue_str("$target"),
+        svalue_str(&format!(
+            "PPtr<file={:?},path={}>",
+            pptr.m_FileID, pptr.m_PathID
+        )),
+    );
+    map.insert(svalue_str("error"), svalue_str(reason));
+    Value::Map(map)
+}
+
+/// Produce a human-readable label for an object: its `m_Name` plus,
+/// where applicable, the gameobject hierarchy path it lives on. Name
+/// alone stays unquoted (`Foo`); the moment we tack on a path we
+/// quote it to make the boundary obvious (`'Foo' on /Player/Hand`).
+fn display_name<R: EnvResolver, P: TypeTreeProvider>(
+    object: &rabex_env::handle::ObjectRefHandle<'_, Value, R, P>,
+    val: &Value,
+) -> String {
+    use std::fmt::Write as _;
+    let m_name = lookup_str(val, "m_Name").unwrap_or_default();
+    let go_path = lookup(val, "m_GameObject")
+        .and_then(pptr_from_value)
+        .and_then(|p| p.optional())
+        .and_then(|p| {
+            object
+                .file
+                .deref_optional(p.typed::<GameObject>())
+                .ok()
+                .flatten()
+        })
+        .and_then(|go| go.path().ok());
+
+    let mut out = String::new();
+    match (m_name.is_empty(), go_path) {
+        (false, Some(path)) => {
+            let _ = write!(&mut out, "'{m_name}' on {path}");
+        }
+        (false, None) => out.push_str(&m_name),
+        (true, Some(path)) => out.push_str(&path),
+        (true, None) => {}
+    }
+    if out.is_empty() {
+        out.push_str(&format!("PathID={}", object.path_id()));
+    }
+    out
+}
+
+fn lookup<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
+    let Value::Map(map) = v else {
+        return None;
+    };
+    map.get(&Value::String(key.to_string()))
+}
+
+fn lookup_str(v: &Value, key: &str) -> Option<String> {
+    match lookup(v, key)? {
+        Value::String(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn pptr_from_value(v: &Value) -> Option<PPtr> {
+    let Value::Map(map) = v else {
+        return None;
+    };
+    let file_id = as_file_id(map.get(&Value::String("m_FileID".to_string()))?)?;
+    let path_id = as_path_id(map.get(&Value::String("m_PathID".to_string()))?)?;
+    Some(PPtr::new(file_id, path_id))
+}
+
+/// PPtrs in the typetree are `int m_FileID; SInt64 m_PathID;`, so
+/// the deserialiser always emits I32 + I64 — no need to handle the
+/// other integer widths here.
+fn as_file_id(v: &Value) -> Option<FileId> {
+    match v {
+        Value::I32(x) => Some(FileId::new(*x)),
+        _ => None,
+    }
+}
+
+fn as_path_id(v: &Value) -> Option<PathId> {
+    match v {
+        Value::I64(x) => Some(*x),
+        _ => None,
+    }
+}
+
+fn svalue_str(s: impl Into<String>) -> Value {
+    Value::String(s.into())
+}
+
+/// Recursively walk `value`, replacing every map that looks like a
+/// PPtr (`m_FileID` + `m_PathID`, two entries) with the result of `f`.
+fn replace_pptrs(value: &mut Value, f: &mut dyn FnMut(PPtr) -> Value) {
+    match value {
+        Value::Seq(items) => {
+            for x in items {
+                replace_pptrs(x, f);
+            }
+        }
+        Value::Map(map) => {
+            if map.len() == 2
+                && let Some(file_v) = map.get(&Value::String("m_FileID".to_string()))
+                && let Some(path_v) = map.get(&Value::String("m_PathID".to_string()))
+                && let (Some(file_id), Some(path_id)) = (as_file_id(file_v), as_path_id(path_v))
+            {
+                let pptr = PPtr::new(file_id, path_id);
+                *value = f(pptr);
+            } else {
+                for v in map.values_mut() {
+                    replace_pptrs(v, f);
+                }
+            }
+        }
+        Value::Newtype(inner) => replace_pptrs(inner, f),
+        Value::Option(opt) => {
+            if let Some(inner) = opt {
+                replace_pptrs(inner, f);
+            }
+        }
+        _ => {}
+    }
 }
