@@ -135,14 +135,31 @@ impl LeafBuilder {
 
     fn into_node(self) -> Node {
         let mut node = leaf_node(&self.entity);
+        // Nested types (and anything below them, transitively) only
+        // matter when the user is searching — flag the whole subtree
+        // so the frontend hides it by default but surfaces it on a
+        // label match.
         node.children = self
             .nested
             .into_values()
-            .map(LeafBuilder::into_node)
+            .map(|c| {
+                let mut sub = c.into_node();
+                mark_hidden(&mut sub);
+                sub
+            })
             .collect();
         node
     }
+}
 
+fn mark_hidden(node: &mut Node) {
+    node.hide_unless_matched = true;
+    for c in &mut node.children {
+        mark_hidden(c);
+    }
+}
+
+impl LeafBuilder {
     fn count(&self) -> usize {
         1 + self.nested.values().map(LeafBuilder::count).sum::<usize>()
     }

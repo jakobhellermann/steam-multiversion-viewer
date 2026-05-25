@@ -271,6 +271,10 @@ export type StructuredNode = {
   /// Frontend honors the flag verbatim — never decides expansion
   /// based on `kind` or `id`.
   default_collapsed?: boolean;
+  /// When true, the row is hidden unless it matches the active
+  /// search / facet filter. Used for secondary entries (e.g. nested
+  /// .NET types) that would otherwise clutter the listing.
+  hide_unless_matched?: boolean;
   /// Faceted attributes — each key is a filter dimension the frontend
   /// surfaces as a dropdown (multi-select whitelist). Format-specific;
   /// the renderer doesn't interpret keys.

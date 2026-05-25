@@ -144,42 +144,51 @@ function Tree({
     return computeFacetSummary(root, query, facetWhitelist);
   }, [root, query, facetWhitelist]);
 
-  // Per-node "passes all filters" set. `null` means "no filter is
-  // active, show everything". Otherwise: a node passes when its own
-  // label/facets match AND every facet whitelist allows it.
+  const filterActive = query.trim() !== "" || facetWhitelist.size > 0;
+
+  // Per-node "passes all filters" set. `null` means no filter is
+  // active (we still need a visibility set, see below, but match-
+  // counters and auto-expand shouldn't kick in).
   const directMatches = useMemo(() => {
-    if (query.trim() === "" && facetWhitelist.size === 0) return null;
+    if (!filterActive) return null;
     const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
     const set = new Set<string>();
     walk(root, (n) => {
       if (nodeMatches(n, tokens, facetWhitelist)) set.add(n.id);
     });
     return set;
-  }, [root, query, facetWhitelist]);
+  }, [filterActive, root, query, facetWhitelist]);
 
-  // Visibility set: a node is visible if it matches, or any descendant
-  // matches (so its row stays as a navigable parent). Computed bottom-up
-  // in one walk.
+  // Visibility set, computed in two modes:
+  // - Filter active: matches + every ancestor of a match.
+  // - No filter: every node except those tagged `hide_unless_matched`
+  //   (and their descendants — propagated by `collectHidden`).
+  // The "default-hide" path is what makes nested .NET types show up
+  // only when the user searches for them.
   const visibleSet = useMemo(() => {
-    if (directMatches == null) return null;
+    if (directMatches != null) {
+      const out = new Set<string>();
+      collectVisible(root, directMatches, out);
+      return out;
+    }
     const out = new Set<string>();
-    collectVisible(root, directMatches, out);
+    collectDefaultVisible(root, false, out);
     return out;
   }, [root, directMatches]);
 
   // Drop any collapse-overrides once the filter is gone — they only
   // make sense as a counter to auto-expansion.
   useEffect(() => {
-    if (visibleSet == null && collapseOverride.size > 0) {
+    if (!filterActive && collapseOverride.size > 0) {
       setCollapseOverride(new Set());
     }
-  }, [visibleSet, collapseOverride.size]);
+  }, [filterActive, collapseOverride.size]);
 
   // While filtering, auto-expand every still-visible parent so users
   // don't have to click through to see matches. User's explicit
   // collapse-overrides take precedence — those nodes stay closed.
   const effectiveExpanded = useMemo(() => {
-    if (visibleSet == null) return expandedIds;
+    if (!filterActive) return expandedIds;
     const out = new Set(expandedIds);
     walk(root, (n) => {
       if (visibleSet.has(n.id) && n.children.length > 0 && !collapseOverride.has(n.id)) {
@@ -188,7 +197,7 @@ function Tree({
     });
     for (const id of collapseOverride) out.delete(id);
     return out;
-  }, [expandedIds, visibleSet, root, collapseOverride]);
+  }, [filterActive, expandedIds, visibleSet, root, collapseOverride]);
 
   // Flat list of visible rows in display order — collapsed subtrees
   // are skipped. Recomputed whenever expansion or filtering changes.
@@ -214,11 +223,6 @@ function Tree({
     return map;
   }, [root]);
 
-  // Whether a filter (search / facet) is currently narrowing the tree.
-  // Captured as a flag rather than reading inside `setExpanded`'s
-  // updater so the callback identity stays stable across renders that
-  // didn't change the filter state.
-  const filterActive = visibleSet != null;
   const setExpanded = useCallback(
     (id: string, next: boolean) => {
       // With a filter active, `effectiveExpanded` auto-includes every
@@ -279,7 +283,7 @@ function Tree({
       const idx = focusedIdx;
       if (idx < 0) return;
       const row = visibleRows[idx];
-      const hasChildren = row.node.children.length > 0;
+      const hasChildren = row.hasVisibleChildren;
       // Treat filter-auto-expanded rows as expanded for nav purposes
       // (arrow-right moves to child instead of opening). Collapsing
       // while a filter is active is a no-op — clear the filter to
@@ -335,7 +339,7 @@ function Tree({
   const activateRow = useCallback(
     (id: string) => {
       const row = visibleRows.find((r) => r.node.id === id);
-      const hasChildren = row != null && row.node.children.length > 0;
+      const hasChildren = row != null && row.hasVisibleChildren;
       const wasSelected = id === focusedId;
       const isExpanded = effectiveExpanded.has(id);
       setFocusedId(id);
@@ -474,7 +478,16 @@ function Tree({
   );
 }
 
-type VisibleRow = { node: StructuredNode; depth: number };
+type VisibleRow = {
+  node: StructuredNode;
+  depth: number;
+  /// True iff *at least one* child of `node` survives the current
+  /// visibility filter — drives the chevron, the expand/collapse
+  /// keyboard handlers, and the click-to-toggle. Rows with raw
+  /// `children.length > 0` but no visible ones (e.g. an outer .NET
+  /// type whose nested members are hidden) get a leaf-style chevron.
+  hasVisibleChildren: boolean;
+};
 
 function walk(node: StructuredNode, visit: (n: StructuredNode) => void) {
   visit(node);
@@ -489,7 +502,8 @@ function walkVisible(
   out: VisibleRow[],
 ) {
   if (visibleSet != null && !visibleSet.has(node.id)) return;
-  out.push({ node, depth });
+  const hasVisibleChildren = node.children.some((c) => visibleSet == null || visibleSet.has(c.id));
+  out.push({ node, depth, hasVisibleChildren });
   if (!expanded.has(node.id)) return;
   for (const c of node.children) walkVisible(c, expanded, visibleSet, depth + 1, out);
 }
@@ -531,6 +545,16 @@ function collectVisible(node: StructuredNode, direct: Set<string>, out: Set<stri
     return true;
   }
   return false;
+}
+
+/// No-filter visibility: include every node except those tagged
+/// `hide_unless_matched` (and everything under them). `hiddenAncestor`
+/// is true once we've entered a hidden subtree, so the entire branch
+/// stays out without re-checking the flag per node.
+function collectDefaultVisible(node: StructuredNode, hiddenAncestor: boolean, out: Set<string>) {
+  const hidden = hiddenAncestor || node.hide_unless_matched === true;
+  if (!hidden) out.add(node.id);
+  for (const c of node.children) collectDefaultVisible(c, hidden, out);
 }
 
 /// Per-facet-key value distribution shown in the filter dropdowns.
@@ -584,8 +608,7 @@ function TreeRow({
   domId: string;
   onActivate: (id: string) => void;
 }) {
-  const { node, depth } = row;
-  const hasChildren = node.children.length > 0;
+  const { node, depth, hasVisibleChildren: hasChildren } = row;
   return (
     <div
       id={domId}

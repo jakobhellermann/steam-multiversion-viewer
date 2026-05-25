@@ -39,6 +39,12 @@ pub struct Node {
     /// open immediately.
     #[serde(default, skip_serializing_if = "is_false")]
     pub default_collapsed: bool,
+    /// When `true`, the frontend hides this node unless it matches a
+    /// currently-active filter. Used for "secondary" rows whose
+    /// existence is only interesting when the user searches for them
+    /// — e.g. nested .NET types under their outer class.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hide_unless_matched: bool,
     /// Faceted attributes the frontend turns into filter chips. Each
     /// key becomes one dropdown ("class", "kind", …), each value one
     /// selectable bucket. Format-specific — the renderer doesn't
@@ -62,6 +68,7 @@ impl Node {
             kind: kind.into(),
             badge: None,
             default_collapsed: false,
+            hide_unless_matched: false,
             facets: BTreeMap::new(),
             children: Vec::new(),
         }
