@@ -313,6 +313,10 @@ function TreeRow({
       aria-selected={selected}
       data-node-id={node.id}
       onClick={() => onActivate(node.id)}
+      // Native browser tooltip surfaces the raw node id (e.g.
+      // `obj:894`, `type:Foo.Bar`) — handy when reproducing an issue
+      // against the backend directly.
+      title={node.id}
       className={`flex w-full cursor-default items-baseline gap-1 text-sm leading-6 select-none hover:text-sky-300 ${
         selected ? "rounded bg-slate-800 text-sky-200" : ""
       } ${focused ? "ring-1 ring-sky-600/60 ring-inset" : ""}`}
