@@ -25,6 +25,7 @@ serde = { version = "1.0", features = ["derive"] }
 similar = "2.6"
 thiserror = "2.0"
 serde_json = "1"
+serde-value = "0.7"
 steam-depot-vfs = { path = "../../steam-depot-vfs/crates/steam-depot-vfs" }
 steam-depot-mount = { path = "../../steam-depot-vfs/crates/steam-depot-mount" }
 steam-vent = "0.5"

@@ -76,7 +76,14 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
     let env = Environment::new(game_files, &tpk);
     let file = env.load_cached(relative)?;
-    let object = file.object_at::<serde_json::Value>(path_id)?;
+    // Use serde_value::Value as the intermediate — unlike
+    // serde_json::Value it has a Bytes variant, so non-UTF-8 string
+    // fields (TextAssets that store binary blobs, savegame payloads
+    // smuggled through MonoBehaviour, …) deserialize instead of failing
+    // with "invalid type: byte array". serde_json then re-encodes
+    // Bytes(Vec<u8>) as a JSON array of integers, matching what `jq`
+    // already does for similar cases.
+    let object = file.object_at::<serde_value::Value>(path_id)?;
     let value = object.read()?;
     Ok(serde_json::to_string_pretty(&value)?)
 }
