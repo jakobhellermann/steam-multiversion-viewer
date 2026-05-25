@@ -855,52 +855,6 @@ const PPTR_PREFIX = "__PPTR__";
 // the token in three.
 const PPTR_SEP = "␞";
 
-/// Walk the parsed JSON, replacing each `{$target, $ref, type, file?}`
-/// blob with a single string `"__PPTR__<ref>|<target>|<type>|<file?>"`.
-/// Done before shiki so the inserted markup doesn't fight HTML escaping
-/// — we just regex-replace the marker out of the rendered HTML in
-/// `linkifyPptrs`.
-function inlinePptrBlobs(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(inlinePptrBlobs);
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const target = obj["$target"];
-    const type = obj["type"];
-    const ref = obj["$ref"];
-    const file = obj["file"];
-    const isPptr =
-      typeof target === "string" &&
-      typeof type === "string" &&
-      (ref === undefined || typeof ref === "string") &&
-      (file === undefined || typeof file === "string");
-    if (isPptr) {
-      const parts = [
-        typeof ref === "string" ? ref : "",
-        target as string,
-        type as string,
-        typeof file === "string" ? file : "",
-      ];
-      return `${PPTR_PREFIX}${parts.join(PPTR_SEP)}`;
-    }
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj)) out[k] = inlinePptrBlobs(v);
-    return out;
-  }
-  return value;
-}
-
-/// Preprocess raw JSON text before handing it to shiki: collapse each
-/// PPtr blob into a single-line string. Returns the original text if
-/// it isn't JSON.
-function preparePptrJson(text: string): string {
-  try {
-    const parsed = JSON.parse(text);
-    return JSON.stringify(inlinePptrBlobs(parsed), null, 2);
-  } catch {
-    return text;
-  }
-}
-
 /// Replace each PPtr sentinel in the rendered HTML with a compact
 /// pseudo-element. Shiki wraps the whole sentinel string in one
 /// `<span ...>"…"</span>` (it's a JSON string), so a single regex
@@ -914,11 +868,16 @@ function linkifyPptrs(html: string): string {
     "g",
   );
   return html.replace(pattern, (_, ref, target, type, file) => {
+    // Fully-empty sentinel = null pptr that landed in a map-key
+    // position. Render as plain `null` to avoid a stray "()".
+    if (!ref && !target && !type && !file) {
+      return '<span class="text-slate-500">null</span>';
+    }
     const escHTML = (s: string) =>
       s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const label = escHTML(target);
+    const label = escHTML(target) || '<span class="text-slate-500">null</span>';
     const ty = escHTML(type);
-    const suffix = ` <span class="text-slate-500">(${ty})</span>${
+    const suffix = `${ty ? ` <span class="text-slate-500">(${ty})</span>` : ""}${
       file ? ` <span class="text-slate-500">in ${escHTML(file)}</span>` : ""
     }`;
     if (ref) {
@@ -977,12 +936,8 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
     };
   }
   const settled = lastSettledRef.current;
-  const rawText = settled?.kind === "ok" ? settled.text : "";
+  const text = settled?.kind === "ok" ? settled.text : "";
   const mime = settled?.kind === "ok" ? settled.mime : "";
-  const prepared = useMemo(
-    () => (langForMime(mime) === "json" ? preparePptrJson(rawText) : rawText),
-    [rawText, mime],
-  );
   // Delegated click — pptr anchors carry their target in
   // `data-pptr-ref`; turning the click into an explicit hash nav lets
   // browser-back still work (tanstack-router would otherwise hijack
@@ -1004,7 +959,7 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
   if (settled.text.length === 0) return null;
   return (
     <div onClick={onClick}>
-      <HighlightedPre code={prepared} lang={langForMime(mime)} bare postProcess={linkifyPptrs} />
+      <HighlightedPre code={text} lang={langForMime(mime)} bare postProcess={linkifyPptrs} />
     </div>
   );
 }

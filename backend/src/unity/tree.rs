@@ -86,11 +86,57 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     // already does for similar cases.
     let object = file.object_at::<Value>(path_id)?;
     let mut value = object.read()?;
-    // Replace each `{m_FileID, m_PathID}` blob with a human-readable
-    // `{ $target, type, file? }` form so the diff/preview shows what
-    // a pptr points at rather than a raw 64-bit path-id.
+    // Replace each `{m_FileID, m_PathID}` blob with a `__PPTR__` sentinel
+    // string the frontend turns into a link.
     qualify_pptrs(&file, &mut value);
+    // Unity `map<K, V>` with non-string keys (e.g. ScriptMapper's
+    // `Shader -> name`) deserialises into `Value::Map<Value, Value>`,
+    // which serde_json can't write — JSON object keys must be strings.
+    // Rewrite those maps to a list of `{key, value}` pairs.
+    flatten_non_string_keyed_maps(&mut value);
     Ok(serde_json::to_string_pretty(&value)?)
+}
+
+fn flatten_non_string_keyed_maps(value: &mut Value) {
+    match value {
+        Value::Map(map) => {
+            // Recurse first so inner non-string maps get flattened too.
+            for v in map.values_mut() {
+                flatten_non_string_keyed_maps(v);
+            }
+            // We only convert when *every* key is a non-string — Unity
+            // typetree `map`s are homogeneous, so a mix would be a real
+            // schema oddity we'd want to look at rather than silently
+            // re-encode.
+            let all_non_string =
+                !map.is_empty() && map.keys().all(|k| !matches!(k, Value::String(_)));
+            if all_non_string {
+                let taken = std::mem::take(map);
+                let pairs: Vec<Value> = taken
+                    .into_iter()
+                    .map(|(k, v)| {
+                        let mut pair = BTreeMap::new();
+                        pair.insert(svalue_str("key"), k);
+                        pair.insert(svalue_str("value"), v);
+                        Value::Map(pair)
+                    })
+                    .collect();
+                *value = Value::Seq(pairs);
+            }
+        }
+        Value::Seq(items) => {
+            for v in items {
+                flatten_non_string_keyed_maps(v);
+            }
+        }
+        Value::Newtype(inner) => flatten_non_string_keyed_maps(inner),
+        Value::Option(opt) => {
+            if let Some(inner) = opt {
+                flatten_non_string_keyed_maps(inner);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Construct the structured tree for the file at `path` in
@@ -390,6 +436,13 @@ fn qualify_pptrs<R: EnvResolver, P: TypeTreeProvider>(
     replace_pptrs(value, &mut |pptr| qualify_one(file, pptr));
 }
 
+/// Sentinel prefix the frontend's `linkifyPptrs` looks for. Anything
+/// past this point is one of: `ref ␞ target ␞ type ␞ file` (ASCII
+/// fields separated by U+241E so they survive JSON.stringify without
+/// being mangled into `\u…` escapes that shiki would re-tokenise).
+const PPTR_PREFIX: &str = "__PPTR__";
+const PPTR_SEP: char = '\u{241e}';
+
 fn qualify_one<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     pptr: PPtr,
@@ -408,21 +461,21 @@ fn qualify_one<R: EnvResolver, P: TypeTreeProvider>(
         .map(|data| display_name(&obj, &data))
         .unwrap_or_else(|| "(unreadable)".to_string());
 
-    let mut map = BTreeMap::new();
-    map.insert(svalue_str("$target"), svalue_str(&target));
-    map.insert(svalue_str("type"), svalue_str(&class_id));
-    if pptr.is_local() {
-        // Local pptrs (same file) get a `$ref` that matches the node
-        // id format used by `build_tree`. The frontend can turn this
-        // into a clickable hash link.
-        map.insert(
-            svalue_str("$ref"),
-            svalue_str(&format!("obj:{}", pptr.m_PathID)),
-        );
-    } else if let Some(ext) = pptr.file_identifier(file.file) {
-        map.insert(svalue_str("file"), svalue_str(&ext.pathName));
-    }
-    Value::Map(map)
+    let ref_part = if pptr.is_local() {
+        format!("obj:{}", pptr.m_PathID)
+    } else {
+        String::new()
+    };
+    let file_part = if !pptr.is_local() {
+        pptr.file_identifier(file.file)
+            .map(|ext| ext.pathName.clone())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    svalue_str(&format!(
+        "{PPTR_PREFIX}{ref_part}{PPTR_SEP}{target}{PPTR_SEP}{class_id}{PPTR_SEP}{file_part}"
+    ))
 }
 
 fn pptr_placeholder(pptr: PPtr, reason: &str) -> Value {
@@ -537,8 +590,21 @@ fn replace_pptrs(value: &mut Value, f: &mut dyn FnMut(PPtr) -> Value) {
                 let pptr = PPtr::new(file_id, path_id);
                 *value = f(pptr);
             } else {
-                for v in map.values_mut() {
-                    replace_pptrs(v, f);
+                // Walk keys too — Unity `map<PPtr, …>` (e.g. ScriptMapper)
+                // has pptr blobs as keys, which would otherwise leave
+                // unrewritten `Map<Value,Value>` slots that JSON can't
+                // serialise. `BTreeMap` keys aren't mutable in place, so
+                // take + rebuild. A null pptr in key position becomes
+                // an explicit sentinel string (rather than `Value::Unit`,
+                // which JSON can't use as an object key).
+                let taken = std::mem::take(map);
+                for (mut k, mut v) in taken {
+                    replace_pptrs(&mut k, f);
+                    if matches!(k, Value::Unit) {
+                        k = svalue_str("__PPTR__\u{241e}\u{241e}\u{241e}");
+                    }
+                    replace_pptrs(&mut v, f);
+                    map.insert(k, v);
                 }
             }
         }
