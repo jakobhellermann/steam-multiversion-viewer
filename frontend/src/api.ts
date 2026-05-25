@@ -275,6 +275,11 @@ export type StructuredNode = {
   /// search / facet filter. Used for secondary entries (e.g. nested
   /// .NET types) that would otherwise clutter the listing.
   hide_unless_matched?: boolean;
+  /// When true, every descendant of this row is also visible whenever
+  /// the row itself matches a filter (otherwise only matches +
+  /// ancestors stay visible). Set on container-shaped rows like
+  /// gameobjects.
+  include_descendants_on_match?: boolean;
   /// Faceted attributes — each key is a filter dimension the frontend
   /// surfaces as a dropdown (multi-select whitelist). Format-specific;
   /// the renderer doesn't interpret keys.

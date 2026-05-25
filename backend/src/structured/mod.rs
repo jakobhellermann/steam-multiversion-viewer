@@ -45,6 +45,13 @@ pub struct Node {
     /// — e.g. nested .NET types under their outer class.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hide_unless_matched: bool,
+    /// When `true`, every descendant is visible whenever this node
+    /// matches an active filter — even if the descendants themselves
+    /// don't match. Set on container-shaped rows (gameobjects, …)
+    /// where the user is really searching for "the thing and what's
+    /// inside it" rather than just the row itself.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_descendants_on_match: bool,
     /// Faceted attributes the frontend turns into filter chips. Each
     /// key becomes one dropdown ("class", "kind", …), each value one
     /// selectable bucket. Format-specific — the renderer doesn't
@@ -69,6 +76,7 @@ impl Node {
             badge: None,
             default_collapsed: false,
             hide_unless_matched: false,
+            include_descendants_on_match: false,
             facets: BTreeMap::new(),
             children: Vec::new(),
         }

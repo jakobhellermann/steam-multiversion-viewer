@@ -612,14 +612,21 @@ function nodeMatches(
 }
 
 /// Bottom-up: a node is visible if it directly matches or if any of
-/// its descendants is visible. Returns whether `node` was added so
-/// callers can short-circuit.
+/// its descendants is visible. Container-shaped matches (those with
+/// `include_descendants_on_match`) additionally pull their whole
+/// subtree in so the user sees "the thing and what's inside it".
+/// Returns whether `node` was added so callers can short-circuit.
 function collectVisible(node: StructuredNode, direct: Set<string>, out: Set<string>): boolean {
+  const selfMatched = direct.has(node.id);
+  if (selfMatched && node.include_descendants_on_match) {
+    walk(node, (n) => out.add(n.id));
+    return true;
+  }
   let anyChild = false;
   for (const c of node.children) {
     if (collectVisible(c, direct, out)) anyChild = true;
   }
-  if (anyChild || direct.has(node.id)) {
+  if (anyChild || selfMatched) {
     out.add(node.id);
     return true;
   }

@@ -302,6 +302,11 @@ fn build_gameobject_node<R: EnvResolver, P: TypeTreeProvider>(
         kind: "gameobject".to_string(),
         badge,
         default_collapsed: false,
+        // Searching for a gameobject usually means "show me everything
+        // about it" — its components + child gameobjects too. The
+        // frontend uses this flag to splice descendants into the
+        // visible set when the gameobject itself matches.
+        include_descendants_on_match: true,
         children,
         ..Default::default()
     })
