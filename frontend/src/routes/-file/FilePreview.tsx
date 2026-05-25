@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 
 import { fetchTransformedFile, type FileView } from "../../api";
 import { formatBytes } from "../../lib/format";
@@ -172,23 +172,45 @@ export const HighlightedPre = memo(function HighlightedPre({
   /// nest borders.
   bare?: boolean;
 }) {
+  // Shiki's `codeToHtml` is synchronous and tokenises the whole input
+  // on the main thread — a 1 MB file freezes the tab for seconds.
+  // Skip highlighting entirely for big inputs; the browser renders
+  // plain `<pre>` of that size without trouble. Threshold picked from
+  // a quick eyeball: ~100k chars highlights in well under 100ms here.
+  const HIGHLIGHT_MAX_CHARS = 100_000;
+  const tooBigForHighlight = code.length > HIGHLIGHT_MAX_CHARS;
   const html = useQuery({
     queryKey: ["syntax-highlight", lang, code.length, code.slice(0, 64)],
     queryFn: () => (lang ? highlight(code, lang) : Promise.resolve(null)),
-    enabled: lang != null,
+    enabled: lang != null && !tooBigForHighlight,
     staleTime: Infinity,
     gcTime: Infinity,
   });
+  // `content-visibility: auto` lets the browser skip layout + paint
+  // for off-screen chunks. Pair with `contain-intrinsic-size` so the
+  // scrollbar thumb is stable when chunks haven't been measured yet —
+  // 16px/line is a fine guess for the text-xs font.
+  const lineCount = useMemo(() => code.split("\n").length, [code]);
+  const cvStyle = {
+    contentVisibility: "auto",
+    containIntrinsicSize: `1px ${lineCount * 16}px`,
+  } as React.CSSProperties;
   // Shiki emits its own <pre> with the theme background; wrap so our
   // own padding/border/scroll behavior stays consistent.
   if (html.data) {
     const chrome = bare
       ? "text-xs [&_pre]:m-0! [&_pre]:bg-transparent! [&_pre]:p-0!"
       : "overflow-x-auto rounded border border-slate-800 text-xs [&_pre]:m-0! [&_pre]:bg-slate-950! [&_pre]:p-3!";
-    return <div className={chrome} dangerouslySetInnerHTML={{ __html: html.data }} />;
+    return (
+      <div className={chrome} style={cvStyle} dangerouslySetInnerHTML={{ __html: html.data }} />
+    );
   }
   const chrome = bare
     ? "font-mono text-xs wrap-break-word whitespace-pre-wrap"
     : "overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs wrap-break-word whitespace-pre-wrap";
-  return <pre className={chrome}>{code}</pre>;
+  return (
+    <pre className={chrome} style={cvStyle}>
+      {code}
+    </pre>
+  );
 });
