@@ -137,7 +137,14 @@ function ManifestDetail() {
           {appInfoQuery.data?.name ?? `App ${appid}`}
         </Link>
         <span className="text-slate-600">/</span>
-        <span>{branch === "public" ? depotId : `${depotId} · ${branch}`}</span>
+        <Link
+          to="/apps/$appid"
+          params={{ appid: appidParam }}
+          hash={`depot-${depotId}`}
+          className="hover:underline"
+        >
+          {branch === "public" ? depotId : `${depotId} · ${branch}`}
+        </Link>
       </nav>
 
       {info.isPending && <p className="text-slate-400">Loading manifest…</p>}

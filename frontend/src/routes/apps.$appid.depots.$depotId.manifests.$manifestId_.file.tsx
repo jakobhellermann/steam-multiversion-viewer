@@ -186,7 +186,14 @@ function FileViewPage() {
           {appInfoQuery.data?.name ?? `App ${appid}`}
         </Link>
         <span className="text-slate-600">/</span>
-        <span>{branch === "public" ? depotId : `${depotId} · ${branch}`}</span>
+        <Link
+          to="/apps/$appid"
+          params={{ appid: appidParam }}
+          hash={`depot-${depotId}`}
+          className="hover:underline"
+        >
+          {branch === "public" ? depotId : `${depotId} · ${branch}`}
+        </Link>
         <span className="text-slate-600">/</span>
         <Link
           to="/apps/$appid/depots/$depotId/manifests/$manifestId"
