@@ -262,7 +262,7 @@ export function CompareMenu({
         Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
       </button>
       {open && (
-        <div className="absolute top-full -right-25 z-10 mt-1 flex max-h-96 w-160 overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-lg">
+        <div className="absolute top-full -right-25 z-10 mt-1 flex max-h-96 w-128 overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-lg">
           <div className="w-56 overflow-auto border-r border-slate-800">
             <div className="sticky top-0 flex items-center justify-between border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400">
               <span>compare to…</span>
