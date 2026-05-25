@@ -308,23 +308,19 @@ pub async fn manifest_file_diff(
     )
     .await?;
 
+    let base_label = diff_label(depot_id, manifest_id, base.creation_time);
+    let target_label = diff_label(
+        body.target.depot_id,
+        body.target.manifest_id,
+        target.creation_time,
+    );
     // Always diff "older → newer" so `+` consistently means "added in
     // the newer version" regardless of which manifest the caller chose
     // to open. Equal timestamps fall back to the request order.
     let (older, newer, older_label, newer_label) = if target.creation_time < base.creation_time {
-        (
-            &target,
-            &base,
-            format!("{}/{}", body.target.depot_id, body.target.manifest_id),
-            format!("{depot_id}/{manifest_id}"),
-        )
+        (&target, &base, target_label, base_label)
     } else {
-        (
-            &base,
-            &target,
-            format!("{depot_id}/{manifest_id}"),
-            format!("{}/{}", body.target.depot_id, body.target.manifest_id),
-        )
+        (&base, &target, base_label, target_label)
     };
 
     let diff = similar::TextDiff::from_lines(&older.text, &newer.text);
@@ -350,6 +346,18 @@ struct DiffSide {
     /// pick the "older" side so the unified diff reads in the natural
     /// chronological direction.
     creation_time: u32,
+}
+
+/// Format the `--- foo` / `+++ bar` header line for one side of the
+/// diff: `depot/<right-padded manifest id> YYYY-MM-DD`. The 20-char
+/// pad covers the u64 max length so 19- and 20-digit ids line up.
+fn diff_label(depot_id: DepotId, manifest_id: ManifestId, creation_time: u32) -> String {
+    let date_fmt = time::macros::format_description!("[year]-[month]-[day]");
+    let date = time::OffsetDateTime::from_unix_timestamp(creation_time as i64)
+        .ok()
+        .and_then(|d| d.format(&date_fmt).ok())
+        .unwrap_or_else(|| "?".to_string());
+    format!("{depot_id}/{:<20} {date}", manifest_id.0)
 }
 
 /// Resolve the file at `(depot_id, manifest_id, path)` to the text we
