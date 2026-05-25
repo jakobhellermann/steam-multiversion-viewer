@@ -35,6 +35,10 @@ type Search = {
   /// Stored as a string instead of an array so tanstack-router doesn't
   /// JSON-encode it to `?compare_to=["..."]`.
   compare_to?: string;
+  /// Extension whitelist for the file tree. Comma-separated, lowercase,
+  /// without leading dots. Empty = no filter. URL form for the same
+  /// reason as `compare_to`.
+  ext?: string;
 };
 
 export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$manifestId")({
@@ -43,6 +47,7 @@ export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$ma
       typeof search.branch === "string" && search.branch !== "public" ? search.branch : undefined,
     compare_to:
       typeof search.compare_to === "string" && search.compare_to ? search.compare_to : undefined,
+    ext: typeof search.ext === "string" && search.ext ? search.ext : undefined,
   }),
   component: ManifestDetail,
 });
@@ -434,11 +439,9 @@ function FilesPanel({
   // query client so they persist across remounts but stay in memory
   // (no URL pollution).
   const queryClient = useQueryClient();
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
   const queryKey = useMemo(() => ["tree-query", depotId, manifestId], [depotId, manifestId]);
-  const extFilterKey = useMemo(
-    () => ["tree-ext-filter", depotId, manifestId],
-    [depotId, manifestId],
-  );
   const expandedKey = useMemo(() => ["tree-expanded", depotId, manifestId], [depotId, manifestId]);
   // Search-mode default-expanded; this set tracks paths the user explicitly
   // collapsed during search so toggle still has an effect there.
@@ -463,15 +466,24 @@ function FilesPanel({
     }
   };
   // Active extension filter (whitelist). Empty = no filter (show all).
-  // Hydrated from + synced to the query client so it survives the
-  // round-trip to file detail and back, like the path filter.
-  const [extFilter, setExtFilterLocal] = useState<Set<string>>(
-    () => queryClient.getQueryData<Set<string>>(extFilterKey) ?? new Set(),
+  // Persisted in the URL so the filter survives reloads and is
+  // shareable; we derive a Set on every render for O(1) lookup.
+  const extFilter = useMemo(
+    () => new Set(search.ext ? search.ext.split(",").filter(Boolean) : []),
+    [search.ext],
   );
-  const setExtFilter = (next: Set<string>) => {
-    setExtFilterLocal(next);
-    queryClient.setQueryData(extFilterKey, next);
-  };
+  const setExtFilter = useCallback(
+    (next: Set<string>) => {
+      navigate({
+        search: (prev) => ({
+          ...prev,
+          ext: next.size === 0 ? undefined : [...next].sort().join(","),
+        }),
+        replace: true,
+      });
+    },
+    [navigate],
+  );
   // Active diff targets. Each entry is "depot_id/manifest_id". Empty =
   // no diff filter active. Same cache-hydration pattern as extFilter.
   const diffRefs = useMemo<ManifestRef[]>(() => {
