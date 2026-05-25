@@ -128,7 +128,9 @@ function ManifestDetail() {
   const statusQuery = useQuery({
     queryKey: ["manifest-statuses", appid, compareRefs],
     queryFn: () => fetchManifestStatuses(appid, compareRefs),
-    enabled: compareRefs.length > 0,
+    // Wait until both inputs to `compareRefs` have settled — see the
+    // file-page route for the same rationale.
+    enabled: compareRefs.length > 0 && extraQuery.isSuccess,
   });
 
   const downloadAll = useMutation({

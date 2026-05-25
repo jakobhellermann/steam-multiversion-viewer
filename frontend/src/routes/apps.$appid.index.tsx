@@ -61,7 +61,8 @@ function AppDetail() {
   const statusQuery = useQuery({
     queryKey: ["manifest-statuses", appid, manifestRefs],
     queryFn: () => fetchManifestStatuses(appid, manifestRefs),
-    enabled: manifestRefs.length > 0,
+    // Don't fire on the half-populated ref list before extras land.
+    enabled: manifestRefs.length > 0 && extraQuery.isSuccess,
     // Per-manifest missing-bytes change as the download manager makes
     // progress; refetch on every mount.
     refetchOnMount: "always",

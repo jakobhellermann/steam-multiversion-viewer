@@ -174,7 +174,10 @@ function FileViewPage() {
   const statusQuery = useQuery({
     queryKey: ["manifest-statuses", appid, compareRefs],
     queryFn: () => fetchManifestStatuses(appid, compareRefs),
-    enabled: compareRefs.length > 0,
+    // Wait until both inputs to `compareRefs` have settled — firing
+    // first on just `appInfo` and again once `extras` lands fragments
+    // the cache into two entries (and means two slow round-trips).
+    enabled: compareRefs.length > 0 && extraQuery.isSuccess,
   });
 
   // One file-view query per diff target. useQueries handles the dynamic
