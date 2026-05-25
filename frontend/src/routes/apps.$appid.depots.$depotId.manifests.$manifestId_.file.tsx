@@ -190,8 +190,26 @@ function FileViewPage() {
         </Link>
       </nav>
 
-      <div className="flex items-baseline gap-3">
-        <h1 className="flex-1 font-mono text-sm break-all">{path}</h1>
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="font-mono text-sm break-all">{path}</h1>
+          {view.isPending && <p className="mt-1 text-sm text-slate-400">Loading…</p>}
+          {view.error && (
+            <div className="mt-1">
+              <ErrorBox title="Failed to load file" error={view.error as Error} />
+            </div>
+          )}
+          {view.data && (
+            <FileMeta
+              view={view.data}
+              onDownload={() => {
+                markShowImmediately();
+                download.mutate();
+              }}
+              downloadPending={download.isPending}
+            />
+          )}
+        </div>
         {appInfoQuery.data ? (
           <CompareMenu
             appInfo={appInfoQuery.data}
@@ -215,20 +233,6 @@ function FileViewPage() {
           <CompareMenuPlaceholder count={diffTargets.size} />
         )}
       </div>
-
-      {view.isPending && <p className="mt-4 text-slate-400">Loading…</p>}
-      {view.error && <ErrorBox title="Failed to load file" error={view.error as Error} />}
-
-      {view.data && (
-        <FileMeta
-          view={view.data}
-          onDownload={() => {
-            markShowImmediately();
-            download.mutate();
-          }}
-          downloadPending={download.isPending}
-        />
-      )}
 
       {diffRefs.length > 0 && (
         <section className="mt-8">
