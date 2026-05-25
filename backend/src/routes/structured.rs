@@ -12,6 +12,7 @@ use serde::Deserialize;
 use utoipa::ToSchema;
 
 use crate::error::ApiError;
+use crate::http::ImmutableCache;
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 use crate::structured::{NodeContent, StructuredTree};
@@ -33,7 +34,7 @@ pub async fn manifest_file_structured(
     State(state): State<AppState>,
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<FileViewQuery>,
-) -> Result<Json<StructuredTree>> {
+) -> Result<(ImmutableCache, Json<StructuredTree>)> {
     let snapshot = Arc::new(
         state
             .open_manifest(appid, depot_id, manifest_id, &q.branch)
@@ -88,7 +89,7 @@ pub async fn manifest_file_structured(
                 status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 message: e.to_string(),
             })?;
-            Ok(Json(tree))
+            Ok((ImmutableCache, Json(tree)))
         }
         Some(Transformer::Dll) => {
             let cfg = state.config.load();
@@ -103,7 +104,7 @@ pub async fn manifest_file_structured(
             // follow-up type clicks become cache hits. Dedups per-sha
             // inside the warmer.
             crate::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
-            Ok(Json(tree))
+            Ok((ImmutableCache, Json(tree)))
         }
         _ => Err(ApiError {
             status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -130,7 +131,7 @@ pub async fn manifest_file_structured_node(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<FileViewQuery>,
     Json(body): Json<NodeContentRequest>,
-) -> Result<Json<NodeContent>> {
+) -> Result<(ImmutableCache, Json<NodeContent>)> {
     let snapshot = Arc::new(
         state
             .open_manifest(appid, depot_id, manifest_id, &q.branch)
@@ -154,10 +155,13 @@ pub async fn manifest_file_structured_node(
             // (section headers, class-stats rows) get an empty body so
             // the frontend hides the panel.
             let Some(path_id) = crate::unity::tree::parse_object_node_id(&body.node_id) else {
-                return Ok(Json(NodeContent {
-                    mime: "text/plain".to_string(),
-                    text: String::new(),
-                }));
+                return Ok((
+                    ImmutableCache,
+                    Json(NodeContent {
+                        mime: "text/plain".to_string(),
+                        text: String::new(),
+                    }),
+                ));
             };
             let path = q.path.clone();
             let text = tokio::task::spawn_blocking(move || {
@@ -172,19 +176,25 @@ pub async fn manifest_file_structured_node(
                 status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 message: e.to_string(),
             })?;
-            Ok(Json(NodeContent {
-                mime: "application/json".to_string(),
-                text,
-            }))
+            Ok((
+                ImmutableCache,
+                Json(NodeContent {
+                    mime: "application/json".to_string(),
+                    text,
+                }),
+            ))
         }
         Some(Transformer::Dll) => {
             // `type:<fully-qualified-name>` → ilspy -t. Anything else
             // (namespace nodes, file root) has no body.
             let Some(type_name) = body.node_id.strip_prefix("type:") else {
-                return Ok(Json(NodeContent {
-                    mime: "text/plain".to_string(),
-                    text: String::new(),
-                }));
+                return Ok((
+                    ImmutableCache,
+                    Json(NodeContent {
+                        mime: "text/plain".to_string(),
+                        text: String::new(),
+                    }),
+                ));
             };
             let cfg = state.config.load();
             let bytes = snapshot.read_full(&q.path).await?;
@@ -194,10 +204,13 @@ pub async fn manifest_file_structured_node(
                     status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     message: e.to_string(),
                 })?;
-            Ok(Json(NodeContent {
-                mime: "text/x-csharp".to_string(),
-                text,
-            }))
+            Ok((
+                ImmutableCache,
+                Json(NodeContent {
+                    mime: "text/x-csharp".to_string(),
+                    text,
+                }),
+            ))
         }
         _ => Err(ApiError {
             status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,

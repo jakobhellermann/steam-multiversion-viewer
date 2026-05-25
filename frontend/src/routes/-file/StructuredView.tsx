@@ -39,6 +39,9 @@ export function StructuredView({
         locator.branch,
         locator.path,
       ),
+    // Backend sends `Cache-Control: immutable`, so any re-fetch after
+    // react-query's default GC hits the browser disk cache. Default
+    // `gcTime` (5 min) is fine.
     staleTime: Infinity,
   });
 
@@ -947,6 +950,8 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
         locator.path,
         nodeId,
       ),
+    // Same rationale as the tree query — backend's immutable
+    // Cache-Control makes a re-fetch cheap.
     staleTime: Infinity,
     // No `placeholderData` — we keep prior content on screen ourselves
     // via `lastSettledRef`, which works across node changes too.

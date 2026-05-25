@@ -195,6 +195,10 @@ export function CompareMenu({
     // candidate manifests are already in the backend's cache.
     enabled: fileContext != null && others.length > 0,
     staleTime: Infinity,
+    // POST request → browser http-cache won't store it; rely on react-
+    // query's in-memory store instead. Manifests are immutable so a
+    // long gcTime is safe.
+    gcTime: 60 * 60 * 1000,
     // Closing + reopening the menu would otherwise reset `data` to
     // undefined and flash the "Checking…" empty state again.
     placeholderData: (prev) => prev,
