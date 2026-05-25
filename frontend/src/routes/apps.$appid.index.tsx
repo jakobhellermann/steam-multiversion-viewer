@@ -68,7 +68,7 @@ function AppDetail() {
   });
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="mx-auto max-w-4xl p-8">
       {query.isPending && <p className="text-slate-400">Loading…</p>}
       {query.error && <ErrorBox title="Failed to load app info" error={query.error as Error} />}
       {query.data && (
@@ -124,7 +124,7 @@ function AppDetailBody({
         <img
           src={`https://cdn.cloudflare.steamstatic.com/steam/apps/${info.appid}/header.jpg`}
           alt=""
-          className="w-[460px] h-[215px] rounded"
+          className="h-54 w-115 rounded"
         />
         <div>
           <h1 className="text-3xl font-bold">{info.name}</h1>
@@ -157,9 +157,9 @@ function AppDetailBody({
       </div>
 
       <section className="mt-8">
-        <h2 className="text-xl font-semibold mb-3">Branches</h2>
+        <h2 className="mb-3 text-xl font-semibold">Branches</h2>
         {info.branches.length === 0 ? (
-          <p className="text-slate-500 text-sm">No branches.</p>
+          <p className="text-sm text-slate-500">No branches.</p>
         ) : (
           <div className="max-h-80 overflow-y-auto">
             <table className="w-full text-left text-sm">
@@ -194,14 +194,14 @@ function AppDetailBody({
       </section>
 
       <section className="mt-8">
-        <h2 className="text-xl font-semibold mb-3">Depots</h2>
+        <h2 className="mb-3 text-xl font-semibold">Depots</h2>
         {statusError && (
           <p className="mb-2 text-xs text-red-400">
             Failed to load manifest status: {statusError.message}
           </p>
         )}
         {info.depots.length === 0 ? (
-          <p className="text-slate-500 text-sm">No depots.</p>
+          <p className="text-sm text-slate-500">No depots.</p>
         ) : (
           <div className="grid grid-cols-[max-content_1fr_max-content_max-content_max-content] gap-y-3 text-sm">
             {info.depots.map((depot) => (
@@ -245,7 +245,7 @@ function DepotCard({
         to="/apps/$appid"
         params={{ appid: String(depot.from_app_id) }}
         hash={`depot-${depot.depot_id}`}
-        className="text-sky-400 hover:underline tabular-nums"
+        className="text-sky-400 tabular-nums hover:underline"
       >
         app {depot.from_app_id}
       </Link>
@@ -257,10 +257,10 @@ function DepotCard({
   return (
     <div
       id={`depot-${depot.depot_id}`}
-      className="col-span-full grid grid-cols-subgrid border border-slate-800 rounded scroll-mt-4"
+      className="col-span-full grid scroll-mt-4 grid-cols-subgrid rounded border border-slate-800"
     >
       <div
-        className={`col-span-full px-4 py-2 flex items-baseline gap-3 ${
+        className={`col-span-full flex items-baseline gap-3 px-4 py-2 ${
           hasBody ? "border-b border-slate-800" : ""
         }`}
       >
@@ -287,12 +287,12 @@ function DepotCard({
         )
       ) : (
         <>
-          <div className="col-span-full grid grid-cols-subgrid text-slate-400 border-b border-slate-800">
+          <div className="col-span-full grid grid-cols-subgrid border-b border-slate-800 text-slate-400">
             <div className="px-4 py-1.5 font-semibold">Branch</div>
             <div className="px-4 py-1.5 font-semibold">Manifest ID</div>
-            <div className="px-4 py-1.5 font-semibold text-right">Size</div>
-            <div className="px-4 py-1.5 font-semibold text-right">Missing</div>
-            <div className="px-4 py-1.5 font-semibold text-right">Unique</div>
+            <div className="px-4 py-1.5 text-right font-semibold">Size</div>
+            <div className="px-4 py-1.5 text-right font-semibold">Missing</div>
+            <div className="px-4 py-1.5 text-right font-semibold">Unique</div>
           </div>
           {(() => {
             // Two branches often point at the same manifest gid (public ==
@@ -388,9 +388,9 @@ function ExtrasSection({
           }
         }}
         aria-expanded={expanded}
-        className="col-span-full grid grid-cols-subgrid text-xs text-slate-500 border-t border-slate-800 bg-slate-900/40 cursor-pointer hover:text-slate-300 hover:bg-slate-900/60 select-none"
+        className="col-span-full grid cursor-pointer grid-cols-subgrid border-t border-slate-800 bg-slate-900/40 text-xs text-slate-500 select-none hover:bg-slate-900/60 hover:text-slate-300"
       >
-        <div className="col-span-4 px-4 py-1.5 flex items-center gap-1">
+        <div className="col-span-4 flex items-center gap-1 px-4 py-1.5">
           <span className="inline-block w-3 text-slate-500">{expanded ? "▼︎" : "▶︎"}</span>
           <span>
             Additional manifests <span className="tabular-nums">({extras.length})</span>
@@ -463,7 +463,7 @@ function ManifestRow({
   const rowMute = duplicate ? "opacity-50" : "";
   return (
     <div
-      className={`col-span-full grid grid-cols-subgrid items-baseline hover:bg-slate-800/40 group ${rowMute}`}
+      className={`group col-span-full grid grid-cols-subgrid items-baseline hover:bg-slate-800/40 ${rowMute}`}
     >
       <Link
         {...linkProps}
@@ -476,7 +476,7 @@ function ManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} font-mono tabular-nums text-xs text-sky-400`}
+        className={`${cell} font-mono text-xs text-sky-400 tabular-nums`}
       >
         {m.manifest_id}
       </Link>
@@ -484,7 +484,7 @@ function ManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} text-right tabular-nums whitespace-nowrap`}
+        className={`${cell} text-right whitespace-nowrap tabular-nums`}
       >
         <Bytes value={m.size} />
       </Link>
@@ -492,7 +492,7 @@ function ManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} text-right tabular-nums whitespace-nowrap`}
+        className={`${cell} text-right whitespace-nowrap tabular-nums`}
       >
         {status ? (
           status.error ? (
@@ -517,7 +517,7 @@ function ManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} text-right tabular-nums whitespace-nowrap text-slate-400`}
+        className={`${cell} text-right whitespace-nowrap text-slate-400 tabular-nums`}
       >
         {status ? (
           status.bytes_unique === 0 ? (
@@ -562,7 +562,7 @@ function ExtraManifestRow({
   } as const;
   const cell = "px-4 py-1.5";
   return (
-    <div className="col-span-full grid grid-cols-subgrid items-baseline hover:bg-slate-800/40 group">
+    <div className="group col-span-full grid grid-cols-subgrid items-baseline hover:bg-slate-800/40">
       <Link {...linkProps} className={`${cell} font-medium whitespace-nowrap text-slate-400`}>
         {extra.branch ?? <span className="text-slate-600 italic">unknown</span>}
       </Link>
@@ -570,7 +570,7 @@ function ExtraManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} font-mono tabular-nums text-xs text-sky-400`}
+        className={`${cell} font-mono text-xs text-sky-400 tabular-nums`}
       >
         {extra.manifest_id}
       </Link>
@@ -578,7 +578,7 @@ function ExtraManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} text-right tabular-nums whitespace-nowrap text-slate-500`}
+        className={`${cell} text-right whitespace-nowrap text-slate-500 tabular-nums`}
       >
         {status?.error ? (
           <span className="text-slate-600">—</span>
@@ -590,7 +590,7 @@ function ExtraManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} text-right tabular-nums whitespace-nowrap`}
+        className={`${cell} text-right whitespace-nowrap tabular-nums`}
       >
         {status ? (
           status.error ? (
@@ -615,7 +615,7 @@ function ExtraManifestRow({
         {...linkProps}
         tabIndex={-1}
         aria-hidden="true"
-        className={`${cell} text-right tabular-nums whitespace-nowrap text-slate-400`}
+        className={`${cell} text-right whitespace-nowrap text-slate-400 tabular-nums`}
       >
         {status ? (
           status.bytes_unique === 0 ? (
@@ -719,19 +719,19 @@ function ImportExtrasModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-160 max-w-[95vw] mx-auto mt-32 mb-16 bg-slate-900 border border-slate-700 rounded shadow-xl">
-        <header className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+      <div className="mx-auto mt-32 mb-16 w-160 max-w-[95vw] rounded border border-slate-700 bg-slate-900 shadow-xl">
+        <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
           <h3 className="text-base font-semibold">Track manifests in depot {depotId}</h3>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="px-1 text-slate-500 hover:text-slate-200 text-lg leading-none"
+            className="px-1 text-lg leading-none text-slate-500 hover:text-slate-200"
           >
             ×
           </button>
         </header>
-        <div className="px-4 py-3 space-y-3 text-sm text-slate-400">
+        <div className="space-y-3 px-4 py-3 text-sm text-slate-400">
           <p>
             SteamDB doesn't expose an API. Open{" "}
             <a
@@ -746,14 +746,14 @@ function ImportExtrasModal({
           </p>
           <p>
             Then{" "}
-            <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">
+            <kbd className="rounded border border-slate-700 bg-slate-800 px-1 py-0.5 text-slate-300">
               Ctrl+A
             </kbd>{" "}
-            <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">
+            <kbd className="rounded border border-slate-700 bg-slate-800 px-1 py-0.5 text-slate-300">
               Ctrl+C
             </kbd>{" "}
             the whole page and{" "}
-            <kbd className="px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">
+            <kbd className="rounded border border-slate-700 bg-slate-800 px-1 py-0.5 text-slate-300">
               Ctrl+V
             </kbd>{" "}
             in here.
@@ -775,11 +775,11 @@ function ImportExtrasModal({
               "1 January 2025 – 12:00:00 UTC    1 year ago     1111111111111111111\n" +
               "2 January 2025 – 12:00:00 UTC    1 year ago     2222222222222222222 public-beta"
             }
-            className="w-full px-3 py-2 text-xs font-mono bg-slate-950 border border-slate-700 rounded focus:outline-none focus:border-sky-700"
+            className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs focus:border-sky-700 focus:outline-none"
           />
           {parsed.length > 0 && (
-            <div className="border border-slate-800 rounded overflow-hidden">
-              <div className="px-3 py-1.5 text-xs text-slate-400 bg-slate-900/60 border-b border-slate-800 flex justify-between">
+            <div className="overflow-hidden rounded border border-slate-800">
+              <div className="flex justify-between border-b border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-400">
                 <span>{parsed.length} parsed</span>
                 <span className="text-slate-500">
                   {newOnly.length} new · {eligible.length - newOnly.length} already tracked
@@ -803,11 +803,11 @@ function ImportExtrasModal({
                   return (
                     <li
                       key={p.manifest_id}
-                      className={`px-3 py-1 flex items-baseline gap-3 ${
+                      className={`flex items-baseline gap-3 px-3 py-1 ${
                         wrongDepot ? "text-amber-400/70" : dup ? "text-slate-600" : "text-slate-200"
                       }`}
                     >
-                      <span className="font-mono tabular-nums text-xs whitespace-pre">
+                      <span className="font-mono text-xs whitespace-pre tabular-nums">
                         {p.manifest_id.padStart(20, " ")}
                       </span>
                       <span className="text-xs text-slate-400">{p.branch}</span>
@@ -829,7 +829,7 @@ function ImportExtrasModal({
             <p className="text-xs text-red-300">Save failed: {(save.error as Error).message}</p>
           )}
         </div>
-        <footer className="px-4 py-3 border-t border-slate-800 flex items-center gap-2">
+        <footer className="flex items-center gap-2 border-t border-slate-800 px-4 py-3">
           <span className="text-xs text-slate-500">
             {newOnly.length === 0
               ? "Nothing new to add."
@@ -846,7 +846,7 @@ function ImportExtrasModal({
             type="button"
             onClick={() => save.mutate()}
             disabled={newOnly.length === 0 || save.isPending}
-            className="px-3 py-1.5 text-sm border border-sky-700 bg-sky-950/40 rounded hover:bg-sky-900/40 disabled:opacity-40"
+            className="rounded border border-sky-700 bg-sky-950/40 px-3 py-1.5 text-sm hover:bg-sky-900/40 disabled:opacity-40"
           >
             {save.isPending ? "Saving…" : "Add"}
           </button>
@@ -857,7 +857,7 @@ function ImportExtrasModal({
 }
 
 function Skeleton() {
-  return <span className="inline-block h-3 w-16 bg-slate-800 rounded animate-pulse align-middle" />;
+  return <span className="inline-block h-3 w-16 animate-pulse rounded bg-slate-800 align-middle" />;
 }
 
 function formatTime(unix: number | null): string {

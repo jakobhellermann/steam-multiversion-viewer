@@ -59,7 +59,7 @@ export function MountToggle() {
         // we know which one to send so we don't blindly call start on a
         // backend that's already mounted (from a previous session).
         disabled={mutation.isPending || status.isPending || status.data === undefined}
-        className={`relative p-1 rounded ${
+        className={`relative rounded p-1 ${
           mounted ? "text-sky-400 hover:text-sky-300" : "text-slate-400 hover:text-sky-400"
         } disabled:opacity-50`}
         aria-label={mounted ? "Unmount" : "Mount"}
@@ -87,7 +87,7 @@ export function MountToggle() {
           // so the dot reads as an inset badge instead of floating.
           <span
             aria-hidden
-            className="absolute top-0 right-0 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-slate-900"
+            className="absolute top-0 right-0 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-slate-900"
           />
         )}
       </button>
@@ -97,10 +97,10 @@ export function MountToggle() {
         <div
           ref={popoverRef}
           role="alert"
-          className="absolute right-0 top-full mt-2 z-50 w-96 px-4 py-3 rounded-md border border-red-700 bg-red-950/95 text-red-100 text-sm shadow-xl space-y-1"
+          className="absolute top-full right-0 z-50 mt-2 w-96 space-y-1 rounded-md border border-red-700 bg-red-950/95 px-4 py-3 text-sm text-red-100 shadow-xl"
         >
           <div className="font-semibold text-red-300">Mount failed</div>
-          <div className="font-mono whitespace-pre-wrap break-words leading-snug">
+          <div className="font-mono leading-snug wrap-break-word whitespace-pre-wrap">
             {lastError.message}
           </div>
         </div>

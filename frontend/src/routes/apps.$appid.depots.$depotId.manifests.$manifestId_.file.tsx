@@ -181,8 +181,8 @@ function FileViewPage() {
   });
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <nav className="text-sm text-slate-400 mb-4">
+    <div className="mx-auto max-w-6xl p-8">
+      <nav className="mb-4 text-sm text-slate-400">
         <Link
           to="/apps/$appid/depots/$depotId/manifests/$manifestId"
           params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
@@ -194,7 +194,7 @@ function FileViewPage() {
       </nav>
 
       <div className="flex items-baseline gap-3">
-        <h1 className="font-mono text-sm break-all flex-1">{path}</h1>
+        <h1 className="flex-1 font-mono text-sm break-all">{path}</h1>
         {appInfoQuery.data && (
           <CompareMenu
             appInfo={appInfoQuery.data}
@@ -229,7 +229,7 @@ function FileViewPage() {
 
       {diffRefs.length > 0 && (
         <section className="mt-8">
-          <h2 className="text-sm font-semibold text-slate-400 mb-3">Compared to</h2>
+          <h2 className="mb-3 text-sm font-semibold text-slate-400">Compared to</h2>
           <div className="space-y-2">
             {diffRefs.map((ref, i) => {
               const status = (statusQuery.data ?? []).find(
@@ -298,7 +298,7 @@ function FileMeta({
             type="button"
             onClick={onDownload}
             disabled={downloadPending}
-            className="text-xs px-2 py-0.5 border border-sky-700 bg-sky-950/40 rounded hover:bg-sky-900/40 disabled:opacity-40"
+            className="rounded border border-sky-700 bg-sky-950/40 px-2 py-0.5 text-xs hover:bg-sky-900/40 disabled:opacity-40"
           >
             {downloadPending
               ? "enqueuing…"
@@ -400,7 +400,7 @@ function FilePreview({
     return null;
   }
   const header = showHeader ? (
-    <h2 className="text-sm font-semibold text-slate-400 mb-2">Preview</h2>
+    <h2 className="mb-2 text-sm font-semibold text-slate-400">Preview</h2>
   ) : null;
   const sectionClass = showHeader ? "mt-6" : "";
   const media = rawSrc ? mediaKindForPath(view.path) : null;
@@ -411,7 +411,7 @@ function FilePreview({
         <img
           src={rawSrc}
           alt={view.path}
-          className="max-w-full bg-slate-950 border border-slate-800 rounded"
+          className="max-w-full rounded border border-slate-800 bg-slate-950"
         />
       </section>
     );
@@ -484,13 +484,13 @@ function HighlightedPre({ code, lang }: { code: string; lang: ReturnType<typeof 
   if (html.data) {
     return (
       <div
-        className="text-xs overflow-x-auto rounded border border-slate-800 [&_pre]:!bg-slate-950 [&_pre]:!p-3 [&_pre]:!m-0"
+        className="overflow-x-auto rounded border border-slate-800 text-xs [&_pre]:m-0! [&_pre]:bg-slate-950! [&_pre]:p-3!"
         dangerouslySetInnerHTML={{ __html: html.data }}
       />
     );
   }
   return (
-    <pre className="p-3 bg-slate-950 border border-slate-800 rounded text-xs whitespace-pre-wrap wrap-break-word font-mono overflow-x-auto">
+    <pre className="overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs wrap-break-word whitespace-pre-wrap">
       {code}
     </pre>
   );
@@ -548,13 +548,13 @@ function DiffTargetBlock({
   const linktargetChanged = base != null && target != null && base.linktarget !== target.linktarget;
   const { summary, summaryClass } = summaryFor(query, targetMissing, delta);
   return (
-    <div className="border border-slate-800 rounded">
+    <div className="rounded border border-slate-800">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         disabled={query.isPending || targetMissing}
         aria-expanded={open}
-        className="w-full flex items-baseline gap-2 px-3 py-1.5 text-sm text-left hover:bg-slate-800/40 disabled:cursor-default disabled:hover:bg-transparent"
+        className="flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-800/40 disabled:cursor-default disabled:hover:bg-transparent"
       >
         <span aria-hidden="true" className="inline-block w-3 text-slate-500">
           {query.isPending || targetMissing ? "" : open ? "▼︎" : "▶︎"}
@@ -563,13 +563,13 @@ function DiffTargetBlock({
         {creationTime > 0 && (
           <span className="text-xs text-slate-500 tabular-nums">{formatDate(creationTime)}</span>
         )}
-        <span className="font-mono tabular-nums text-xs text-slate-500">
+        <span className="font-mono text-xs text-slate-500 tabular-nums">
           depot {ref_.depot_id} · {ref_.manifest_id.slice(0, 12)}…
         </span>
         <span className={`ml-auto text-xs tabular-nums ${summaryClass}`}>{summary}</span>
       </button>
       {open && (
-        <div className="px-3 py-2 border-t border-slate-800 space-y-2">
+        <div className="space-y-2 border-t border-slate-800 px-3 py-2">
           {query.error != null && (
             <p className="text-sm text-red-300">
               Failed: {query.error instanceof Error ? query.error.message : String(query.error)}

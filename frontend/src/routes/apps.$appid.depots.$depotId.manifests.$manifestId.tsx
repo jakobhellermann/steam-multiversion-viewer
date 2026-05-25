@@ -131,8 +131,8 @@ function ManifestDetail() {
   });
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <nav className="text-sm text-slate-400 mb-4">
+    <div className="mx-auto max-w-6xl p-8">
+      <nav className="mb-4 text-sm text-slate-400">
         <Link to="/apps/$appid" params={{ appid: appidParam }} className="hover:underline">
           ← App {appid}
         </Link>
@@ -156,7 +156,7 @@ function ManifestDetail() {
 
       <section className="mt-8">
         {files.error && <ErrorBox title="Failed to load files" error={files.error as Error} />}
-        {files.isPending && <p className="text-slate-400 text-sm">Loading files…</p>}
+        {files.isPending && <p className="text-sm text-slate-400">Loading files…</p>}
         {files.data && (
           <FilesPanel
             allFiles={files.data.files}
@@ -198,7 +198,7 @@ function ManifestHeader({
           type="button"
           onClick={onDownload}
           disabled={downloadPending}
-          className="ml-auto px-3 py-1.5 text-sm border border-sky-700 bg-sky-950/40 rounded hover:bg-sky-900/40 disabled:opacity-50"
+          className="ml-auto rounded border border-sky-700 bg-sky-950/40 px-3 py-1.5 text-sm hover:bg-sky-900/40 disabled:opacity-50"
         >
           {downloadPending ? "Enqueuing…" : "Download all"}
         </button>
@@ -218,7 +218,7 @@ function ManifestHeader({
       )}
       <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-slate-400">Manifest ID</dt>
-        <dd className="font-mono tabular-nums break-all">{info.manifest_id}</dd>
+        <dd className="font-mono break-all tabular-nums">{info.manifest_id}</dd>
         <dt className="text-slate-400">Depot</dt>
         <dd className="tabular-nums">{info.depot_id}</dd>
         <dt className="text-slate-400">Created</dt>
@@ -527,20 +527,24 @@ function FilesPanel({
     if (!diffQuery.data) return null;
     return new Set(diffQuery.data);
   }, [diffTargets, diffQuery.data]);
-  const expanded =
-    useQuery({
-      queryKey: expandedKey,
-      queryFn: () => new Set<string>(),
-      staleTime: Infinity,
-      gcTime: Infinity,
-    }).data ?? new Set<string>();
-  const collapsed =
-    useQuery({
-      queryKey: collapsedKey,
-      queryFn: () => new Set<string>(),
-      staleTime: Infinity,
-      gcTime: Infinity,
-    }).data ?? new Set<string>();
+  // `initialData` (not `?? new Set()`) so the cache entry's reference is
+  // stable across renders — otherwise the `flattenTree` useMemo below
+  // would re-run on every render because its `expanded`/`collapsed`
+  // deps would be a fresh Set each time.
+  const expanded = useQuery({
+    queryKey: expandedKey,
+    queryFn: () => new Set<string>(),
+    initialData: () => new Set<string>(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  }).data;
+  const collapsed = useQuery({
+    queryKey: collapsedKey,
+    queryFn: () => new Set<string>(),
+    initialData: () => new Set<string>(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  }).data;
   const deferred = useDeferredValue(query);
 
   const tree = useMemo(() => buildTree(allFiles), [allFiles]);
@@ -676,7 +680,7 @@ function FilesPanel({
 
   return (
     <>
-      <div className="flex items-baseline gap-4 mb-3">
+      <div className="mb-3 flex items-baseline gap-4">
         <h2 className="text-xl font-semibold">Files</h2>
         <span className="text-sm text-slate-400 tabular-nums">
           {matchedCount != null ? (
@@ -696,7 +700,7 @@ function FilesPanel({
           {hasOpenDirs ? "collapse all" : "expand all"}
         </button>
       </div>
-      <div className="flex gap-2 mb-3">
+      <div className="mb-3 flex gap-2">
         <div className="relative flex-1">
           <input
             type="search"
@@ -706,14 +710,14 @@ function FilesPanel({
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
-            className="w-full px-3 py-1.5 pr-8 text-sm bg-slate-900 border border-slate-700 rounded focus:outline-none focus:border-sky-700 [&::-webkit-search-cancel-button]:hidden"
+            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-1.5 pr-8 text-sm focus:border-sky-700 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery("")}
               aria-label="Clear filter"
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 text-slate-500 hover:text-slate-200 text-lg leading-none"
+              className="absolute top-1/2 right-1.5 -translate-y-1/2 px-1.5 text-lg leading-none text-slate-500 hover:text-slate-200"
             >
               ×
             </button>
@@ -764,11 +768,11 @@ function TreeList({
   onToggle: (path: string, currentlyExpanded: boolean, anchor: HTMLElement | null) => void;
 }) {
   if (rows.length === 0) {
-    return <p className="text-slate-500 text-sm">No matches.</p>;
+    return <p className="text-sm text-slate-500">No matches.</p>;
   }
   return (
-    <div className="text-sm border border-slate-800 rounded overflow-hidden">
-      <div className="flex items-baseline gap-1 py-1.5 px-3 border-b border-slate-800 font-semibold text-slate-400">
+    <div className="overflow-hidden rounded border border-slate-800 text-sm">
+      <div className="flex items-baseline gap-1 border-b border-slate-800 px-3 py-1.5 font-semibold text-slate-400">
         <span>Name</span>
         <span className="ml-auto w-14 text-right">Files</span>
         <span className="w-20 text-right">Size</span>
@@ -829,15 +833,15 @@ const TreeRow = memo(function TreeRow({
         <button
           type="button"
           onClick={(e) => onToggle(node.path, expanded, e.currentTarget)}
-          className="w-full flex items-baseline gap-1 py-1.5 pr-3 text-left hover:bg-slate-800/40"
+          className="flex w-full items-baseline gap-1 py-1.5 pr-3 text-left hover:bg-slate-800/40"
           style={{ paddingLeft: indentPx }}
         >
-          <span className="inline-block w-3 text-slate-500 text-xs">{expanded ? "▾" : "▸"}</span>
+          <span className="inline-block w-3 text-xs text-slate-500">{expanded ? "▾" : "▸"}</span>
           <span className="text-sm text-slate-200">{node.name}</span>
-          <span className="ml-auto w-14 text-right text-xs text-slate-500 tabular-nums whitespace-nowrap">
+          <span className="ml-auto w-14 text-right text-xs whitespace-nowrap text-slate-500 tabular-nums">
             {node.fileCount.toLocaleString()}
           </span>
-          <span className="w-20 text-right text-xs text-slate-500 tabular-nums whitespace-nowrap">
+          <span className="w-20 text-right text-xs whitespace-nowrap text-slate-500 tabular-nums">
             <Bytes value={node.size} />
           </span>
         </button>
@@ -866,7 +870,7 @@ const TreeRow = memo(function TreeRow({
           <span className="font-mono text-xs text-slate-500"> → {file.linktarget}</span>
         )}
         <span className="ml-auto w-14" aria-hidden="true" />
-        <span className="w-20 text-right text-xs text-slate-400 tabular-nums whitespace-nowrap">
+        <span className="w-20 text-right text-xs whitespace-nowrap text-slate-400 tabular-nums">
           <Bytes value={file.size} />
         </span>
       </Link>
@@ -914,7 +918,7 @@ function ExtensionFilter({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`px-3 py-1.5 text-sm border rounded whitespace-nowrap ${
+        className={`rounded border px-3 py-1.5 text-sm whitespace-nowrap ${
           count > 0
             ? "border-sky-700 bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
             : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600"
@@ -925,8 +929,8 @@ function ExtensionFilter({
         Extensions{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-10 w-48 max-h-80 overflow-auto bg-slate-900 border border-slate-700 rounded shadow-lg">
-          <div className="flex items-center justify-between px-3 py-1.5 text-xs text-slate-400 border-b border-slate-800 sticky top-0 bg-slate-900">
+        <div className="absolute top-full right-0 z-10 mt-1 max-h-80 w-48 overflow-auto rounded border border-slate-700 bg-slate-900 shadow-lg">
+          <div className="sticky top-0 flex items-center justify-between border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400">
             <span className="tabular-nums">{extCounts.length} types</span>
             {count > 0 && (
               <button
@@ -945,7 +949,7 @@ function ExtensionFilter({
                 <li key={ext}>
                   <label
                     onMouseDown={(e) => e.preventDefault()}
-                    className={`flex items-center gap-2 px-3 py-1 text-sm cursor-pointer select-none hover:bg-slate-800/60 ${
+                    className={`flex cursor-pointer items-center gap-2 px-3 py-1 text-sm select-none hover:bg-slate-800/60 ${
                       checked ? "text-sky-200" : "text-slate-300"
                     }`}
                   >
@@ -956,7 +960,7 @@ function ExtensionFilter({
                       className="accent-sky-500"
                     />
                     <span className="flex-1 truncate">
-                      {ext === NO_EXT ? <span className="italic text-slate-500">none</span> : ext}
+                      {ext === NO_EXT ? <span className="text-slate-500 italic">none</span> : ext}
                     </span>
                     <span className="text-xs text-slate-500 tabular-nums">
                       {n.toLocaleString()}

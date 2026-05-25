@@ -11,10 +11,10 @@ function SettingsPage() {
   const query = useQuery({ queryKey: ["config"], queryFn: fetchConfig });
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Settings</h1>
+    <div className="mx-auto max-w-4xl p-8">
+      <h1 className="mb-6 text-2xl font-bold">Settings</h1>
       {query.isPending && <p className="text-slate-400">Loading…</p>}
-      {query.error && <p className="text-red-400 text-sm">{(query.error as Error).message}</p>}
+      {query.error && <p className="text-sm text-red-400">{(query.error as Error).message}</p>}
       {query.data && (
         <SettingsForm
           config={query.data}
@@ -55,7 +55,7 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
           type="text"
           value={storeRoot}
           onChange={(e) => setStoreRoot(e.target.value)}
-          className="mt-1 block w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 font-mono text-sm"
+          className="mt-1 block w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm"
           spellCheck={false}
         />
         <p className="mt-1 text-xs text-slate-500">
@@ -70,7 +70,7 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
           type="text"
           value={mountpoint}
           onChange={(e) => setMountpoint(e.target.value)}
-          className="mt-1 block w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 font-mono text-sm"
+          className="mt-1 block w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm"
           spellCheck={false}
         />
         <p className="mt-1 text-xs text-slate-500">
@@ -83,7 +83,7 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
         <button
           type="submit"
           disabled={!dirty || mutation.isPending}
-          className="px-4 py-2 bg-sky-700 hover:bg-sky-600 disabled:opacity-30 disabled:hover:bg-sky-700 rounded text-sm font-medium"
+          className="rounded bg-sky-700 px-4 py-2 text-sm font-medium hover:bg-sky-600 disabled:opacity-30 disabled:hover:bg-sky-700"
         >
           {mutation.isPending ? "Saving…" : "Save"}
         </button>
@@ -94,9 +94,9 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
       </div>
 
       {config.restart_required && (
-        <div className="p-3 border border-amber-700 bg-amber-950/40 rounded text-sm">
+        <div className="rounded border border-amber-700 bg-amber-950/40 p-3 text-sm">
           <span className="font-medium text-amber-300">Restart required.</span>
-          <span className="text-amber-200/70 ml-2">
+          <span className="ml-2 text-amber-200/70">
             The backend is still using the previous path; restart it to pick up the new value.
           </span>
         </div>

@@ -15,8 +15,8 @@ function RootComponent() {
   return (
     <>
       <header className="border-b border-slate-800">
-        <div className="max-w-4xl mx-auto px-8 py-3 flex items-center">
-          <Link to="/" className="text-sky-400 hover:underline font-medium">
+        <div className="mx-auto flex max-w-4xl items-center px-8 py-3">
+          <Link to="/" className="font-medium text-sky-400 hover:underline">
             Library
           </Link>
           <div className="ml-auto flex items-center gap-2">

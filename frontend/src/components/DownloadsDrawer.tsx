@@ -218,18 +218,18 @@ export function DownloadsDrawer() {
   return (
     <div
       ref={rootRef}
-      className={`fixed top-3 right-3 z-50 w-80 transition-opacity duration-[250ms] motion-reduce:transition-none ${
+      className={`fixed top-3 right-3 z-50 w-80 transition-opacity duration-250 motion-reduce:transition-none ${
         exiting ? "opacity-0" : "opacity-100"
       }`}
     >
-      <div className="flex items-stretch bg-slate-900 border border-slate-700 rounded-t shadow px-3 py-2 gap-3">
+      <div className="flex items-stretch gap-3 rounded-t border border-slate-700 bg-slate-900 px-3 py-2 shadow">
         <span
-          className={`self-center inline-block h-2 w-2 rounded-full ${active ? "bg-sky-400 animate-pulse" : stats.chunks_failed > 0 ? "bg-amber-400" : "bg-emerald-400"}`}
+          className={`inline-block h-2 w-2 self-center rounded-full ${active ? "animate-pulse bg-sky-400" : stats.chunks_failed > 0 ? "bg-amber-400" : "bg-emerald-400"}`}
         />
-        <span className="text-sm font-medium self-center">
+        <span className="self-center text-sm font-medium">
           {active ? "Downloading" : stats.chunks_failed > 0 ? "Done (errors)" : "Done"}
         </span>
-        <span className="ml-auto text-xs text-slate-400 tabular-nums self-center">
+        <span className="ml-auto self-center text-xs text-slate-400 tabular-nums">
           {formatBytes(stats.bytes_completed)} / {formatBytes(stats.bytes_total)}
         </span>
         {!active && (
@@ -248,13 +248,13 @@ export function DownloadsDrawer() {
           </button>
         )}
       </div>
-      <div className="h-1 bg-slate-800 overflow-hidden">
+      <div className="h-1 overflow-hidden bg-slate-800">
         <div
           className="h-full bg-sky-500 transition-[width] duration-300"
           style={{ width: `${bytesPct}%` }}
         />
       </div>
-      <div className="px-3 py-3 bg-slate-900 border-x border-b border-slate-700 rounded-b shadow text-sm space-y-1.5">
+      <div className="space-y-1.5 rounded-b border-x border-b border-slate-700 bg-slate-900 px-3 py-3 text-sm shadow">
         <Row label="Chunks">
           <span className="tabular-nums">
             {stats.chunks_completed.toLocaleString()} / {stats.chunks_total.toLocaleString()}
@@ -295,20 +295,20 @@ export function DownloadsDrawer() {
                   /* SSE will redeliver state regardless */
                 });
               }}
-              className="w-full px-3 py-1 text-xs border border-red-900 bg-red-950/40 text-red-300 rounded hover:bg-red-900/40"
+              className="w-full rounded border border-red-900 bg-red-950/40 px-3 py-1 text-xs text-red-300 hover:bg-red-900/40"
             >
               Cancel
             </button>
           </div>
         )}
         {stats.last_error && (
-          <p className="mt-2 text-xs text-red-300 wrap-break-word">
+          <p className="mt-2 text-xs wrap-break-word text-red-300">
             last error: <span className="font-mono">{stats.last_error}</span>
           </p>
         )}
       </div>
       {idleSince != null && (
-        <div className="h-px bg-slate-800 overflow-hidden">
+        <div className="h-px overflow-hidden bg-slate-800">
           <div
             key={idleSince}
             className="h-full bg-slate-600"

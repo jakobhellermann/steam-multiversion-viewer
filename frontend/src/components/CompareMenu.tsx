@@ -224,7 +224,7 @@ export function CompareMenu({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`px-3 py-1.5 text-sm border rounded whitespace-nowrap ${
+        className={`rounded border px-3 py-1.5 text-sm whitespace-nowrap ${
           count > 0
             ? "border-sky-700 bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
             : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600"
@@ -236,9 +236,9 @@ export function CompareMenu({
         Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
       </button>
       {open && (
-        <div className="absolute -right-[100px] top-full mt-1 z-10 flex w-[640px] max-h-96 bg-slate-900 border border-slate-700 rounded shadow-lg overflow-hidden">
-          <div className="w-56 border-r border-slate-800 overflow-auto">
-            <div className="flex items-center justify-between px-3 py-1.5 text-xs text-slate-400 border-b border-slate-800 sticky top-0 bg-slate-900">
+        <div className="absolute top-full -right-25 z-10 mt-1 flex max-h-96 w-160 overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-lg">
+          <div className="w-56 overflow-auto border-r border-slate-800">
+            <div className="sticky top-0 flex items-center justify-between border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400">
               <span>compare to…</span>
               {count > 0 && (
                 <button
@@ -271,13 +271,13 @@ export function CompareMenu({
                       <button
                         type="button"
                         onClick={() => setActiveDepotId(g.depotId)}
-                        className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 ${
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
                           isActive
                             ? "bg-slate-800 text-slate-100"
                             : "text-slate-300 hover:bg-slate-800/60"
                         }`}
                       >
-                        <span className="flex-1 min-w-0">
+                        <span className="min-w-0 flex-1">
                           <span className="block truncate">
                             {g.depotId === currentDepotId ? (
                               <span>This depot</span>
@@ -285,7 +285,7 @@ export function CompareMenu({
                               <span>depot {g.depotId}</span>
                             )}
                           </span>
-                          <span className="block text-xs text-slate-500 truncate">{g.label}</span>
+                          <span className="block truncate text-xs text-slate-500">{g.label}</span>
                         </span>
                         <span className="text-xs text-slate-500 tabular-nums">
                           {selectedHere > 0 ? `${selectedHere}/` : ""}
@@ -300,7 +300,7 @@ export function CompareMenu({
           </div>
           <div className="flex-1 overflow-auto">
             {error && (
-              <p className="px-3 py-2 text-xs text-red-300 border-b border-slate-800">
+              <p className="border-b border-slate-800 px-3 py-2 text-xs text-red-300">
                 Diff failed: {error.message}
               </p>
             )}
@@ -323,7 +323,7 @@ export function CompareMenu({
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => toggle(c.key)}
                         aria-pressed={checked}
-                        className={`w-full flex items-center gap-2 px-3 py-1 text-sm cursor-pointer select-none text-left ${
+                        className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1 text-left text-sm select-none ${
                           checked
                             ? "bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
                             : "text-slate-300 hover:bg-slate-800/60"
@@ -337,10 +337,10 @@ export function CompareMenu({
                         >
                           ✓
                         </span>
-                        <span className="flex-1 min-w-0">
+                        <span className="min-w-0 flex-1">
                           <span className="block truncate">{c.branch}</span>
                           <span
-                            className={`block text-xs truncate ${
+                            className={`block truncate text-xs ${
                               checked ? "text-sky-400/70" : "text-slate-500"
                             }`}
                           >
@@ -348,7 +348,7 @@ export function CompareMenu({
                           </span>
                         </span>
                         <span
-                          className={`text-xs font-mono tabular-nums ${
+                          className={`font-mono text-xs tabular-nums ${
                             checked ? "text-sky-400/70" : "text-slate-500"
                           }`}
                         >
