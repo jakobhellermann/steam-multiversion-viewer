@@ -192,7 +192,7 @@ function FileViewPage() {
 
       <div className="flex items-baseline gap-3">
         <h1 className="flex-1 font-mono text-sm break-all">{path}</h1>
-        {appInfoQuery.data && (
+        {appInfoQuery.data ? (
           <CompareMenu
             appInfo={appInfoQuery.data}
             extras={extraQuery.data ?? []}
@@ -207,6 +207,12 @@ function FileViewPage() {
               path,
             }}
           />
+        ) : (
+          // Placeholder while appInfo is loading. We already know the
+          // selected count from the URL `compare_to` param, so render
+          // the button at its final width to avoid a layout shift when
+          // the real menu mounts.
+          <CompareMenuPlaceholder count={diffTargets.size} />
         )}
       </div>
 
@@ -262,5 +268,26 @@ function FileViewPage() {
         />
       )}
     </div>
+  );
+}
+
+/// Visually identical to the active state of the real `CompareMenu`
+/// trigger so the layout doesn't shift when `appInfo` finishes loading.
+/// We can render this immediately because the selected count comes from
+/// the URL — no backend roundtrip needed.
+function CompareMenuPlaceholder({ count }: { count: number }) {
+  return (
+    <button
+      type="button"
+      disabled
+      className={`rounded border px-3 py-1.5 text-sm whitespace-nowrap opacity-60 ${
+        count > 0
+          ? "border-sky-700 bg-sky-950/40 text-sky-200"
+          : "border-slate-700 bg-slate-900 text-slate-300"
+      }`}
+      title="Loading…"
+    >
+      Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
+    </button>
   );
 }
