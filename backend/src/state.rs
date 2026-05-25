@@ -2,6 +2,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use arc_swap::ArcSwap;
 use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
 use steam_depot_vfs::fs::DepotManifestStore;
 use steam_depot_vfs::{DepotStore, VfsError};
@@ -9,6 +10,7 @@ use steam_depot_vfs::{DepotStore, VfsError};
 use crate::config::Config;
 use crate::downloads::DownloadManager;
 use crate::extra_manifests::ExtraManifestsStore;
+use crate::mount::MountManager;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient, auth};
 use crate::store_index::StoreIndex;
 
@@ -18,13 +20,20 @@ pub type Snapshot = DepotManifestStore<FsCacheStore<CdnChunkStore<SteamClient>>>
 pub struct AppState {
     pub steam: Arc<SteamClient>,
     pub store: Arc<DepotStore>,
-    /// Snapshot of the config the running process started with.
-    pub config: Arc<Config>,
+    /// Latest config. Updated atomically by `PATCH /api/config`; read
+    /// via `state.config.load()` to get an `Arc<Config>` snapshot that
+    /// the caller can hold across awaits without locking.
+    pub config: Arc<ArcSwap<Config>>,
+    /// Snapshot of the config as it was when this process started. Used
+    /// to surface `restart_required` for fields that aren't live-reloadable
+    /// (e.g. `store_root`, which is baked into `DepotStore`).
+    pub initial_config: Arc<Config>,
     /// In-memory indexes derived from the on-disk store. Updated when new
     /// manifests are fetched.
     pub store_index: Arc<RwLock<StoreIndex>>,
     pub downloads: Arc<DownloadManager>,
     pub extra_manifests: Arc<ExtraManifestsStore>,
+    pub mount: Arc<MountManager>,
 }
 
 impl AppState {
@@ -52,13 +61,17 @@ impl AppState {
                 .with_context(|| format!("loading extra manifests from {store_root}"))?,
         );
 
+        let mount = Arc::new(MountManager::new());
+
         Ok(Self {
             steam,
             store,
-            config: Arc::new(config),
+            initial_config: Arc::new(config.clone()),
+            config: Arc::new(ArcSwap::from_pointee(config)),
             store_index,
             downloads,
             extra_manifests,
+            mount,
         })
     }
 

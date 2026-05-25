@@ -309,6 +309,7 @@ export function fetchManifestInfo(
 
 export type Config = {
   store_root: string;
+  mountpoint: string;
   restart_required: boolean;
 };
 
@@ -316,12 +317,33 @@ export function fetchConfig(): Promise<Config> {
   return getJson("/api/config");
 }
 
-export async function patchConfig(patch: { store_root?: string }): Promise<Config> {
+export async function patchConfig(patch: {
+  store_root?: string;
+  mountpoint?: string;
+}): Promise<Config> {
   const r = await fetch("/api/config", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
+export type MountStatus = { state: "idle" } | { state: "mounted"; mountpoint: string };
+
+export function fetchMountStatus(): Promise<MountStatus> {
+  return getJson("/api/mount/status");
+}
+
+export async function startMount(): Promise<MountStatus> {
+  const r = await fetch("/api/mount/start", { method: "POST" });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
+export async function stopMount(): Promise<MountStatus> {
+  const r = await fetch("/api/mount/stop", { method: "POST" });
   if (!r.ok) throw new Error(await extractErrorMessage(r));
   return r.json();
 }

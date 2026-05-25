@@ -3,6 +3,7 @@ mod downloads;
 mod error;
 mod extra_manifests;
 mod http;
+mod mount;
 mod routes;
 mod state;
 mod steam;
@@ -63,6 +64,9 @@ async fn main() -> Result<()> {
             routes::put_extra_manifests
         ))
         .routes(routes!(routes::delete_extra_manifest))
+        .routes(routes!(routes::mount::start))
+        .routes(routes!(routes::mount::stop))
+        .routes(routes!(routes::mount::status))
         .split_for_parts();
 
     let app = api_router

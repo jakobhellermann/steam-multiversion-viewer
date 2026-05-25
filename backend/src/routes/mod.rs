@@ -22,6 +22,7 @@ use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 
 pub mod downloads;
+pub mod mount;
 
 pub(crate) type Result<T, E = ApiError> = std::result::Result<T, E>;
 
@@ -314,6 +315,8 @@ pub async fn manifest_files(
 pub struct ConfigDto {
     #[schema(value_type = String)]
     pub store_root: Utf8PathBuf,
+    #[schema(value_type = String)]
+    pub mountpoint: Utf8PathBuf,
     pub restart_required: bool,
 }
 
@@ -322,12 +325,18 @@ pub struct ConfigDto {
 pub struct PatchConfig {
     #[schema(value_type = String)]
     pub store_root: Option<Utf8PathBuf>,
+    #[schema(value_type = String)]
+    pub mountpoint: Option<Utf8PathBuf>,
 }
 
 fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
     ConfigDto {
-        restart_required: saved.store_root != state.config.store_root,
+        // Only `store_root` requires a restart — it's baked into
+        // `DepotStore` at init. `mountpoint` is live-reloaded on the
+        // next `/api/mount/start`.
+        restart_required: saved.store_root != state.initial_config.store_root,
         store_root: saved.store_root,
+        mountpoint: saved.mountpoint,
     }
 }
 
@@ -350,7 +359,14 @@ pub async fn patch_config(
         std::fs::create_dir_all(&store_root)?;
         cfg.store_root = store_root;
     }
+    if let Some(mountpoint) = body.mountpoint {
+        // Only validated when the user actually starts the mount; we
+        // intentionally don't create the dir here.
+        cfg.mountpoint = mountpoint;
+    }
     cfg.save()?;
+    // Publish the new config to every other request handler atomically.
+    state.config.store(Arc::new(cfg.clone()));
     Ok(Json(build_config_dto(&state, cfg)))
 }
 
@@ -1020,8 +1036,9 @@ pub async fn manifest_file_transformed(
 
     let content_type = format!("{}; charset=utf-8", transformer.output_mime);
 
+    let cfg = state.config.load();
     // Cache hit short-circuits the (potentially expensive) tool run.
-    if let Some(cached) = crate::transform::read_cached(&state.config.store_root, &file_sha)? {
+    if let Some(cached) = crate::transform::read_cached(&cfg.store_root, &file_sha)? {
         return Ok((
             ImmutableCache,
             [(header::CONTENT_TYPE, content_type.clone())],
@@ -1035,13 +1052,12 @@ pub async fn manifest_file_transformed(
         .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
         .await;
     let bytes = snapshot.read_full(&file_path).await?;
-    let text =
-        crate::transform::run_and_cache(&state.config.store_root, transformer, &file_sha, &bytes)
-            .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })?;
+    let text = crate::transform::run_and_cache(&cfg.store_root, transformer, &file_sha, &bytes)
+        .await
+        .map_err(|e| ApiError {
+            status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            message: e.to_string(),
+        })?;
 
     Ok((ImmutableCache, [(header::CONTENT_TYPE, content_type)], text).into_response())
 }

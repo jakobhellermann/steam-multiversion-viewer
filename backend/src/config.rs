@@ -7,12 +7,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub store_root: Utf8PathBuf,
+    #[serde(default = "default_mountpoint")]
+    pub mountpoint: Utf8PathBuf,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             store_root: default_store_root(),
+            mountpoint: default_mountpoint(),
         }
     }
 }
@@ -53,6 +56,16 @@ fn default_store_root() -> Utf8PathBuf {
         .and_then(|d| Utf8Path::from_path(d.data_dir()).map(|p| p.to_path_buf()))
         .map(|p| p.join("store"))
         .unwrap_or_else(|| Utf8PathBuf::from("store"))
+}
+
+fn default_mountpoint() -> Utf8PathBuf {
+    // $XDG_DATA_HOME/steam-multiversion-viewer/mount — persists across
+    // sessions and is spec-compliant for application data. Falls back
+    // to /tmp if ProjectDirs can't resolve a data dir or it's non-utf8.
+    ProjectDirs::from("", "", "steam-multiversion-viewer")
+        .and_then(|d| Utf8Path::from_path(d.data_dir()).map(|p| p.to_path_buf()))
+        .map(|p| p.join("mount"))
+        .unwrap_or_else(|| Utf8PathBuf::from("/tmp/steam-multiversion-viewer"))
 }
 
 #[derive(Debug)]

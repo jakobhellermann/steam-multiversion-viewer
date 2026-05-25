@@ -56,6 +56,17 @@ impl ExtraManifestsStore {
         state.apps.get(&app_id.0).cloned().unwrap_or_default()
     }
 
+    /// Snapshot of every app's manifest list. Used by the mount
+    /// bootstrap to register everything in one go.
+    pub fn get_all(&self) -> Vec<(AppId, Vec<ExtraManifestEntry>)> {
+        let state = self.state.lock().expect("extra_manifests poisoned");
+        state
+            .apps
+            .iter()
+            .map(|(app, entries)| (AppId(*app), entries.clone()))
+            .collect()
+    }
+
     /// Replace the entire list for `app_id`. Dedups by (depot_id, manifest_id)
     /// preserving the first occurrence's branch.
     pub fn set(

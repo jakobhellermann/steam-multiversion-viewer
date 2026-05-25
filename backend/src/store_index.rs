@@ -82,6 +82,11 @@ impl StoreIndex {
         true
     }
 
+    /// Iterate every indexed `(app, depot, manifest)` triple.
+    pub fn indexed(&self) -> impl Iterator<Item = (AppId, DepotId, ManifestId)> + '_ {
+        self.indexed_manifests.iter().copied()
+    }
+
     /// Record that a chunk now exists on disk.
     pub fn mark_chunk_present(&mut self, sha: ChunkHash) {
         self.chunks_present.insert(sha);

@@ -27,17 +27,19 @@ function SettingsPage() {
 
 function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void }) {
   const [storeRoot, setStoreRoot] = useState(config.store_root);
+  const [mountpoint, setMountpoint] = useState(config.mountpoint);
 
   useEffect(() => {
     setStoreRoot(config.store_root);
-  }, [config.store_root]);
+    setMountpoint(config.mountpoint);
+  }, [config.store_root, config.mountpoint]);
 
   const mutation = useMutation({
-    mutationFn: () => patchConfig({ store_root: storeRoot }),
+    mutationFn: () => patchConfig({ store_root: storeRoot, mountpoint }),
     onSuccess: () => onSaved(),
   });
 
-  const dirty = storeRoot !== config.store_root;
+  const dirty = storeRoot !== config.store_root || mountpoint !== config.mountpoint;
 
   return (
     <form
@@ -59,6 +61,21 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
         <p className="mt-1 text-xs text-slate-500">
           Directory holding <code>chunks/</code> and <code>manifests/</code>. Created on save if it
           doesn't exist.
+        </p>
+      </label>
+
+      <label className="block">
+        <span className="text-sm text-slate-400">FUSE mountpoint</span>
+        <input
+          type="text"
+          value={mountpoint}
+          onChange={(e) => setMountpoint(e.target.value)}
+          className="mt-1 block w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 font-mono text-sm"
+          spellCheck={false}
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Where the depot tree appears when you click the mount button. Created on first mount;
+          changes take effect after the next stop/start.
         </p>
       </label>
 
