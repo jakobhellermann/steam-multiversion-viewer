@@ -33,6 +33,26 @@ type DepotGroup = {
   candidates: CompareCandidate[];
 };
 
+/// URL of the page that opens this candidate in isolation. For
+/// file-context calls we stay on the file-detail page (same `path`);
+/// otherwise we land on the manifest detail page. Used as the `href`
+/// on the dropdown rows so middle-click / ctrl-click works as
+/// expected.
+function candidateHref(
+  appid: number,
+  c: CompareCandidate,
+  fileContext: FileContext | undefined,
+): string {
+  const params = new URLSearchParams();
+  if (c.branch !== "public") params.set("branch", c.branch);
+  if (fileContext) {
+    params.set("path", fileContext.path);
+    return `/apps/${appid}/depots/${c.depotId}/manifests/${c.manifestId}/file?${params.toString()}`;
+  }
+  const qs = params.toString();
+  return `/apps/${appid}/depots/${c.depotId}/manifests/${c.manifestId}${qs ? `?${qs}` : ""}`;
+}
+
 /// Build the URL-safe key used for `compare_to`. Targets in the same
 /// depot as the base get a bare manifest_id, cross-depot targets carry
 /// the depot prefix joined with a dash (so neither slash nor comma need
@@ -321,10 +341,23 @@ export function CompareMenu({
                   const checked = selected.has(c.key);
                   return (
                     <li key={c.key}>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => toggle(c.key)}
+                      {/*
+                        `<a>` rather than `<button>` so middle-click /
+                        ctrl-click open the candidate in a new tab. We
+                        intercept the plain left-click to toggle the
+                        compare-set inline; modifier-clicks fall through
+                        to the browser's default navigation.
+                      */}
+                      <a
+                        href={candidateHref(appInfo.appid, c, fileContext)}
+                        onClick={(e) => {
+                          // Only let ctrl/cmd/alt (new tab/window) fall
+                          // through to the browser's default navigation;
+                          // shift is reserved for a future range-select.
+                          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.altKey) return;
+                          e.preventDefault();
+                          toggle(c.key);
+                        }}
                         aria-pressed={checked}
                         className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1 text-left text-sm select-none ${
                           checked
@@ -357,7 +390,7 @@ export function CompareMenu({
                         >
                           {c.manifestId.slice(0, 8)}…
                         </span>
-                      </button>
+                      </a>
                     </li>
                   );
                 })}
