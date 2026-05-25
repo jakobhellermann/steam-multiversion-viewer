@@ -1,5 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
+import { memo } from "react";
 
 import { fetchTransformedFile, type FileView } from "../../api";
 import { formatBytes } from "../../lib/format";
@@ -140,9 +141,16 @@ function TransformedPreview({ locator }: { locator: FileLocator }) {
   return <HighlightedPre code={query.data.text} lang={langForMime(query.data.mime)} />;
 }
 
-/// Shiki-rendered code block. Falls back to a plain `<pre>` when the
-/// lang isn't recognised or shiki hasn't finished loading.
-function HighlightedPre({ code, lang }: { code: string; lang: ReturnType<typeof langForPath> }) {
+/// Shiki-rendered code block. Memoised so a rerender of the parent
+/// route (e.g. when the URL `compare_to` set changes) doesn't force
+/// React to diff a multi-megabyte `dangerouslySetInnerHTML` blob.
+export const HighlightedPre = memo(function HighlightedPre({
+  code,
+  lang,
+}: {
+  code: string;
+  lang: ReturnType<typeof langForPath>;
+}) {
   const html = useQuery({
     queryKey: ["syntax-highlight", lang, code.length, code.slice(0, 64)],
     queryFn: () => (lang ? highlight(code, lang) : Promise.resolve(null)),
@@ -165,4 +173,4 @@ function HighlightedPre({ code, lang }: { code: string; lang: ReturnType<typeof 
       {code}
     </pre>
   );
-}
+});

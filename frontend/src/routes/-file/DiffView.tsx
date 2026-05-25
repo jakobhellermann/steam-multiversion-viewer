@@ -2,7 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { fetchFileDiff } from "../../api";
-import { highlight } from "../../lib/syntax";
+import { HighlightedPre } from "./FilePreview";
 import type { FileLocator } from "./types";
 
 /// Render a unified text diff between `base` and `target` for the same
@@ -43,16 +43,6 @@ export function DiffView({
       ),
   });
 
-  // Run shiki once we have the text. Diff highlighting comes free with
-  // shiki's `diff` grammar — +/- lines get green/red, hunk headers blue.
-  const html = useQuery({
-    queryKey: ["syntax-highlight", "diff", diff.data?.length ?? 0, diff.data?.slice(0, 64) ?? ""],
-    queryFn: () => (diff.data ? highlight(diff.data, "diff") : Promise.resolve(null)),
-    enabled: diff.data != null && diff.data.length > 0,
-    staleTime: Infinity,
-    gcTime: Infinity,
-  });
-
   if (diff.isPending) {
     return <p className="text-sm text-slate-500">Computing diff…</p>;
   }
@@ -74,17 +64,5 @@ export function DiffView({
   if (diff.data.length === 0) {
     return <p className="text-sm text-slate-500">No textual differences.</p>;
   }
-  if (html.data) {
-    return (
-      <div
-        className="overflow-x-auto rounded border border-slate-800 text-xs [&_pre]:m-0! [&_pre]:bg-slate-950! [&_pre]:p-3!"
-        dangerouslySetInnerHTML={{ __html: html.data }}
-      />
-    );
-  }
-  return (
-    <pre className="overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs wrap-break-word whitespace-pre-wrap">
-      {diff.data}
-    </pre>
-  );
+  return <HighlightedPre code={diff.data} lang="diff" />;
 }
