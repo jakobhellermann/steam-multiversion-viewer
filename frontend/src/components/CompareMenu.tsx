@@ -170,7 +170,10 @@ export function CompareMenu({
     ],
     queryFn: () =>
       fetchFileDiffTargets(fileContext!.appid, fileContext!.base, others, fileContext!.path),
-    enabled: open && fileContext != null && others.length > 0,
+    // Prefetch — independent of `open` — so opening the menu has the
+    // filter ready instead of flashing "Checking…". Cheap when the
+    // candidate manifests are already in the backend's cache.
+    enabled: fileContext != null && others.length > 0,
     staleTime: Infinity,
     // Closing + reopening the menu would otherwise reset `data` to
     // undefined and flash the "Checking…" empty state again.
