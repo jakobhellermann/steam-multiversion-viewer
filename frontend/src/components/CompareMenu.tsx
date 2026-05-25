@@ -217,7 +217,10 @@ export function CompareMenu({
     if (!fileDiff.data) return [];
     const filtered = groups.map((g) => ({
       ...g,
-      candidates: g.candidates.filter((c) => fileStatusByKey.get(c.key) !== "same"),
+      // Keep only manifests where the file still exists *and* differs —
+      // skip both `same` (no change to show) and `missing` (deleted in
+      // that version, nothing to compare to).
+      candidates: g.candidates.filter((c) => fileStatusByKey.get(c.key) === "different"),
     }));
     // Hide empty *other* depots but keep "this depot" — the right pane
     // can then explicitly say "no different manifests in this depot"
