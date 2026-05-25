@@ -99,6 +99,10 @@ pub async fn manifest_file_structured(
                     status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     message: e.to_string(),
                 })?;
+            // Kick off the bulk `-p` decompile in the background so
+            // follow-up type clicks become cache hits. Dedups per-sha
+            // inside the warmer.
+            crate::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
             Ok(Json(tree))
         }
         _ => Err(ApiError {

@@ -122,13 +122,18 @@ pub fn read_cached_artifact(
 }
 
 /// Persist `text` as a cached artifact under
-/// `transforms/<sha>/<artifact>.txt.zst`.
+/// `transforms/<sha>/<artifact>.txt.zst`. Atomic via tmp + rename so a
+/// background bulk-warm (e.g. `ilspycmd -p`) and a foreground per-type
+/// fetch can race without interleaving bytes mid-file.
 pub fn write_cached_artifact(
     store_root: &Utf8Path,
     sha: &[u8; 20],
     artifact: &str,
     text: &str,
 ) -> Result<(), std::io::Error> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
     let path = cache_artifact_path(store_root, sha, artifact);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -136,7 +141,13 @@ pub fn write_cached_artifact(
     // zstd level 3 — fast both ways, ~5× compression on typical text
     // tool output. Decompression is single-digit ms for normal sizes.
     let compressed = zstd::encode_all(text.as_bytes(), 3)?;
-    std::fs::write(&path, &compressed)?;
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("zst.tmp.{}.{seq}", std::process::id()));
+    std::fs::write(&tmp, &compressed)?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     Ok(())
 }
 
