@@ -88,6 +88,12 @@ function Tree({
   }, [root]);
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(initiallyExpanded);
+  // User-driven collapse override during filtering. The filter
+  // auto-expands every parent of a match (see `effectiveExpanded`),
+  // so plain `setExpanded(id, false)` would be a no-op. Entries here
+  // beat that auto-expansion — the node stays closed until the user
+  // opens it explicitly or clears the filter.
+  const [collapseOverride, setCollapseOverride] = useState<Set<string>>(new Set());
   // Selection (what drives the right pane) tracks focus 1:1 — moving
   // through the tree previews each row's content as you go.
   const [focusedId, setFocusedId] = useState<string>(root.id);
@@ -161,17 +167,28 @@ function Tree({
     return out;
   }, [root, directMatches]);
 
+  // Drop any collapse-overrides once the filter is gone — they only
+  // make sense as a counter to auto-expansion.
+  useEffect(() => {
+    if (visibleSet == null && collapseOverride.size > 0) {
+      setCollapseOverride(new Set());
+    }
+  }, [visibleSet, collapseOverride.size]);
+
   // While filtering, auto-expand every still-visible parent so users
   // don't have to click through to see matches. User's explicit
-  // expand-state is preserved separately; we OR the two together.
+  // collapse-overrides take precedence — those nodes stay closed.
   const effectiveExpanded = useMemo(() => {
     if (visibleSet == null) return expandedIds;
     const out = new Set(expandedIds);
     walk(root, (n) => {
-      if (visibleSet.has(n.id) && n.children.length > 0) out.add(n.id);
+      if (visibleSet.has(n.id) && n.children.length > 0 && !collapseOverride.has(n.id)) {
+        out.add(n.id);
+      }
     });
+    for (const id of collapseOverride) out.delete(id);
     return out;
-  }, [expandedIds, visibleSet, root]);
+  }, [expandedIds, visibleSet, root, collapseOverride]);
 
   // Flat list of visible rows in display order — collapsed subtrees
   // are skipped. Recomputed whenever expansion or filtering changes.
@@ -197,14 +214,34 @@ function Tree({
     return map;
   }, [root]);
 
-  const setExpanded = useCallback((id: string, next: boolean) => {
-    setExpandedIds((prev) => {
-      const out = new Set(prev);
-      if (next) out.add(id);
-      else out.delete(id);
-      return out;
-    });
-  }, []);
+  // Whether a filter (search / facet) is currently narrowing the tree.
+  // Captured as a flag rather than reading inside `setExpanded`'s
+  // updater so the callback identity stays stable across renders that
+  // didn't change the filter state.
+  const filterActive = visibleSet != null;
+  const setExpanded = useCallback(
+    (id: string, next: boolean) => {
+      // With a filter active, `effectiveExpanded` auto-includes every
+      // visible parent. To actually collapse a node the user has to
+      // win over that auto-expansion via `collapseOverride`; opening
+      // a previously-overridden node just drops it from the override.
+      if (filterActive) {
+        setCollapseOverride((prev) => {
+          const out = new Set(prev);
+          if (next) out.delete(id);
+          else out.add(id);
+          return out;
+        });
+      }
+      setExpandedIds((prev) => {
+        const out = new Set(prev);
+        if (next) out.add(id);
+        else out.delete(id);
+        return out;
+      });
+    },
+    [filterActive],
+  );
 
   const treeRef = useRef<HTMLDivElement | null>(null);
   // Stable prefix so each row's DOM id is unique across multiple
@@ -297,13 +334,23 @@ function Tree({
 
   const activateRow = useCallback(
     (id: string) => {
-      setFocusedId(id);
       const row = visibleRows.find((r) => r.node.id === id);
-      if (row && row.node.children.length > 0) {
-        setExpanded(id, !effectiveExpanded.has(id));
+      const hasChildren = row != null && row.node.children.length > 0;
+      const wasSelected = id === focusedId;
+      const isExpanded = effectiveExpanded.has(id);
+      setFocusedId(id);
+      if (!hasChildren) return;
+      // Click semantics: collapsed → open. Expanded but not yet
+      // selected → just select (so users can preview a header without
+      // losing its open state). Expanded *and* already selected →
+      // collapse (second click on the same header closes it).
+      if (!isExpanded) {
+        setExpanded(id, true);
+      } else if (wasSelected) {
+        setExpanded(id, false);
       }
     },
-    [visibleRows, effectiveExpanded, setExpanded],
+    [visibleRows, effectiveExpanded, focusedId, setExpanded],
   );
 
   const matchedCount = directMatches?.size ?? null;
