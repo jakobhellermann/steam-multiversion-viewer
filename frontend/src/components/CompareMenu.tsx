@@ -186,7 +186,13 @@ export function CompareMenu({
       fileContext?.base.depot_id,
       fileContext?.base.manifest_id,
       fileContext?.path,
-      others.map((r) => `${r.depot_id}/${r.manifest_id}`).join(","),
+      // Sort the candidate list so ordering changes (e.g. once the
+      // manifests-status query lands and we re-sort by creation_time)
+      // don't fragment the cache into "same content, different key".
+      others
+        .map((r) => `${r.depot_id}/${r.manifest_id}`)
+        .sort()
+        .join(","),
     ],
     queryFn: () =>
       fetchFileDiffTargets(fileContext!.appid, fileContext!.base, others, fileContext!.path),

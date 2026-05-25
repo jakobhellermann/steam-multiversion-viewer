@@ -248,10 +248,10 @@ function FileViewPage() {
             />
           )}
         </div>
-        {appInfoQuery.data ? (
+        {appInfoQuery.data && extraQuery.data ? (
           <CompareMenu
             appInfo={appInfoQuery.data}
-            extras={extraQuery.data ?? []}
+            extras={extraQuery.data}
             statuses={statusQuery.data}
             currentDepotId={depotId}
             currentManifestId={manifestId}
