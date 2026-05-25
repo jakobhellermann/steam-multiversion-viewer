@@ -19,6 +19,7 @@ import { highlight, langForMime, langForPath } from "../syntax";
 import { Bytes } from "../Bytes";
 import { CompareMenu, diffTargetKey } from "../CompareMenu";
 import { ErrorBox } from "../ErrorBox";
+import { markShowImmediately } from "../downloadsUiSignal";
 import { formatBytes, formatDate } from "../format";
 
 type Search = {
@@ -218,7 +219,10 @@ function FileViewPage() {
       {view.data && (
         <FileMeta
           view={view.data}
-          onDownload={() => download.mutate()}
+          onDownload={() => {
+            markShowImmediately();
+            download.mutate();
+          }}
           downloadPending={download.isPending}
         />
       )}

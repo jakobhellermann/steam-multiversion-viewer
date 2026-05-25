@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cancelDownloads, type DownloadStats } from "./api";
+import { consumeShowImmediately } from "./downloadsUiSignal";
 import { formatBytes } from "./format";
 
 /// Live download progress panel, anchored top-right. Visible whenever
@@ -30,6 +31,38 @@ export function DownloadsDrawer() {
 
   const activeNow =
     stats != null && stats.chunks_completed + stats.chunks_failed < stats.chunks_total;
+
+  // Delay showing the drawer for "implicit" downloads (e.g. opening a
+  // file triggers a chunk fetch behind the scenes). If the download
+  // finishes in under VISIBLE_DELAY_MS we never flash the UI. Explicit
+  // "Download all" callsites set markShowImmediately() so the drawer
+  // appears right away.
+  const VISIBLE_DELAY_MS = 2000;
+  const [visible, setVisible] = useState(false);
+  const activeStartedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (!stats || stats.chunks_total === 0) {
+      activeStartedAt.current = null;
+      setVisible(false);
+      return;
+    }
+    if (!visible && consumeShowImmediately()) {
+      setVisible(true);
+      return;
+    }
+    if (activeNow && activeStartedAt.current == null) {
+      activeStartedAt.current = performance.now();
+    }
+    if (visible || !activeNow) return;
+    const startedAt = activeStartedAt.current ?? performance.now();
+    const remaining = startedAt + VISIBLE_DELAY_MS - performance.now();
+    if (remaining <= 0) {
+      setVisible(true);
+      return;
+    }
+    const t = window.setTimeout(() => setVisible(true), remaining);
+    return () => window.clearTimeout(t);
+  }, [stats, activeNow, visible]);
 
   // Auto-dismiss once nothing new has happened for a few seconds. We
   // store the timestamp at which the panel went idle so the progress bar
@@ -167,6 +200,7 @@ export function DownloadsDrawer() {
   }, [queryClient]);
 
   if (!stats || stats.chunks_total === 0) return null;
+  if (!visible) return null;
 
   const done = stats.chunks_completed + stats.chunks_failed;
   const pct = Math.min(100, (done / stats.chunks_total) * 100);

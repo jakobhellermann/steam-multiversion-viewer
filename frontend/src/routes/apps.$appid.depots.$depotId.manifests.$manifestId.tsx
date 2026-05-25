@@ -22,6 +22,7 @@ import { Bytes } from "../Bytes";
 import { CompareMenu, diffTargetKey } from "../CompareMenu";
 import { ErrorBox } from "../ErrorBox";
 import { formatBytes } from "../format";
+import { markShowImmediately } from "../downloadsUiSignal";
 import { pinScroll } from "../pinScroll";
 
 type Search = {
@@ -143,7 +144,10 @@ function ManifestDetail() {
         <ManifestHeader
           info={info.data}
           branch={branch}
-          onDownload={() => downloadAll.mutate()}
+          onDownload={() => {
+            markShowImmediately();
+            downloadAll.mutate();
+          }}
           downloadPending={downloadAll.isPending}
           downloadResult={downloadAll.data}
           downloadError={downloadAll.error as Error | null}
