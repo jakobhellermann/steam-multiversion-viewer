@@ -601,8 +601,8 @@ function TreeRow({
       // `obj:894`, `type:Foo.Bar`) — handy when reproducing an issue
       // against the backend directly.
       title={node.id}
-      className={`flex w-full cursor-default items-baseline gap-1 text-sm leading-6 select-none hover:text-sky-300 ${
-        selected ? "rounded bg-slate-800 text-sky-200" : ""
+      className={`flex w-full cursor-default items-baseline gap-1 rounded text-sm leading-6 select-none ${
+        selected ? "bg-slate-800 text-sky-200" : "hover:bg-slate-800/50"
       } ${focused ? "ring-1 ring-sky-600/60 ring-inset" : ""}`}
       style={{ paddingLeft: `${depth * 12}px` }}
     >
