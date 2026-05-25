@@ -11,10 +11,12 @@ import {
   fetchManifestStatuses,
   fileRawUrl,
   type ManifestRef,
+  type ManifestStatusEntry,
 } from "../api";
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
 import { ErrorBox } from "../components/ErrorBox";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
+import { formatDate } from "../lib/format";
 import { DiffTargetBlock } from "./-file/DiffTarget";
 import { FileMeta } from "./-file/FileMeta";
 import { FilePreview } from "./-file/FilePreview";
@@ -179,14 +181,20 @@ function FileViewPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-8">
-      <nav className="mb-4 text-sm text-slate-400">
+      <nav className="mb-4 flex items-center gap-2 text-sm text-slate-400">
+        <Link to="/apps/$appid" params={{ appid: appidParam }} className="hover:underline">
+          {appInfoQuery.data?.name ?? `App ${appid}`}
+        </Link>
+        <span className="text-slate-600">/</span>
+        <span>{branch === "public" ? depotId : `${depotId} · ${branch}`}</span>
+        <span className="text-slate-600">/</span>
         <Link
           to="/apps/$appid/depots/$depotId/manifests/$manifestId"
           params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
           search={{ branch: branch === "public" ? undefined : branch, compare_to }}
           className="hover:underline"
         >
-          ← Manifest
+          {manifestCrumbLabel(currentManifestCreation(statusQuery.data, depotId, manifestId))}
         </Link>
       </nav>
 
@@ -295,4 +303,25 @@ function CompareMenuPlaceholder({ count }: { count: number }) {
       Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
     </button>
   );
+}
+
+/// Pick the `creation_time` for the currently-viewed manifest out of
+/// the shared status-query result. Returns 0 (treated as "unknown") if
+/// the status query hasn't loaded yet or this manifest isn't in it.
+function currentManifestCreation(
+  statuses: ManifestStatusEntry[] | undefined,
+  depotId: number,
+  manifestId: string,
+): number {
+  if (!statuses) return 0;
+  const me = statuses.find((s) => s.depot_id === depotId && s.manifest_id === manifestId);
+  return me?.creation_time ?? 0;
+}
+
+/// Label for the manifest segment of the breadcrumb. Falls back to
+/// "manifest" while the status query is still loading the creation
+/// time.
+function manifestCrumbLabel(creationTime: number): string {
+  if (creationTime > 0) return formatDate(creationTime);
+  return "manifest";
 }

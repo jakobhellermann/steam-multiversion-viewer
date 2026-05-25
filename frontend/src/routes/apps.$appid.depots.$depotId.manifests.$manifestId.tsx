@@ -132,10 +132,12 @@ function ManifestDetail() {
 
   return (
     <div className="mx-auto max-w-6xl p-8">
-      <nav className="mb-4 text-sm text-slate-400">
+      <nav className="mb-4 flex items-center gap-2 text-sm text-slate-400">
         <Link to="/apps/$appid" params={{ appid: appidParam }} className="hover:underline">
-          ← App {appid}
+          {appInfoQuery.data?.name ?? `App ${appid}`}
         </Link>
+        <span className="text-slate-600">/</span>
+        <span>{branch === "public" ? depotId : `${depotId} · ${branch}`}</span>
       </nav>
 
       {info.isPending && <p className="text-slate-400">Loading manifest…</p>}
