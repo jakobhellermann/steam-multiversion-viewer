@@ -406,9 +406,15 @@ fn qualify_one<R: EnvResolver, P: TypeTreeProvider>(
     let mut map = BTreeMap::new();
     map.insert(svalue_str("$target"), svalue_str(&target));
     map.insert(svalue_str("type"), svalue_str(&class_id));
-    if !pptr.is_local()
-        && let Some(ext) = pptr.file_identifier(file.file)
-    {
+    if pptr.is_local() {
+        // Local pptrs (same file) get a `$ref` that matches the node
+        // id format used by `build_tree`. The frontend can turn this
+        // into a clickable hash link.
+        map.insert(
+            svalue_str("$ref"),
+            svalue_str(&format!("obj:{}", pptr.m_PathID)),
+        );
+    } else if let Some(ext) = pptr.file_identifier(file.file) {
         map.insert(svalue_str("file"), svalue_str(&ext.pathName));
     }
     Value::Map(map)

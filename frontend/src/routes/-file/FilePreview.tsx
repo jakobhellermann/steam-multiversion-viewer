@@ -164,6 +164,7 @@ export const HighlightedPre = memo(function HighlightedPre({
   code,
   lang,
   bare = false,
+  postProcess,
 }: {
   code: string;
   lang: ReturnType<typeof langForPath>;
@@ -171,6 +172,10 @@ export const HighlightedPre = memo(function HighlightedPre({
   /// the caller already wraps the content in a styled card so we don't
   /// nest borders.
   bare?: boolean;
+  /// Last-mile transform on the rendered HTML string — used to inject
+  /// link markup (PPtr refs, jump targets, etc) without re-running
+  /// the (expensive) shiki tokenisation.
+  postProcess?: (html: string) => string;
 }) {
   // Shiki's `codeToHtml` is synchronous and tokenises the whole input
   // on the main thread — a 1 MB file freezes the tab for seconds.
@@ -180,7 +185,10 @@ export const HighlightedPre = memo(function HighlightedPre({
   const HIGHLIGHT_MAX_CHARS = 100_000;
   const tooBigForHighlight = code.length > HIGHLIGHT_MAX_CHARS;
   const html = useQuery({
-    queryKey: ["syntax-highlight", lang, code.length, code.slice(0, 64)],
+    // Cache by the actual code text — a length + 64-char prefix used
+    // to collide for inputs that differed only further in (e.g. raw
+    // vs PPtr-collapsed JSON), making us serve a stale render.
+    queryKey: ["syntax-highlight", lang, code],
     queryFn: () => (lang ? highlight(code, lang) : Promise.resolve(null)),
     enabled: lang != null && !tooBigForHighlight,
     staleTime: Infinity,
@@ -201,13 +209,18 @@ export const HighlightedPre = memo(function HighlightedPre({
     const chrome = bare
       ? "text-xs [&_pre]:m-0! [&_pre]:bg-transparent! [&_pre]:p-0!"
       : "overflow-x-auto rounded border border-slate-800 text-xs [&_pre]:m-0! [&_pre]:bg-slate-950! [&_pre]:p-3!";
+    const rendered = postProcess ? postProcess(html.data) : html.data;
     return (
-      <div className={chrome} style={cvStyle} dangerouslySetInnerHTML={{ __html: html.data }} />
+      <div className={chrome} style={cvStyle} dangerouslySetInnerHTML={{ __html: rendered }} />
     );
   }
   const chrome = bare
     ? "font-mono text-xs wrap-break-word whitespace-pre-wrap"
     : "overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs wrap-break-word whitespace-pre-wrap";
+  // Plain `<pre>` path ignores `postProcess` — that transform only
+  // makes sense when there's already escaped HTML to inject markup
+  // into (the shiki path above). React's children render escapes the
+  // raw text safely here.
   return (
     <pre className={chrome} style={cvStyle}>
       {code}

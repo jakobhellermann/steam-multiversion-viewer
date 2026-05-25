@@ -94,6 +94,15 @@ function Tree({
   // beat that auto-expansion — the node stays closed until the user
   // opens it explicitly or clears the filter.
   const [collapseOverride, setCollapseOverride] = useState<Set<string>>(new Set());
+  // A `#obj:N` deep-link target that should be visible regardless of
+  // the active filter — so clicking a PPtr link to something outside
+  // the current search still lands on it. Cleared by clearing the
+  // hash or selecting a different row.
+  const [hashTarget, setHashTarget] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : decodeURIComponent(window.location.hash.replace(/^#/, "")) || null,
+  );
   // Selection (what drives the right pane) tracks focus 1:1 — moving
   // through the tree previews each row's content as you go.
   const [focusedId, setFocusedId] = useState<string>(root.id);
@@ -165,16 +174,36 @@ function Tree({
   //   (and their descendants — propagated by `collectHidden`).
   // The "default-hide" path is what makes nested .NET types show up
   // only when the user searches for them.
+  // Pre-build a parent lookup so we can splice deep-link targets back
+  // into visibility/expansion sets cheaply.
+  const parentByIdEarly = useMemo(() => {
+    const map = new Map<string, string>();
+    walk(root, (n) => {
+      for (const c of n.children) map.set(c.id, n.id);
+    });
+    return map;
+  }, [root]);
+
   const visibleSet = useMemo(() => {
-    if (directMatches != null) {
-      const out = new Set<string>();
-      collectVisible(root, directMatches, out);
-      return out;
-    }
     const out = new Set<string>();
-    collectDefaultVisible(root, false, out);
+    if (directMatches != null) {
+      collectVisible(root, directMatches, out);
+    } else {
+      collectDefaultVisible(root, false, out);
+    }
+    // Splice the deep-link target (and its ancestors) in — even if a
+    // filter would otherwise hide it. Without this, navigating to a
+    // PPtr from a filtered view snaps focus straight back onto the
+    // first row in the (still-filtered) tree.
+    if (hashTarget) {
+      let cur: string | undefined = hashTarget;
+      while (cur && !out.has(cur)) {
+        out.add(cur);
+        cur = parentByIdEarly.get(cur);
+      }
+    }
     return out;
-  }, [root, directMatches]);
+  }, [root, directMatches, hashTarget, parentByIdEarly]);
 
   // Drop any collapse-overrides once the filter is gone — they only
   // make sense as a counter to auto-expansion.
@@ -222,6 +251,9 @@ function Tree({
   // jump — that effect would otherwise fight the user every time.
   useEffect(() => {
     if (directMatches == null) return;
+    // A `#obj:N` deep link wins over the "snap to first match" rule —
+    // the user explicitly asked to land there.
+    if (hashTarget) return;
     const firstMatch = visibleRows.find((r) => directMatches.has(r.node.id));
     if (firstMatch) setFocusedId(firstMatch.node.id);
     // Intentionally only depend on `directMatches` so non-match clicks
@@ -230,13 +262,7 @@ function Tree({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [directMatches]);
 
-  const parentById = useMemo(() => {
-    const map = new Map<string, string>();
-    walk(root, (n) => {
-      for (const c of n.children) map.set(c.id, n.id);
-    });
-    return map;
-  }, [root]);
+  const parentById = parentByIdEarly;
 
   const setExpanded = useCallback(
     (id: string, next: boolean) => {
@@ -290,6 +316,44 @@ function Tree({
   useEffect(() => {
     treeRef.current?.focus({ preventScroll: true });
   }, [locator.path]);
+
+  // Honor `#obj:<path-id>` hash links — the unity object dump turns
+  // local PPtrs into anchors, and the browser's default click on those
+  // updates `location.hash`. Listen and snap focus onto the target,
+  // expanding ancestors as needed.
+  useEffect(() => {
+    const idsInTree = new Set<string>();
+    walk(root, (n) => idsInTree.add(n.id));
+    const jump = () => {
+      const id = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+      // Empty hash (e.g. user hit back from a #obj:N entry) snaps
+      // selection back to the root row so the preview pane clears
+      // visibly — otherwise the URL changes but nothing else does.
+      if (!id) {
+        setHashTarget(null);
+        setFocusedId(root.id);
+        return;
+      }
+      if (!idsInTree.has(id)) return;
+      // Track the target so `visibleSet` keeps it (and its ancestors)
+      // visible even if a filter would normally hide it.
+      setHashTarget(id);
+      // Open every ancestor so the row is actually visible.
+      setExpandedIds((prev) => {
+        const out = new Set(prev);
+        let cur = parentById.get(id);
+        while (cur) {
+          out.add(cur);
+          cur = parentById.get(cur);
+        }
+        return out;
+      });
+      setFocusedId(id);
+    };
+    jump();
+    window.addEventListener("hashchange", jump);
+    return () => window.removeEventListener("hashchange", jump);
+  }, [root, parentById]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -769,6 +833,97 @@ function FacetDropdown({
   );
 }
 
+/// Sentinel string used to smuggle a PPtr blob through shiki as a
+/// single-line JSON string. `\x1f` (ASCII Unit Separator) is the
+/// classic record-separator codepoint — it cannot legally appear in
+/// the user-facing JSON content we render, so it's a safer field
+/// delimiter than `|` (which can show up in gameobject paths).
+const PPTR_PREFIX = "__PPTR__";
+// `␞` (U+241E SYMBOL FOR RECORD SEPARATOR) is a printable codepoint
+// JSON.stringify passes through unescaped, so shiki sees it as plain
+// text and keeps the whole sentinel inside a single string-token —
+// regex-on-output stays simple. A raw `\x1f` would be JSON-escaped to
+// ``, which shiki then re-tokenises as a string escape, breaking
+// the token in three.
+const PPTR_SEP = "␞";
+
+/// Walk the parsed JSON, replacing each `{$target, $ref, type, file?}`
+/// blob with a single string `"__PPTR__<ref>|<target>|<type>|<file?>"`.
+/// Done before shiki so the inserted markup doesn't fight HTML escaping
+/// — we just regex-replace the marker out of the rendered HTML in
+/// `linkifyPptrs`.
+function inlinePptrBlobs(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(inlinePptrBlobs);
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const target = obj["$target"];
+    const type = obj["type"];
+    const ref = obj["$ref"];
+    const file = obj["file"];
+    const isPptr =
+      typeof target === "string" &&
+      typeof type === "string" &&
+      (ref === undefined || typeof ref === "string") &&
+      (file === undefined || typeof file === "string");
+    if (isPptr) {
+      const parts = [
+        typeof ref === "string" ? ref : "",
+        target as string,
+        type as string,
+        typeof file === "string" ? file : "",
+      ];
+      return `${PPTR_PREFIX}${parts.join(PPTR_SEP)}`;
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) out[k] = inlinePptrBlobs(v);
+    return out;
+  }
+  return value;
+}
+
+/// Preprocess raw JSON text before handing it to shiki: collapse each
+/// PPtr blob into a single-line string. Returns the original text if
+/// it isn't JSON.
+function preparePptrJson(text: string): string {
+  try {
+    const parsed = JSON.parse(text);
+    return JSON.stringify(inlinePptrBlobs(parsed), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+/// Replace each PPtr sentinel in the rendered HTML with a compact
+/// pseudo-element. Shiki wraps the whole sentinel string in one
+/// `<span ...>"…"</span>` (it's a JSON string), so a single regex
+/// reliably picks it up. The HTML-escaped `&quot;` matches what shiki
+/// actually emits.
+function linkifyPptrs(html: string): string {
+  const sep = PPTR_SEP;
+  const noSep = `[^"${sep}]*`;
+  const pattern = new RegExp(
+    `"${PPTR_PREFIX}(${noSep})${sep}(${noSep})${sep}(${noSep})${sep}([^"]*)"`,
+    "g",
+  );
+  return html.replace(pattern, (_, ref, target, type, file) => {
+    const escHTML = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const label = escHTML(target);
+    const ty = escHTML(type);
+    const suffix = ` <span class="text-slate-500">(${ty})</span>${
+      file ? ` <span class="text-slate-500">in ${escHTML(file)}</span>` : ""
+    }`;
+    if (ref) {
+      // Use `data-pptr-ref` rather than `href="#..."` because tanstack-
+      // router intercepts `<a>` clicks (treats them as in-app
+      // navigation). A delegated click handler in `NodeContentPanel`
+      // turns these into history-aware hash navigations explicitly.
+      return `<a data-pptr-ref="${escHTML(ref)}" class="cursor-pointer text-sky-400 underline decoration-sky-700 hover:decoration-sky-400 hover:text-sky-200">${label}</a>${suffix}`;
+    }
+    return `<span class="text-slate-400">${label}</span>${suffix}`;
+  });
+}
+
 function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: string }) {
   const content = useQuery({
     queryKey: [
@@ -795,6 +950,31 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
     placeholderData: (prev) => prev,
   });
 
+  // Collapse each PPtr blob into a single-line sentinel string *before*
+  // shiki sees it, then turn those sentinels into pseudo-elements in
+  // the rendered HTML. Doing the rewrite on JSON instead of on the
+  // shiki output means we don't need to span lines. Hooks run
+  // unconditionally — early returns below stay below.
+  const rawText = content.data?.text ?? "";
+  const mime = content.data?.mime ?? "";
+  const prepared = useMemo(
+    () => (langForMime(mime) === "json" ? preparePptrJson(rawText) : rawText),
+    [rawText, mime],
+  );
+  // Delegated click — pptr anchors carry their target in
+  // `data-pptr-ref`; turning the click into an explicit hash nav lets
+  // browser-back still work (tanstack-router would otherwise hijack
+  // plain `<a href="#…">` clicks).
+  const onClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement | null;
+    const anchor = t?.closest("a[data-pptr-ref]") as HTMLAnchorElement | null;
+    if (!anchor) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    e.preventDefault();
+    const ref = anchor.getAttribute("data-pptr-ref");
+    if (ref) window.location.hash = ref;
+  }, []);
+
   if (content.error) {
     return (
       <p className="text-sm text-red-300">
@@ -805,5 +985,9 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
   if (!content.data || content.data.text.length === 0) {
     return null;
   }
-  return <HighlightedPre code={content.data.text} lang={langForMime(content.data.mime)} bare />;
+  return (
+    <div onClick={onClick}>
+      <HighlightedPre code={prepared} lang={langForMime(mime)} bare postProcess={linkifyPptrs} />
+    </div>
+  );
 }
