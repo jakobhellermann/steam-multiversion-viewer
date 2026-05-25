@@ -422,6 +422,13 @@ function Tree({
       const hasChildren = row != null && row.hasVisibleChildren;
       const wasSelected = id === focusedId;
       const isExpanded = effectiveExpanded.has(id);
+      // Push every selection into the hash so browser back/forward
+      // walks the same history the user clicked through. We compare
+      // against the current hash to avoid a redundant history entry
+      // when the row is already selected (second-click collapse).
+      if (window.location.hash !== `#${id}`) {
+        window.location.hash = id;
+      }
       setFocusedId(id);
       if (!hasChildren) return;
       // Click semantics: collapsed → open. Expanded but not yet
@@ -860,35 +867,64 @@ const PPTR_SEP = "␞";
 /// `<span ...>"…"</span>` (it's a JSON string), so a single regex
 /// reliably picks it up. The HTML-escaped `&quot;` matches what shiki
 /// actually emits.
-function linkifyPptrs(html: string): string {
-  const sep = PPTR_SEP;
-  const noSep = `[^"${sep}]*`;
-  const pattern = new RegExp(
-    `"${PPTR_PREFIX}(${noSep})${sep}(${noSep})${sep}(${noSep})${sep}([^"]*)"`,
-    "g",
-  );
-  return html.replace(pattern, (_, ref, target, type, file) => {
-    // Fully-empty sentinel = null pptr that landed in a map-key
-    // position. Render as plain `null` to avoid a stray "()".
-    if (!ref && !target && !type && !file) {
-      return '<span class="text-slate-500">null</span>';
-    }
-    const escHTML = (s: string) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const label = escHTML(target) || '<span class="text-slate-500">null</span>';
-    const ty = escHTML(type);
-    const suffix = `${ty ? ` <span class="text-slate-500">(${ty})</span>` : ""}${
-      file ? ` <span class="text-slate-500">in ${escHTML(file)}</span>` : ""
-    }`;
-    if (ref) {
-      // Use `data-pptr-ref` rather than `href="#..."` because tanstack-
-      // router intercepts `<a>` clicks (treats them as in-app
-      // navigation). A delegated click handler in `NodeContentPanel`
-      // turns these into history-aware hash navigations explicitly.
-      return `<a data-pptr-ref="${escHTML(ref)}" class="cursor-pointer text-sky-400 underline decoration-sky-700 hover:decoration-sky-400 hover:text-sky-200">${label}</a>${suffix}`;
-    }
-    return `<span class="text-slate-400">${label}</span>${suffix}`;
-  });
+function makeLinkifyPptrs(locator: FileLocator) {
+  const branchParam =
+    locator.branch === "public" ? "" : `&branch=${encodeURIComponent(locator.branch)}`;
+  const fileHref = (depotPath: string) =>
+    `/apps/${locator.appid}/depots/${locator.depotId}/manifests/${locator.manifestId}/file?path=${encodeURIComponent(depotPath)}${branchParam}`;
+  // Strip the `<Game>_Data/` data-dir prefix from file labels — the
+  // user already knows which game/version they're in, so the extra
+  // prefix only wastes horizontal space.
+  const dataDirPrefix = (() => {
+    const slash = locator.path.indexOf("/");
+    return slash > 0 ? locator.path.slice(0, slash + 1) : "";
+  })();
+  const shortFileLabel = (depotPath: string) =>
+    dataDirPrefix && depotPath.startsWith(dataDirPrefix)
+      ? depotPath.slice(dataDirPrefix.length)
+      : depotPath;
+  return function linkifyPptrs(html: string): string {
+    const sep = PPTR_SEP;
+    const noSep = `[^"${sep}]*`;
+    const pattern = new RegExp(
+      `"${PPTR_PREFIX}(${noSep})${sep}(${noSep})${sep}(${noSep})${sep}([^"]*)"`,
+      "g",
+    );
+    return html.replace(pattern, (_, ref, target, type, file) => {
+      // Fully-empty sentinel = null pptr that landed in a map-key
+      // position. Render as plain `null` to avoid a stray "()".
+      if (!ref && !target && !type && !file) {
+        return '<span class="text-slate-500">null</span>';
+      }
+      const escHTML = (s: string) =>
+        s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      // Label depends on locality: local refs show the target's name
+      // (resolved by the backend), external ones show the depot path
+      // of the file they live in — the latter is what's actually
+      // identifying since cross-file targets often have no `m_Name`.
+      const labelText = file ? shortFileLabel(file) : target;
+      const label = escHTML(labelText) || '<span class="text-slate-500">null</span>';
+      const ty = escHTML(type);
+      // If we couldn't recover a real name (backend fell back to
+      // `PathID=N`), keep that as a hint next to the type so the row
+      // still tells you *which* `Shader` you're looking at.
+      const pathHint =
+        file && /^PathID=\d+$/.test(target)
+          ? ` <span class="text-slate-500">${escHTML(target)}</span>`
+          : "";
+      const suffix = `${ty ? ` <span class="text-slate-500">(${ty})</span>` : ""}${pathHint}`;
+      if (!ref) {
+        return `<span class="text-slate-400">${label}</span>${suffix}`;
+      }
+      // Same shape for local + external — the click handler dispatches:
+      // `data-pptr-ref` alone → hash nav inside this file; combined
+      // with `data-file-href` → route nav to another depot file.
+      const linkAttrs = file
+        ? `data-pptr-ref="${escHTML(ref)}" data-file-href="${escHTML(fileHref(file))}"`
+        : `data-pptr-ref="${escHTML(ref)}"`;
+      return `<a ${linkAttrs} class="cursor-pointer text-sky-400 underline decoration-sky-700 hover:decoration-sky-400 hover:text-sky-200">${label}</a>${suffix}`;
+    });
+  };
 }
 
 function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: string }) {
@@ -938,18 +974,26 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
   const settled = lastSettledRef.current;
   const text = settled?.kind === "ok" ? settled.text : "";
   const mime = settled?.kind === "ok" ? settled.mime : "";
-  // Delegated click — pptr anchors carry their target in
-  // `data-pptr-ref`; turning the click into an explicit hash nav lets
-  // browser-back still work (tanstack-router would otherwise hijack
-  // plain `<a href="#…">` clicks).
+  const linkifyPptrs = useMemo(() => makeLinkifyPptrs(locator), [locator]);
+  // Delegated click — pptr anchors carry either a hash target
+  // (`data-pptr-ref`, same-file) or a full route URL (`data-file-href`,
+  // jumps to another depot file). Hash nav avoids tanstack-router
+  // intercepting `<a href="#…">`; file links we explicitly navigate.
   const onClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const t = e.target as HTMLElement | null;
-    const anchor = t?.closest("a[data-pptr-ref]") as HTMLAnchorElement | null;
-    if (!anchor) return;
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    const a = t?.closest("a[data-pptr-ref]") as HTMLAnchorElement | null;
+    if (!a) return;
     e.preventDefault();
-    const ref = anchor.getAttribute("data-pptr-ref");
-    if (ref) window.location.hash = ref;
+    const ref = a.getAttribute("data-pptr-ref") ?? "";
+    const fileHref = a.getAttribute("data-file-href");
+    if (fileHref) {
+      // External pptr: jump to the other file with the same `#obj:N`
+      // anchor so the destination tree focuses on the target.
+      window.location.assign(`${fileHref}#${ref}`);
+    } else {
+      window.location.hash = ref;
+    }
   }, []);
 
   if (!settled) return null;

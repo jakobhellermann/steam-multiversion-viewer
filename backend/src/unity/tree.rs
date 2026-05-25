@@ -71,9 +71,8 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     path_id: PathId,
 ) -> Result<String> {
     let game_files = SteamDepotGameFiles::new(manifest_store)?;
-    let relative = path
-        .strip_prefix(&format!("{}/", game_files.data_dir().display()))
-        .unwrap_or(path);
+    let data_dir = game_files.data_dir().display().to_string();
+    let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
     let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
     let env = Environment::new(game_files, &tpk);
     let file = env.load_cached(relative)?;
@@ -88,7 +87,7 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     let mut value = object.read()?;
     // Replace each `{m_FileID, m_PathID}` blob with a `__PPTR__` sentinel
     // string the frontend turns into a link.
-    qualify_pptrs(&file, &mut value);
+    qualify_pptrs(&file, &data_dir, &mut value);
     // Unity `map<K, V>` with non-string keys (e.g. ScriptMapper's
     // `Shader -> name`) deserialises into `Value::Map<Value, Value>`,
     // which serde_json can't write — JSON object keys must be strings.
@@ -431,9 +430,10 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
 
 fn qualify_pptrs<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
+    data_dir: &str,
     value: &mut Value,
 ) {
-    replace_pptrs(value, &mut |pptr| qualify_one(file, pptr));
+    replace_pptrs(value, &mut |pptr| qualify_one(file, data_dir, pptr));
 }
 
 /// Sentinel prefix the frontend's `linkifyPptrs` looks for. Anything
@@ -445,6 +445,7 @@ const PPTR_SEP: char = '\u{241e}';
 
 fn qualify_one<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
+    data_dir: &str,
     pptr: PPtr,
 ) -> Value {
     let Some(pptr) = pptr.optional() else {
@@ -461,14 +462,14 @@ fn qualify_one<R: EnvResolver, P: TypeTreeProvider>(
         .map(|data| display_name(&obj, &data))
         .unwrap_or_else(|| "(unreadable)".to_string());
 
-    let ref_part = if pptr.is_local() {
-        format!("obj:{}", pptr.m_PathID)
-    } else {
-        String::new()
-    };
+    // `ref` always carries the target's `obj:<pathid>` (it's a
+    // file-local id either way). External pptrs additionally fill
+    // `file` with the depot path of the referenced file — frontend
+    // combines the two into a route-level link.
+    let ref_part = format!("obj:{}", pptr.m_PathID);
     let file_part = if !pptr.is_local() {
         pptr.file_identifier(file.file)
-            .map(|ext| ext.pathName.clone())
+            .map(|ext| external_to_depot_path(data_dir, &ext.pathName))
             .unwrap_or_default()
     } else {
         String::new()
@@ -476,6 +477,21 @@ fn qualify_one<R: EnvResolver, P: TypeTreeProvider>(
     svalue_str(&format!(
         "{PPTR_PREFIX}{ref_part}{PPTR_SEP}{target}{PPTR_SEP}{class_id}{PPTR_SEP}{file_part}"
     ))
+}
+
+/// Translate an external-file identifier (as ilspy / rabex prints
+/// them, e.g. `Library/unity default resources`) to the manifest-
+/// relative depot path the frontend can navigate to. Mirrors the
+/// rabex-env-steam-depot-vfs path resolver.
+fn external_to_depot_path(data_dir: &str, name: &str) -> String {
+    // Unity prefixes builtin-resource file ids with `Library/`; the
+    // depot layout has them under `<DataDir>/Resources/` instead.
+    // Other names already are data-dir-relative.
+    if let Some(rest) = name.strip_prefix("Library/") {
+        format!("{data_dir}/Resources/{rest}")
+    } else {
+        format!("{data_dir}/{name}")
+    }
 }
 
 fn pptr_placeholder(pptr: PPtr, reason: &str) -> Value {
