@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
-use steam_depot_vfs::fs::DepotSnapshot;
+use steam_depot_vfs::fs::DepotManifestStore;
 use steam_depot_vfs::{DepotStore, VfsError};
 
 use crate::config::Config;
@@ -12,7 +12,7 @@ use crate::extra_manifests::ExtraManifestsStore;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient, auth};
 use crate::store_index::StoreIndex;
 
-pub type Snapshot = DepotSnapshot<FsCacheStore<CdnChunkStore<SteamClient>>>;
+pub type Snapshot = DepotManifestStore<FsCacheStore<CdnChunkStore<SteamClient>>>;
 
 #[derive(Clone)]
 pub struct AppState {
