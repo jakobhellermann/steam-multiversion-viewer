@@ -308,13 +308,30 @@ pub async fn manifest_file_diff(
     )
     .await?;
 
-    let base_label = format!("{depot_id}/{manifest_id}");
-    let target_label = format!("{}/{}", body.target.depot_id, body.target.manifest_id);
-    let diff = similar::TextDiff::from_lines(&base, &target);
+    // Always diff "older → newer" so `+` consistently means "added in
+    // the newer version" regardless of which manifest the caller chose
+    // to open. Equal timestamps fall back to the request order.
+    let (older, newer, older_label, newer_label) = if target.creation_time < base.creation_time {
+        (
+            &target,
+            &base,
+            format!("{}/{}", body.target.depot_id, body.target.manifest_id),
+            format!("{depot_id}/{manifest_id}"),
+        )
+    } else {
+        (
+            &base,
+            &target,
+            format!("{depot_id}/{manifest_id}"),
+            format!("{}/{}", body.target.depot_id, body.target.manifest_id),
+        )
+    };
+
+    let diff = similar::TextDiff::from_lines(&older.text, &newer.text);
     let unified = diff
         .unified_diff()
         .context_radius(3)
-        .header(&base_label, &target_label)
+        .header(&older_label, &newer_label)
         .to_string();
 
     Ok((
@@ -325,6 +342,14 @@ pub async fn manifest_file_diff(
         unified,
     )
         .into_response())
+}
+
+struct DiffSide {
+    text: String,
+    /// Steam-side manifest creation timestamp (unix seconds). Used to
+    /// pick the "older" side so the unified diff reads in the natural
+    /// chronological direction.
+    creation_time: u32,
 }
 
 /// Resolve the file at `(depot_id, manifest_id, path)` to the text we
@@ -339,13 +364,14 @@ async fn resolve_diff_text(
     manifest_id: ManifestId,
     branch: &str,
     path: &str,
-) -> Result<String> {
+) -> Result<DiffSide> {
     let snapshot = Arc::new(
         state
             .open_manifest(appid, depot_id, manifest_id, branch)
             .await?,
     );
 
+    let creation_time = snapshot.manifest().creation_time;
     let (file_path, file_sha, chunks_for_dl) = {
         let manifest = snapshot.manifest();
         let file = manifest
@@ -373,19 +399,26 @@ async fn resolve_diff_text(
     if let Some(transformer) = crate::transform::tools::transformer_for(&file_path) {
         let cfg = state.config.load();
         if let Some(cached) = crate::transform::read_cached(&cfg.store_root, &file_sha)? {
-            return Ok(cached);
+            return Ok(DiffSide {
+                text: cached,
+                creation_time,
+            });
         }
         state
             .downloads
             .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
             .await;
         let bytes = snapshot.read_full(&file_path).await?;
-        return crate::transform::run_and_cache(&cfg.store_root, transformer, &file_sha, &bytes)
+        let text = crate::transform::run_and_cache(&cfg.store_root, transformer, &file_sha, &bytes)
             .await
             .map_err(|e| ApiError {
                 status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 message: e.to_string(),
-            });
+            })?;
+        return Ok(DiffSide {
+            text,
+            creation_time,
+        });
     }
 
     // No transformer — only useful for files we can read as UTF-8.
@@ -394,8 +427,12 @@ async fn resolve_diff_text(
         .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
         .await;
     let bytes = snapshot.read_full(&file_path).await?;
-    String::from_utf8(bytes.to_vec()).map_err(|_| ApiError {
+    let text = String::from_utf8(bytes.to_vec()).map_err(|_| ApiError {
         status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
         message: format!("file is binary and has no registered transformer: {file_path}"),
+    })?;
+    Ok(DiffSide {
+        text,
+        creation_time,
     })
 }
