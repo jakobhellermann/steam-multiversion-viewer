@@ -72,11 +72,6 @@ impl Node {
         self
     }
 
-    pub fn collapsed_by_default(mut self) -> Self {
-        self.default_collapsed = true;
-        self
-    }
-
     pub fn with_facet(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.facets.insert(key.into(), value.into());
         self

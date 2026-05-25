@@ -146,21 +146,59 @@ fn is_compiler_generated(type_name: &str) -> bool {
 }
 
 /// Decompile a single type to C#. `type_name` must be the fully
-/// qualified name as printed by [`list_entities`] (ilspy's `-t`
-/// wants that exact form).
+/// qualified name as printed by [`list_entities`] (`Outer.Inner` for
+/// nested types). For nested types we normalise both the cache key
+/// and the ilspy invocation to the outer type: ilspy renders the
+/// outer's full decompilation regardless of whether you ask for the
+/// nested via `Outer+Inner` or just `Outer`, and the warmer's `-p`
+/// pass only produces the outer file — so reusing that one cache
+/// entry makes nested clicks free once the warmer has run.
 pub async fn decompile_type(
     store_root: &Utf8Path,
     dll_sha: &[u8; 20],
     dll_bytes: &[u8],
     type_name: &str,
 ) -> Result<String, TransformError> {
-    let artifact = type_artifact_name(type_name);
+    let resolved = resolve_outer(store_root, dll_sha, dll_bytes, type_name).await?;
+    let artifact = type_artifact_name(&resolved);
     if let Some(cached) = crate::transform::read_cached_artifact(store_root, dll_sha, &artifact)? {
         return Ok(cached);
     }
-    let text = run_ilspy(dll_bytes, &["-t", type_name]).await?;
+    let text = run_ilspy(dll_bytes, &["-t", &resolved]).await?;
     crate::transform::write_cached_artifact(store_root, dll_sha, &artifact, &text)?;
     Ok(text)
+}
+
+/// Map a fully-qualified type name to the outermost containing type
+/// (= what ilspy renders as one .cs file). `Foo.Bar.Inner.More` with
+/// `Foo.Bar` as a known entity → `Foo.Bar`. Non-nested names come
+/// back unchanged.
+async fn resolve_outer(
+    store_root: &Utf8Path,
+    dll_sha: &[u8; 20],
+    dll_bytes: &[u8],
+    type_name: &str,
+) -> Result<String, TransformError> {
+    if !type_name.contains('.') {
+        return Ok(type_name.to_string());
+    }
+    let entities = list_entities(store_root, dll_sha, dll_bytes).await?;
+    let names: std::collections::HashSet<&str> = entities.iter().map(|e| e.name.as_str()).collect();
+    Ok(outer_of(type_name, |s| names.contains(s)))
+}
+
+/// Pure helper for [`resolve_outer`]: walk dot positions; the first
+/// prefix that is itself a known entity is the outermost type. Every
+/// `.` after that delimits a nested type — drop the suffix.
+/// `Ns.Outer.Inner` with `Ns.Outer` known → `Ns.Outer`.
+fn outer_of(type_name: &str, is_entity: impl Fn(&str) -> bool) -> String {
+    for (idx, _) in type_name.match_indices('.') {
+        let prefix = &type_name[..idx];
+        if is_entity(prefix) {
+            return prefix.to_string();
+        }
+    }
+    type_name.to_string()
 }
 
 /// Build a filesystem-safe artifact name from a fully-qualified type
@@ -410,5 +448,24 @@ mod tests {
             type_artifact_name("Ns.Inner+Nested"),
             "types/Ns.Inner+Nested"
         );
+    }
+
+    #[test]
+    fn outer_of_strips_nested_suffix() {
+        let known: std::collections::HashSet<&str> =
+            ["Foo", "Foo.Bar", "Ns.Outer"].into_iter().collect();
+        // Pure namespace (no entity-prefix matches) — left alone.
+        assert_eq!(outer_of("Ns.NoSuch", |s| known.contains(s)), "Ns.NoSuch");
+        // Outer.Inner → Outer.
+        assert_eq!(outer_of("Foo.Bar", |s| known.contains(s)), "Foo");
+        // Longer chain — first matching prefix wins.
+        assert_eq!(outer_of("Foo.Bar.Baz", |s| known.contains(s)), "Foo");
+        // Namespaced outer.
+        assert_eq!(
+            outer_of("Ns.Outer.Inner", |s| known.contains(s)),
+            "Ns.Outer"
+        );
+        // No dots — pass-through.
+        assert_eq!(outer_of("Foo", |s| known.contains(s)), "Foo");
     }
 }
