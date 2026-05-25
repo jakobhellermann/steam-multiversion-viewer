@@ -673,6 +673,12 @@ function FacetDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  // Stash the popup's scroll offset whenever it closes so reopening
+  // brings the user back to where they were in a long value list.
+  const scrollTopRef = useRef(0);
+  const popupRef = useCallback((el: HTMLDivElement | null) => {
+    if (el) el.scrollTop = scrollTopRef.current;
+  }, []);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -712,7 +718,13 @@ function FacetDropdown({
         {count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
       </button>
       {open && (
-        <div className="absolute top-full right-0 z-10 mt-1 max-h-80 w-56 overflow-auto rounded border border-slate-700 bg-slate-900 shadow-lg">
+        <div
+          ref={popupRef}
+          onScroll={(e) => {
+            scrollTopRef.current = e.currentTarget.scrollTop;
+          }}
+          className="absolute top-full right-0 z-10 mt-1 max-h-80 w-56 overflow-auto rounded border border-slate-700 bg-slate-900 shadow-lg"
+        >
           <div className="sticky top-0 flex items-center justify-between border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400">
             <span className="tabular-nums">{counts.length} values</span>
             {count > 0 && (
