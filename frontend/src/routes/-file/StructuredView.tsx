@@ -256,9 +256,6 @@ function Tree({
     if (hashTarget) return;
     const firstMatch = visibleRows.find((r) => directMatches.has(r.node.id));
     if (firstMatch) setFocusedId(firstMatch.node.id);
-    // Intentionally only depend on `directMatches` so non-match clicks
-    // don't re-fire this — `visibleRows` is fresh enough on the same
-    // render that the filter changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [directMatches]);
 
@@ -324,16 +321,20 @@ function Tree({
   useEffect(() => {
     const idsInTree = new Set<string>();
     walk(root, (n) => idsInTree.add(n.id));
+    // Track whether we've ever observed a non-empty hash for this
+    // mount — that lets us tell apart "page just loaded without a hash"
+    // (do nothing) from "user navigated back from a #obj:N entry"
+    // (snap to root so the preview clears).
+    let everSawHash = false;
     const jump = () => {
       const id = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-      // Empty hash (e.g. user hit back from a #obj:N entry) snaps
-      // selection back to the root row so the preview pane clears
-      // visibly — otherwise the URL changes but nothing else does.
       if (!id) {
+        if (!everSawHash) return;
         setHashTarget(null);
         setFocusedId(root.id);
         return;
       }
+      everSawHash = true;
       if (!idsInTree.has(id)) return;
       // Track the target so `visibleSet` keeps it (and its ancestors)
       // visible even if a filter would normally hide it.
