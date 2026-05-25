@@ -57,7 +57,28 @@ fn build_root(file_label: &str, entities: &[EntityEntry]) -> Node {
     for entity in entities {
         root.insert(entity);
     }
-    let children = root.into_children();
+    // Bucket types without a namespace into a synthetic `(global)` node
+    // so the root listing isn't drowned in 800+ flat leaves. Skip the
+    // bucket when there are none.
+    let mut leaves = root.leaves;
+    leaves.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut children: Vec<Node> = Vec::new();
+    if !leaves.is_empty() {
+        let count = leaves.len();
+        let global_children: Vec<Node> = leaves.iter().map(leaf_node).collect();
+        children.push(Node {
+            id: "ns:-".to_string(),
+            label: "-".to_string(),
+            kind: "namespace".to_string(),
+            badge: Some(format!("{count}")),
+            default_collapsed: false,
+            children: global_children,
+            ..Default::default()
+        });
+    }
+    for (segment, child) in root.children {
+        children.push(child.into_namespace_node(segment));
+    }
     Node {
         id: format!("file:{file_label}"),
         label: file_label.to_string(),
@@ -198,10 +219,14 @@ mod tests {
         ];
         let root = build_root("Assembly-CSharp.dll", &entities);
         assert_eq!(root.children.len(), 2);
-        // Leaves of the root (no namespace) first.
-        assert_eq!(root.children[0].label, "<Module>");
-        assert_eq!(root.children[0].kind, "class");
-        // Namespace nodes after.
+        // Unnamespaced types live under a synthetic "-" bucket (matches
+        // Avalonia ILSpy's UI convention for "no namespace").
+        assert_eq!(root.children[0].label, "-");
+        assert_eq!(root.children[0].kind, "namespace");
+        assert_eq!(root.children[0].badge.as_deref(), Some("1"));
+        assert_eq!(root.children[0].children[0].label, "<Module>");
+        assert_eq!(root.children[0].children[0].kind, "class");
+        // Real namespace nodes follow.
         assert_eq!(root.children[1].label, "UnityEngine");
         assert_eq!(root.children[1].badge.as_deref(), Some("3"));
         let ue = &root.children[1];
