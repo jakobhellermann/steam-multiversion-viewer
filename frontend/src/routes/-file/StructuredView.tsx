@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { fetchFileStructured, fetchStructuredNodeContent, type StructuredNode } from "../../api";
 import { langForMime } from "../../lib/syntax";
@@ -46,6 +46,13 @@ export function StructuredView({ locator }: { locator: FileLocator }) {
   }
 
   return <Tree root={tree.data.root} locator={locator} />;
+}
+
+// DOM-id helper. Node ids can contain `:` / `.` / `<` / `>` which are
+// valid in HTML id attributes but awkward to escape in querySelector;
+// `CSS.escape` makes the lookup in the focus effect safe.
+function rowDomId(treeUid: string, nodeId: string) {
+  return `${treeUid}-${nodeId}`;
 }
 
 function Tree({ root, locator }: { root: StructuredNode; locator: FileLocator }) {
@@ -103,6 +110,9 @@ function Tree({ root, locator }: { root: StructuredNode; locator: FileLocator })
   }, []);
 
   const treeRef = useRef<HTMLDivElement | null>(null);
+  // Stable prefix so each row's DOM id is unique across multiple
+  // structured views on the same page (and across remounts).
+  const treeUid = useId();
   // Virtualize so a fully-expanded scene (≈8k rows) doesn't try to
   // mount every <div role=treeitem> on each toggle. Row size is fixed
   // by `leading-6` on TreeRow (24px); we don't bother measuring.
@@ -121,6 +131,12 @@ function Tree({ root, locator }: { root: StructuredNode; locator: FileLocator })
   useEffect(() => {
     if (focusedIdx >= 0) virtualizer.scrollToIndex(focusedIdx, { align: "auto" });
   }, [focusedIdx, virtualizer]);
+
+  // Move keyboard focus to the tree container as soon as it mounts so
+  // arrow keys drive navigation instead of scrolling the page.
+  useEffect(() => {
+    treeRef.current?.focus({ preventScroll: true });
+  }, [locator.path]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -199,9 +215,14 @@ function Tree({ root, locator }: { root: StructuredNode; locator: FileLocator })
         ref={treeRef}
         role="tree"
         aria-label="Structured file contents"
-        tabIndex={-1}
+        // Container holds focus; rows are addressed via
+        // aria-activedescendant. This way arrow keys reach onKeyDown
+        // even when the user hasn't clicked into the tree yet — focus
+        // moves cleanly from <body> to here on first tab/click.
+        tabIndex={0}
+        aria-activedescendant={focusedId ? rowDomId(treeUid, focusedId) : undefined}
         onKeyDown={onKeyDown}
-        className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-2 focus:outline-none"
+        className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-2 focus:outline-none focus:ring-1 focus:ring-sky-600/40"
       >
         {/* Spacer keeps the scroll thumb honest while we render only
             the rows in view. Items are absolute-positioned by the
@@ -227,8 +248,8 @@ function Tree({ root, locator }: { root: StructuredNode; locator: FileLocator })
                   expanded={expandedIds.has(row.node.id)}
                   focused={row.node.id === focusedId}
                   selected={row.node.id === selectedId}
+                  domId={rowDomId(treeUid, row.node.id)}
                   onActivate={activateRow}
-                  onFocus={setFocusedId}
                 />
               </div>
             );
@@ -269,32 +290,30 @@ function TreeRow({
   expanded,
   focused,
   selected,
+  domId,
   onActivate,
-  onFocus,
 }: {
   row: VisibleRow;
   expanded: boolean;
   focused: boolean;
   selected: boolean;
+  domId: string;
   onActivate: (id: string) => void;
-  onFocus: (id: string) => void;
 }) {
   const { node, depth } = row;
   const hasChildren = node.children.length > 0;
   return (
     <div
+      id={domId}
       role="treeitem"
-      // Roving tabindex: only the focused row participates in the page
-      // tab order so screen readers and keyboard users land on the
-      // user's last position when re-entering the tree.
-      tabIndex={focused ? 0 : -1}
+      // Focus lives on the tree container; rows are referenced via
+      // aria-activedescendant. No per-row tabindex.
       aria-level={depth + 1}
       aria-expanded={hasChildren ? expanded : undefined}
       aria-selected={selected}
       data-node-id={node.id}
-      onFocus={() => onFocus(node.id)}
       onClick={() => onActivate(node.id)}
-      className={`flex w-full cursor-default items-baseline gap-1 text-sm leading-6 select-none hover:text-sky-300 focus:outline-none ${
+      className={`flex w-full cursor-default items-baseline gap-1 text-sm leading-6 select-none hover:text-sky-300 ${
         selected ? "rounded bg-slate-800 text-sky-200" : ""
       } ${focused ? "ring-1 ring-sky-600/60 ring-inset" : ""}`}
       style={{ paddingLeft: `${depth * 12}px` }}
