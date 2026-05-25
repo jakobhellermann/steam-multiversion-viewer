@@ -8,6 +8,7 @@ fmt:
 lint:
     cargo clippy
     cd frontend && oxlint
+    cd frontend && pnpm run lint
 
 ai-debt:
     rg -F 'TODO(ai-review)' -g '!justfile' -g '!CLAUDE.md' -g '!docs/plan.md'
