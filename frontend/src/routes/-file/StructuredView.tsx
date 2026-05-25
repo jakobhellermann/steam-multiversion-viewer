@@ -565,7 +565,11 @@ function Tree({
         </div>
         <div className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-3">
           {selectedId ? (
-            <NodeContentPanel locator={locator} nodeId={selectedId} />
+            <NodeContentPanel
+              locator={locator}
+              nodeId={selectedId}
+              isInTree={(id) => id === root.id || parentById.has(id)}
+            />
           ) : (
             <p className="text-sm text-slate-500">Pick a node to inspect.</p>
           )}
@@ -938,7 +942,15 @@ function makeLinkifyPptrs(locator: FileLocator) {
   };
 }
 
-function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: string }) {
+function NodeContentPanel({
+  locator,
+  nodeId,
+  isInTree,
+}: {
+  locator: FileLocator;
+  nodeId: string;
+  isInTree: (id: string) => boolean;
+}) {
   const content = useQuery({
     queryKey: [
       "file-structured-node",
@@ -1005,11 +1017,16 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
       const href = a.getAttribute("href");
       if (href) {
         router.navigate({ to: href });
-      } else {
-        window.location.hash = ref;
+        return;
       }
+      // Same-file ref: only navigate the hash if the target actually
+      // lives in the tree. Otherwise the click is a no-op — the
+      // backend filters some pptrs out (self-transforms, etc) but
+      // they still appear as `__PPTR__` sentinels in the json dump.
+      if (!isInTree(ref)) return;
+      window.location.hash = ref;
     },
-    [router],
+    [router, isInTree],
   );
 
   if (!settled) return null;
