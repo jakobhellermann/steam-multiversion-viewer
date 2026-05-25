@@ -161,28 +161,30 @@ function AppDetailBody({
         {info.branches.length === 0 ? (
           <p className="text-slate-500 text-sm">No branches.</p>
         ) : (
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-700">
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2 text-right">Build ID</th>
-                <th className="px-3 py-2">Updated</th>
-                <th className="px-3 py-2">Description</th>
-              </tr>
-            </thead>
-            <tbody>
-              {info.branches.map((b) => (
-                <tr key={b.name} className="border-b border-slate-800">
-                  <td className="px-3 py-2 font-medium">{b.name}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{b.build_id}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatTime(b.time_updated)}</td>
-                  <td className="px-3 py-2 text-slate-400">
-                    {b.description || <span className="text-slate-600">—</span>}
-                  </td>
+          <div className="max-h-80 overflow-y-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="sticky top-0 bg-slate-900">
+                <tr className="border-b border-slate-700">
+                  <th className="px-3 py-2">Name</th>
+                  <th className="px-3 py-2 text-right">Build ID</th>
+                  <th className="px-3 py-2">Updated</th>
+                  <th className="px-3 py-2">Description</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {info.branches.map((b) => (
+                  <tr key={b.name} className="border-b border-slate-800">
+                    <td className="px-3 py-2 font-medium">{b.name}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{b.build_id}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatTime(b.time_updated)}</td>
+                    <td className="px-3 py-2 text-slate-400">
+                      {b.description || <span className="text-slate-600">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         {info.private_branches && (
           <p className="mt-2 text-xs text-slate-500">
