@@ -215,6 +215,21 @@ function Tree({
     }
   }, [visibleRows, focusedId, root.id]);
 
+  // When the active filter changes (e.g. a `?q=…` deep link or a
+  // toggled facet) slide focus onto the first match so the right pane
+  // shows something useful straight away. Keyed on `directMatches`
+  // identity so clicking a non-leaf ancestor doesn't re-trigger the
+  // jump — that effect would otherwise fight the user every time.
+  useEffect(() => {
+    if (directMatches == null) return;
+    const firstMatch = visibleRows.find((r) => directMatches.has(r.node.id));
+    if (firstMatch) setFocusedId(firstMatch.node.id);
+    // Intentionally only depend on `directMatches` so non-match clicks
+    // don't re-fire this — `visibleRows` is fresh enough on the same
+    // render that the filter changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directMatches]);
+
   const parentById = useMemo(() => {
     const map = new Map<string, string>();
     walk(root, (n) => {
