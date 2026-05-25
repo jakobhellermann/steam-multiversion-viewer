@@ -2,7 +2,7 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
 /// Languages we ship grammars for. Add to this *and* to extToLang below.
-const LANGS = ["xml", "json", "lua", "csharp"] as const;
+const LANGS = ["xml", "json", "lua", "csharp", "diff"] as const;
 type Lang = (typeof LANGS)[number];
 
 const THEME = "github-dark";

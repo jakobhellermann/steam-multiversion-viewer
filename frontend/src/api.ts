@@ -125,6 +125,33 @@ export async function deleteExtraManifest(
   return r.json();
 }
 
+/// Fetch a unified diff between the same file in two manifests.
+/// Backend resolves both sides through `/file/transformed` semantics —
+/// .dll diffs are between two decompiled C# blobs. Returns the raw
+/// unified-diff text (ready to feed into shiki with the `diff` lang)
+/// or null when the file is binary and untransformable (HTTP 415).
+export async function fetchFileDiff(
+  appid: AppId,
+  baseDepotId: number,
+  baseManifestId: string,
+  baseBranch: string,
+  target: { depot_id: number; manifest_id: string; branch: string },
+  path: string,
+): Promise<string | null> {
+  const qs = new URLSearchParams({ branch: baseBranch, path });
+  const r = await fetch(
+    `/api/apps/${appid}/depots/${baseDepotId}/manifests/${baseManifestId}/file/diff?${qs}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path, target }),
+    },
+  );
+  if (r.status === 415) return null;
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.text();
+}
+
 export async function fetchManifestDiff(
   appid: AppId,
   base: ManifestRef,

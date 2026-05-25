@@ -246,6 +246,7 @@ function FileViewPage() {
                 <DiffTargetBlock
                   key={`${ref.depot_id}-${ref.manifest_id}`}
                   base={view.data ?? null}
+                  baseLocator={{ appid, depotId, manifestId, branch, path }}
                   ref_={ref}
                   creationTime={status?.creation_time ?? 0}
                   query={targetViews[i]}

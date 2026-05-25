@@ -21,6 +21,7 @@ use crate::http::{CacheSeconds, ImmutableCache};
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 
+pub mod diff;
 pub mod downloads;
 pub mod mount;
 
@@ -403,8 +404,8 @@ pub struct ManifestStatusEntry {
     /// (i.e. what you'd reclaim by deleting it).
     pub bytes_unique: u64,
     /// Manifest creation time (Steam-side timestamp, unix seconds). Lets
-    /// the frontend sort tracked manifests chronologically without
-    /// having to open each one again. Zero when `error` is set.
+    /// callers sort tracked manifests chronologically without having to
+    /// open each one again. Zero when `error` is set.
     pub creation_time: u32,
 }
 
@@ -494,250 +495,6 @@ pub async fn manifest_statuses(
     Ok(Json(out))
 }
 
-#[derive(Deserialize, ToSchema)]
-pub struct ManifestDiffRequest {
-    /// The manifest whose paths we report. A path is included if the file
-    /// under that path differs from *any* of the listed others (added,
-    /// removed, or content-changed).
-    pub base: ManifestRef,
-    pub others: Vec<ManifestRef>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct ManifestDiffResponse {
-    /// Paths in `base` that differ from at least one `other`. Includes
-    /// paths missing in `base` but present in some `other` ("removed").
-    pub changed_paths: Vec<String>,
-}
-
-/// Symmetric path-level diff between a base manifest and a set of others.
-/// Returns every path that, in at least one of the other manifests, is
-/// either missing or has a different content fingerprint. Identity is
-/// `(kind, size, sha, linktarget)`; absence on either side counts as a
-/// difference.
-#[utoipa::path(
-    post,
-    path = "/api/apps/{appid}/manifests/diff",
-    request_body = ManifestDiffRequest
-)]
-#[tracing::instrument(skip_all, fields(others = body.others.len()))]
-pub async fn manifest_diff(
-    State(state): State<AppState>,
-    Path(appid): Path<AppId>,
-    Json(body): Json<ManifestDiffRequest>,
-) -> Result<Json<ManifestDiffResponse>> {
-    let base_snap = state
-        .open_manifest(
-            appid,
-            body.base.depot_id,
-            body.base.manifest_id,
-            &body.base.branch,
-        )
-        .await?;
-
-    // Open all `other` manifests in parallel — pulling them one by one
-    // on a cold cache adds up fast when comparing across many depots.
-    let sem = Arc::new(Semaphore::new(8));
-    let mut fu = FuturesUnordered::new();
-    let mut seen = HashSet::new();
-    for r in &body.others {
-        if !seen.insert((r.depot_id, r.manifest_id)) {
-            continue;
-        }
-        if (r.depot_id, r.manifest_id) == (body.base.depot_id, body.base.manifest_id) {
-            // Comparing a manifest against itself yields nothing.
-            continue;
-        }
-        let state = &state;
-        let sem = sem.clone();
-        let depot_id = r.depot_id;
-        let manifest_id = r.manifest_id;
-        let branch = r.branch.clone();
-        fu.push(async move {
-            let _permit = sem.acquire().await.expect("semaphore not closed");
-            state
-                .open_manifest(appid, depot_id, manifest_id, &branch)
-                .await
-        });
-    }
-
-    let base = base_snap.manifest();
-    let mut base_by_path: std::collections::HashMap<&str, &steam_vent_depot::DepotFile> =
-        std::collections::HashMap::with_capacity(base.files.len());
-    for f in &base.files {
-        if matches!(f.kind, FileKind::Directory) {
-            continue;
-        }
-        base_by_path.insert(f.path.as_str(), f);
-    }
-
-    // Identity tuple used to decide "same content". Files without a sha
-    // (e.g. symlinks) still get a stable fingerprint via the rest.
-    fn fp(f: &steam_vent_depot::DepotFile) -> (FileKind, u64, Option<[u8; 20]>, Option<&str>) {
-        (f.kind, f.size, f.sha, f.linktarget.as_deref())
-    }
-
-    let mut changed: HashSet<String> = HashSet::new();
-    while let Some(result) = fu.next().await {
-        let snap = result?;
-        let other = snap.manifest();
-        let mut other_paths: HashSet<&str> = HashSet::with_capacity(other.files.len());
-        for f in &other.files {
-            if matches!(f.kind, FileKind::Directory) {
-                continue;
-            }
-            other_paths.insert(f.path.as_str());
-            match base_by_path.get(f.path.as_str()) {
-                None => {
-                    // Present in `other`, absent in `base` — counts as a
-                    // change of `base`'s view (the file would "appear").
-                    changed.insert(f.path.clone());
-                }
-                Some(base_f) => {
-                    if fp(base_f) != fp(f) {
-                        changed.insert(f.path.clone());
-                    }
-                }
-            }
-        }
-        // Paths in `base` that this `other` does not have at all.
-        for path in base_by_path.keys() {
-            if !other_paths.contains(path) {
-                changed.insert((*path).to_owned());
-            }
-        }
-    }
-
-    let mut changed_paths: Vec<String> = changed.into_iter().collect();
-    changed_paths.sort();
-    Ok(Json(ManifestDiffResponse { changed_paths }))
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct FileDiffTargetsRequest {
-    pub base: ManifestRef,
-    pub others: Vec<ManifestRef>,
-    pub path: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct FileDiffTargetsResponse {
-    /// For each `other` manifest, whether the file at `path` differs
-    /// from the base (`different`), doesn't exist there (`missing`), or
-    /// is identical (`same`). Identity is the file's content sha (with
-    /// kind/linktarget tie-breakers for non-file or symlink entries).
-    pub statuses: Vec<FileDiffTargetStatus>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct FileDiffTargetStatus {
-    pub depot_id: DepotId,
-    pub manifest_id: ManifestId,
-    pub status: FileDiffStatus,
-}
-
-#[derive(Serialize, ToSchema, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
-pub enum FileDiffStatus {
-    Same,
-    Different,
-    Missing,
-}
-
-/// Per-target diff status for a single file across many manifests.
-/// Lets the compare-to menu hide manifests that have the exact same
-/// version of the focused file. Cheaper than asking the frontend to
-/// fan-out file-view queries; one round trip and the heavy lifting
-/// happens server-side where the manifests are already in cache.
-#[utoipa::path(
-    post,
-    path = "/api/apps/{appid}/file/diff-targets",
-    request_body = FileDiffTargetsRequest
-)]
-#[tracing::instrument(skip_all, fields(path = %body.path, others = body.others.len()))]
-pub async fn file_diff_targets(
-    State(state): State<AppState>,
-    Path(appid): Path<AppId>,
-    Json(body): Json<FileDiffTargetsRequest>,
-) -> Result<Json<FileDiffTargetsResponse>> {
-    let base_snap = state
-        .open_manifest(
-            appid,
-            body.base.depot_id,
-            body.base.manifest_id,
-            &body.base.branch,
-        )
-        .await?;
-    let base_file = base_snap
-        .manifest()
-        .files
-        .iter()
-        .find(|f| f.path == body.path)
-        .cloned();
-
-    // Identity tuple — same as manifest_diff, scoped to one file.
-    let base_fp = base_file
-        .as_ref()
-        .map(|f| (f.kind, f.size, f.sha, f.linktarget.clone()));
-
-    let sem = Arc::new(Semaphore::new(8));
-    let mut fu = FuturesUnordered::new();
-    let mut seen = HashSet::new();
-    for r in &body.others {
-        if !seen.insert((r.depot_id, r.manifest_id)) {
-            continue;
-        }
-        let state = &state;
-        let sem = sem.clone();
-        let depot_id = r.depot_id;
-        let manifest_id = r.manifest_id;
-        let branch = r.branch.clone();
-        fu.push(async move {
-            let _permit = sem.acquire().await.expect("semaphore not closed");
-            let result = state
-                .open_manifest(appid, depot_id, manifest_id, &branch)
-                .await;
-            (depot_id, manifest_id, result)
-        });
-    }
-
-    let path = body.path.as_str();
-    let mut statuses = Vec::new();
-    while let Some((depot_id, manifest_id, result)) = fu.next().await {
-        let status = match result {
-            Ok(snap) => {
-                let file = snap
-                    .manifest()
-                    .files
-                    .iter()
-                    .find(|f| f.path == path)
-                    .cloned();
-                let other_fp = file.map(|f| (f.kind, f.size, f.sha, f.linktarget));
-                match (&base_fp, &other_fp) {
-                    (Some(b), Some(o)) if b == o => FileDiffStatus::Same,
-                    (None, None) => FileDiffStatus::Same,
-                    (_, None) => FileDiffStatus::Missing,
-                    (None, Some(_)) => FileDiffStatus::Different,
-                    (Some(_), Some(_)) => FileDiffStatus::Different,
-                }
-            }
-            Err(err) => {
-                tracing::warn!(%depot_id, %manifest_id, %err, "open_manifest failed in file diff");
-                // Treat a fetch error as "different" so the user still
-                // sees the candidate — they can investigate.
-                FileDiffStatus::Different
-            }
-        };
-        statuses.push(FileDiffTargetStatus {
-            depot_id,
-            manifest_id,
-            status,
-        });
-    }
-
-    Ok(Json(FileDiffTargetsResponse { statuses }))
-}
-
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct FileViewQuery {
     #[serde(default = "default_branch")]
@@ -774,20 +531,20 @@ pub struct FileView {
     /// to preview" or "not a text-like extension". The caller decides
     /// whether to offer a fetch/download instead.
     pub content: Option<String>,
-    /// When `content` is `None` because of a size cap, the cap used (for
-    /// the UI to show "this file is X MiB, preview cap is Y MiB").
+    /// When `content` is `None` because of a size cap, the cap that was
+    /// applied (so the caller can surface "this file is X MiB, cap is
+    /// Y MiB" without hardcoding the limit).
     pub preview_cap_bytes: u64,
-    /// If non-null, the backend has a registered text transformer for
-    /// this file (e.g. ilspycmd for `.dll`). The frontend shouldn't
-    /// duplicate the extension list — call `/file/transformed` whenever
-    /// this is set.
+    /// Set when a text transformer is registered for this file's
+    /// extension — callers should treat it as "the `/file/transformed`
+    /// endpoint will yield text for this file" rather than guessing
+    /// from the extension themselves.
     pub transformer: Option<TransformerInfo>,
 }
 
 #[derive(Serialize, ToSchema, Clone, Debug)]
 pub struct TransformerInfo {
-    /// MIME type of the transformer's output; the frontend uses this to
-    /// pick a syntax highlighter.
+    /// MIME type of the transformer's output (e.g. `text/x-csharp`).
     pub mime: String,
 }
 
@@ -875,8 +632,8 @@ pub async fn manifest_file(
 
     let (content_kind, content) = if !q.auto_fetch {
         // Caller wants metadata only — skip the download + content read.
-        // content_kind is best-effort by extension/size only; we leave
-        // it as Unknown so the frontend doesn't render anything.
+        // We don't classify text-vs-binary without reading the bytes,
+        // so return `Unknown`.
         (FileContentKind::Unknown, None)
     } else {
         match file_kind {

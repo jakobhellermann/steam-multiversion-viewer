@@ -3,13 +3,16 @@ import { useState } from "react";
 
 import type { FileView, ManifestRef } from "../../api";
 import { formatBytes, formatDate } from "../../lib/format";
+import { DiffView } from "./DiffView";
 import { FilePreview } from "./FilePreview";
 import type { FileLocator } from "./types";
 
 /// Collapsible "diff against another manifest" row. Header summarises
-/// the size delta; body shows the target's full preview.
+/// the size delta; body shows the actual diff for text-like files, or
+/// the target's preview otherwise.
 export function DiffTargetBlock({
   base,
+  baseLocator,
   ref_,
   creationTime,
   query,
@@ -17,6 +20,9 @@ export function DiffTargetBlock({
   locator,
 }: {
   base: FileView | null;
+  /// Identity of the base file — needed so we can ask the backend for a
+  /// unified diff against `locator` (the target).
+  baseLocator: FileLocator;
   ref_: ManifestRef;
   creationTime: number;
   query: { data: FileView | null | undefined; isPending: boolean; error: unknown };
@@ -70,9 +76,21 @@ export function DiffTargetBlock({
               link target: {base.linktarget ?? "—"} → {target.linktarget ?? "—"}
             </p>
           )}
-          {target && (
-            <FilePreview view={target} rawSrc={rawSrc} locator={locator} showHeader={false} />
-          )}
+          {target &&
+            (canDiffText(base) && canDiffText(target) ? (
+              <DiffView
+                appid={baseLocator.appid}
+                base={{
+                  depotId: baseLocator.depotId,
+                  manifestId: baseLocator.manifestId,
+                  branch: baseLocator.branch,
+                }}
+                target={locator}
+                path={baseLocator.path}
+              />
+            ) : (
+              <FilePreview view={target} rawSrc={rawSrc} locator={locator} showHeader={false} />
+            ))}
         </div>
       )}
     </div>
@@ -98,6 +116,16 @@ function summaryFor(
     summary: signedDelta(delta),
     summaryClass: delta === 0 ? "text-slate-500" : "text-amber-300",
   };
+}
+
+/// True when this file resolves to a text blob the backend can diff —
+/// either it's already inline text, or there's a registered transformer
+/// that produces text (decompile / disassembly). Bytes-only files
+/// without a transformer fall through to the plain preview.
+function canDiffText(view: FileView | null): boolean {
+  if (view == null) return false;
+  if (view.kind !== "file") return false;
+  return view.content_kind === "text" || view.transformer != null;
 }
 
 function signedDelta(delta: number): string {
