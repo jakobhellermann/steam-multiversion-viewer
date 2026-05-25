@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { FileView, ManifestRef } from "../../api";
 import { formatBytes, formatDate } from "../../lib/format";
@@ -29,8 +29,21 @@ export function DiffTargetBlock({
   rawSrc: string;
   locator: FileLocator;
 }) {
-  const [open, setOpen] = useState(false);
   const target = query.data;
+  // Auto-expand for plain text files (no transformer)
+  const autoOpen =
+    target != null &&
+    base != null &&
+    canDiffText(base) &&
+    canDiffText(target) &&
+    base.transformer == null &&
+    target.transformer == null;
+  const [open, setOpen] = useState(false);
+  // `useState(autoOpen)` would only see the initial render's value;
+  // open it once the file-view query lands.
+  useEffect(() => {
+    if (autoOpen) setOpen(true);
+  }, [autoOpen]);
   // fetchFileViewOptional returns null on 404 — file is missing from
   // that manifest, not an error.
   const targetMissing = !query.isPending && query.error == null && target === null;
