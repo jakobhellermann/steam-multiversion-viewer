@@ -777,6 +777,18 @@ pub struct FileView {
     /// When `content` is `None` because of a size cap, the cap used (for
     /// the UI to show "this file is X MiB, preview cap is Y MiB").
     pub preview_cap_bytes: u64,
+    /// If non-null, the backend has a registered text transformer for
+    /// this file (e.g. ilspycmd for `.dll`). The frontend shouldn't
+    /// duplicate the extension list — call `/file/transformed` whenever
+    /// this is set.
+    pub transformer: Option<TransformerInfo>,
+}
+
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct TransformerInfo {
+    /// MIME type of the transformer's output; the frontend uses this to
+    /// pick a syntax highlighter.
+    pub mime: String,
 }
 
 #[derive(Serialize, ToSchema, Clone, Copy, Debug)]
@@ -901,6 +913,11 @@ pub async fn manifest_file(
         chunk_shas.iter().filter(|sha| index.has_chunk(sha)).count() as u32
     };
 
+    let transformer =
+        crate::transform::tools::transformer_for(&file_path).map(|t| TransformerInfo {
+            mime: t.output_mime.to_string(),
+        });
+
     Ok(Json(FileView {
         path: file_path,
         size: file_size,
@@ -912,6 +929,7 @@ pub async fn manifest_file(
         content_kind,
         content,
         preview_cap_bytes: PREVIEW_CAP_BYTES,
+        transformer,
     }))
 }
 

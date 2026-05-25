@@ -215,6 +215,16 @@ export type FileView = {
   content_kind: FileContentKind;
   content: string | null;
   preview_cap_bytes: number;
+  /// Set when the backend has a registered text transformer for this
+  /// file's extension. The frontend decides "show a decompile-spinner"
+  /// purely from this field — never from the file extension.
+  transformer: TransformerInfo | null;
+};
+
+export type TransformerInfo = {
+  /// MIME type of the transformer's output — frontend uses it to pick
+  /// a syntax highlighter for the result.
+  mime: string;
 };
 
 export function fetchFileView(

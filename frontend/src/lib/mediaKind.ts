@@ -20,15 +20,6 @@ export function mediaKindForPath(path: string): MediaKind {
   return null;
 }
 
-const TRANSFORMABLE_EXTS = new Set(["dll", "exe", "so"]);
-
-/// Mirrors the backend's transformer dispatch — true when the file
-/// extension has a registered text transformer (e.g. ilspycmd).
-export function isTransformablePath(path: string): boolean {
-  const ext = extOf(path);
-  return ext != null && TRANSFORMABLE_EXTS.has(ext);
-}
-
 function extOf(path: string): string | null {
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   const name = slash >= 0 ? path.slice(slash + 1) : path;
