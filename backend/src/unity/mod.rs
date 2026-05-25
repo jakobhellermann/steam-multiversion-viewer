@@ -17,6 +17,7 @@ use steam_depot_vfs::chunk_store::ChunkStore;
 use steam_depot_vfs::fs::DepotManifestStore;
 
 mod format;
+pub mod tree;
 
 /// Dump a unity serialized-file as text
 /// Synchronous because rabex's I/O trampolines

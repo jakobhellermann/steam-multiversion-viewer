@@ -246,6 +246,9 @@ export type FileView = {
   /// file's extension. The frontend decides "show a decompile-spinner"
   /// purely from this field — never from the file extension.
   transformer: TransformerInfo | null;
+  /// Set when the backend can build a structured tree (e.g. unity
+  /// serialized files). Frontend toggles to the tree renderer when set.
+  structured: StructuredInfo | null;
 };
 
 export type TransformerInfo = {
@@ -253,6 +256,73 @@ export type TransformerInfo = {
   /// a syntax highlighter for the result.
   mime: string;
 };
+
+export type StructuredInfo = {
+  /// Renderer hint — currently always `"unity-serialized"`.
+  kind: string;
+};
+
+export type StructuredNode = {
+  id: string;
+  label: string;
+  kind: string;
+  badge?: string;
+  /// When true, the backend wants this node collapsed by default.
+  /// Frontend honors the flag verbatim — never decides expansion
+  /// based on `kind` or `id`.
+  default_collapsed?: boolean;
+  children: StructuredNode[];
+};
+
+export type StructuredTree = {
+  kind: string;
+  root: StructuredNode;
+};
+
+export type NodeContent = {
+  mime: string;
+  text: string;
+};
+
+/// Fetch the structured tree for a file. The path/branch identify the
+/// file; backend dispatches based on the file's type.
+export async function fetchFileStructured(
+  appid: AppId,
+  depotId: number,
+  manifestId: string,
+  branch: string,
+  path: string,
+): Promise<StructuredTree> {
+  const qs = new URLSearchParams({ branch, path });
+  const r = await fetch(
+    `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/structured?${qs}`,
+    { method: "POST" },
+  );
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
+/// Fetch lazy content for a single node inside a structured tree.
+export async function fetchStructuredNodeContent(
+  appid: AppId,
+  depotId: number,
+  manifestId: string,
+  branch: string,
+  path: string,
+  nodeId: string,
+): Promise<NodeContent> {
+  const qs = new URLSearchParams({ branch, path });
+  const r = await fetch(
+    `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/structured/node?${qs}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ node_id: nodeId }),
+    },
+  );
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
 
 export function fetchFileView(
   appid: AppId,

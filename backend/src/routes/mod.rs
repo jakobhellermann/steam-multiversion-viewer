@@ -24,6 +24,7 @@ use crate::steam::{AppId, DepotId, ManifestId};
 pub mod diff;
 pub mod downloads;
 pub mod mount;
+pub mod structured;
 
 pub(crate) type Result<T, E = ApiError> = std::result::Result<T, E>;
 
@@ -540,12 +541,23 @@ pub struct FileView {
     /// endpoint will yield text for this file" rather than guessing
     /// from the extension themselves.
     pub transformer: Option<TransformerInfo>,
+    /// Set when the backend can build a [`crate::structured::StructuredTree`]
+    /// for this file. The frontend uses it to decide whether to render
+    /// the tree view instead of (or alongside) the plain preview.
+    pub structured: Option<StructuredInfo>,
 }
 
 #[derive(Serialize, ToSchema, Clone, Debug)]
 pub struct TransformerInfo {
     /// MIME type of the transformer's output (e.g. `text/x-csharp`).
     pub mime: String,
+}
+
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct StructuredInfo {
+    /// Renderer hint matching `StructuredTree::kind` (e.g.
+    /// `"unity-serialized"`).
+    pub kind: String,
 }
 
 #[derive(Serialize, ToSchema, Clone, Copy, Debug)]
@@ -674,6 +686,7 @@ pub async fn manifest_file(
         crate::transform::tools::transformer_for(&file_path).map(|t| TransformerInfo {
             mime: t.output_mime().to_string(),
         });
+    let structured = structured_info_for(&file_path);
 
     Ok(Json(FileView {
         path: file_path,
@@ -687,7 +700,24 @@ pub async fn manifest_file(
         content,
         preview_cap_bytes: PREVIEW_CAP_BYTES,
         transformer,
+        structured,
     }))
+}
+
+/// Probe whether the backend has a structured-tree builder for this
+/// file. Keeps the route layer out of feature-cfg territory.
+fn structured_info_for(path: &str) -> Option<StructuredInfo> {
+    #[cfg(feature = "unity")]
+    {
+        use crate::transform::Transformer;
+        if let Some(Transformer::UnitySerialized) = crate::transform::tools::transformer_for(path) {
+            return Some(StructuredInfo {
+                kind: crate::unity::tree::TREE_KIND.to_string(),
+            });
+        }
+    }
+    let _ = path;
+    None
 }
 
 fn hex_encode(bytes: [u8; 20]) -> String {

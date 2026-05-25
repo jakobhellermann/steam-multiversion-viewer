@@ -8,6 +8,7 @@ mod routes;
 mod state;
 mod steam;
 mod store_index;
+mod structured;
 mod transform;
 #[cfg(feature = "unity")]
 mod unity;
@@ -58,6 +59,8 @@ async fn main() -> Result<()> {
         .routes(routes!(routes::manifest_file))
         .routes(routes!(routes::manifest_file_raw))
         .routes(routes!(routes::manifest_file_transformed))
+        .routes(routes!(routes::structured::manifest_file_structured))
+        .routes(routes!(routes::structured::manifest_file_structured_node))
         .routes(routes!(routes::downloads::manifest_download))
         .routes(routes!(routes::downloads::downloads_snapshot))
         .routes(routes!(routes::downloads::downloads_cancel))

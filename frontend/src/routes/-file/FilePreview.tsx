@@ -7,6 +7,7 @@ import { formatBytes } from "../../lib/format";
 import { mediaKindForPath } from "../../lib/mediaKind";
 import { highlight, langForMime, langForPath } from "../../lib/syntax";
 import { MediaPlayer } from "./MediaPlayer";
+import { StructuredView } from "./StructuredView";
 import type { FileLocator } from "./types";
 
 /// Render `view` as the user expects: image/audio/video by extension,
@@ -36,6 +37,20 @@ export function FilePreview({
   ) : null;
 
   const sectionClass = showHeader ? "mt-6" : "";
+
+  // Structured view wins over everything else — files that have one
+  // (unity scenes, eventually bundles) are useless as raw text.
+  if (view.structured) {
+    // Take the remaining vertical space inside the file route so
+    // StructuredView can fill it. Without `min-h-0` the flex item
+    // would refuse to shrink below its intrinsic content height.
+    return (
+      <section className={`${sectionClass} flex min-h-0 flex-1 flex-col`}>
+        {header}
+        <StructuredView locator={locator} />
+      </section>
+    );
+  }
 
   const media = mediaKindForPath(view.path);
   if (media === "image") {

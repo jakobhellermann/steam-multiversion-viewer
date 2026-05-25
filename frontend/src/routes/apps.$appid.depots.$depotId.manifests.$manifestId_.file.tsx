@@ -179,8 +179,12 @@ function FileViewPage() {
     },
   });
 
+  // File page is always viewport-fixed: header (measured into
+  // `--app-header-h` by the root component) sits above us, we claim
+  // the rest. The preview owns its own scroll-region — body never
+  // scrolls on this route.
   return (
-    <div className="mx-auto max-w-6xl p-8">
+    <div className="mx-auto flex h-[calc(100dvh-var(--app-header-h,52px))] max-w-6xl flex-col overflow-hidden p-8">
       <nav className="mb-4 flex items-center gap-2 text-sm text-slate-400">
         <Link to="/apps/$appid" params={{ appid: appidParam }} className="hover:underline">
           {appInfoQuery.data?.name ?? `App ${appid}`}

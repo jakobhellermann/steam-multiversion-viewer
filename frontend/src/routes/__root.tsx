@@ -2,6 +2,7 @@ import { Link, Outlet, createRootRouteWithContext } from "@tanstack/react-router
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import type { QueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 
 import { DownloadsDrawer } from "../components/DownloadsDrawer";
 import { MountToggle } from "../components/MountToggle";
@@ -12,9 +13,28 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 });
 
 function RootComponent() {
+  // Publish the header's measured height on `<html>` as `--app-header-h`
+  // so routes can size their containers against the remaining viewport
+  // without hardcoding a pixel guess. Updates whenever the header
+  // itself changes size (e.g. on narrow widths).
+  const headerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const update = () => {
+      document.documentElement.style.setProperty(
+        "--app-header-h",
+        `${el.getBoundingClientRect().height}px`,
+      );
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
     <>
-      <header className="border-b border-slate-800">
+      <header ref={headerRef} className="border-b border-slate-800">
         <div className="mx-auto flex max-w-4xl items-center px-8 py-3">
           <Link to="/" className="font-medium text-sky-400 hover:underline">
             Library
