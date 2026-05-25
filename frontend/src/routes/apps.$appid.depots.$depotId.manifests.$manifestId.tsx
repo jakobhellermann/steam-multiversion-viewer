@@ -21,7 +21,7 @@ import {
 import { Bytes } from "../components/Bytes";
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
 import { ErrorBox } from "../components/ErrorBox";
-import { formatBytes } from "../lib/format";
+import { formatBytes, formatDate } from "../lib/format";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { pinScroll } from "../lib/pinScroll";
 
@@ -145,6 +145,10 @@ function ManifestDetail() {
         >
           {branch === "public" ? depotId : `${depotId} · ${branch}`}
         </Link>
+        <span className="text-slate-600">/</span>
+        <span className="font-medium text-slate-200">
+          {info.data ? formatDate(info.data.creation_time) : "manifest"}
+        </span>
       </nav>
 
       {info.isPending && <p className="text-slate-400">Loading manifest…</p>}

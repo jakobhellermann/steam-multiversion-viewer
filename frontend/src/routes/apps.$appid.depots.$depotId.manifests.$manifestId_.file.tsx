@@ -203,6 +203,8 @@ function FileViewPage() {
         >
           {manifestCrumbLabel(currentManifestCreation(statusQuery.data, depotId, manifestId))}
         </Link>
+        <span className="text-slate-600">/</span>
+        <span className="truncate font-medium text-slate-200">{filenameOf(path)}</span>
       </nav>
 
       <div className="flex items-center gap-3">
@@ -331,4 +333,9 @@ function currentManifestCreation(
 function manifestCrumbLabel(creationTime: number): string {
   if (creationTime > 0) return formatDate(creationTime);
   return "manifest";
+}
+
+function filenameOf(path: string): string {
+  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return slash >= 0 ? path.slice(slash + 1) : path;
 }
