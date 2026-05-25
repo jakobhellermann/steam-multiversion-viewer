@@ -707,17 +707,17 @@ pub async fn manifest_file(
 /// Probe whether the backend has a structured-tree builder for this
 /// file. Keeps the route layer out of feature-cfg territory.
 fn structured_info_for(path: &str) -> Option<StructuredInfo> {
-    #[cfg(feature = "unity")]
-    {
-        use crate::transform::Transformer;
-        if let Some(Transformer::UnitySerialized) = crate::transform::tools::transformer_for(path) {
-            return Some(StructuredInfo {
-                kind: crate::unity::tree::TREE_KIND.to_string(),
-            });
-        }
+    use crate::transform::Transformer;
+    match crate::transform::tools::transformer_for(path) {
+        #[cfg(feature = "unity")]
+        Some(Transformer::UnitySerialized) => Some(StructuredInfo {
+            kind: crate::unity::tree::TREE_KIND.to_string(),
+        }),
+        Some(Transformer::Dll) => Some(StructuredInfo {
+            kind: crate::dll::tree::TREE_KIND.to_string(),
+        }),
+        _ => None,
     }
-    let _ = path;
-    None
 }
 
 fn hex_encode(bytes: [u8; 20]) -> String {
@@ -869,6 +869,14 @@ pub async fn manifest_file_transformed(
         #[cfg(feature = "unity")]
         crate::transform::Transformer::UnitySerialized => {
             run_unity_dump(snapshot.clone(), file_path.clone()).await?
+        }
+        crate::transform::Transformer::Dll => {
+            return Err(ApiError {
+                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                message:
+                    ".NET assemblies are served through /file/structured, not /file/transformed"
+                        .to_string(),
+            });
         }
     };
 

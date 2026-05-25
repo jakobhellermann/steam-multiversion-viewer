@@ -443,6 +443,16 @@ async fn resolve_diff_text(
                     message: e.to_string(),
                 })?
             }
+            crate::transform::Transformer::Dll => {
+                // .NET assemblies don't have a single text dump to
+                // diff — they're inherently per-type. A future
+                // structured-diff endpoint can cover this; for now
+                // the file falls through to the byte-equality view.
+                return Err(ApiError {
+                    status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    message: ".NET assemblies have no text-diff representation yet".to_string(),
+                });
+            }
         };
         return Ok(DiffSide {
             text,

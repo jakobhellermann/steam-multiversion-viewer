@@ -1,9 +1,8 @@
 // TODO(ai-review): review for style and correctness
 //! `/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured`
 //! — returns a [`StructuredTree`] for files where the backend knows
-//! how to build one (today only unity serialized files via
-//! [`crate::unity::tree::build_tree`]). A companion endpoint serves
-//! lazy per-node content so the initial response stays small.
+//! how to build one. A companion endpoint serves lazy per-node content
+//! so the initial response stays small.
 
 use std::sync::Arc;
 
@@ -16,6 +15,7 @@ use crate::error::ApiError;
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 use crate::structured::{NodeContent, StructuredTree};
+use crate::transform::Transformer;
 
 use super::{FileViewQuery, Result};
 
@@ -40,11 +40,11 @@ pub async fn manifest_file_structured(
             .await?,
     );
 
-    // Pre-download the file's own chunks so the rabex tree-walk
-    // doesn't stall mid-parse waiting on the CDN. External files
-    // (typetree, shared assets) are still fetched lazily by rabex's
-    // resolver when it needs them.
-    let chunks_for_dl = {
+    // Pre-download the file's own chunks so the actual tree-building
+    // step doesn't stall mid-parse waiting on the CDN. Per-format
+    // external files (rabex typetrees, etc) are fetched lazily by
+    // their own resolvers.
+    let (file_sha, chunks_for_dl) = {
         let file = snapshot
             .manifest()
             .files
@@ -54,10 +54,17 @@ pub async fn manifest_file_structured(
                 status: axum::http::StatusCode::NOT_FOUND,
                 message: format!("file not in manifest: {}", q.path),
             })?;
-        file.chunks
-            .iter()
-            .map(|c| (c.sha, u64::from(c.size_compressed)))
-            .collect::<Vec<_>>()
+        let sha = file.sha.ok_or_else(|| ApiError {
+            status: axum::http::StatusCode::BAD_REQUEST,
+            message: format!("file has no content sha: {}", q.path),
+        })?;
+        (
+            sha,
+            file.chunks
+                .iter()
+                .map(|c| (c.sha, u64::from(c.size_compressed)))
+                .collect::<Vec<_>>(),
+        )
     };
     state
         .downloads
@@ -65,10 +72,9 @@ pub async fn manifest_file_structured(
         .await;
 
     let path = q.path.clone();
-
-    #[cfg(feature = "unity")]
-    {
-        if has_unity_dispatch(&path) {
+    match crate::transform::tools::transformer_for(&path) {
+        #[cfg(feature = "unity")]
+        Some(Transformer::UnitySerialized) => {
             let snapshot_for_blocking = snapshot.clone();
             let tree = tokio::task::spawn_blocking(move || {
                 crate::unity::tree::build_tree(snapshot_for_blocking, &path)
@@ -82,24 +88,32 @@ pub async fn manifest_file_structured(
                 status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 message: e.to_string(),
             })?;
-            return Ok(Json(tree));
+            Ok(Json(tree))
         }
+        Some(Transformer::Dll) => {
+            let cfg = state.config.load();
+            let bytes = snapshot.read_full(&path).await?;
+            let tree = crate::dll::tree::build_tree(&cfg.store_root, &file_sha, &bytes, &path)
+                .await
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e.to_string(),
+                })?;
+            Ok(Json(tree))
+        }
+        _ => Err(ApiError {
+            status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            message: format!("no structured view for {path}"),
+        }),
     }
-
-    Err(ApiError {
-        status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        message: format!("no structured view for {path}"),
-    })
 }
 
-/// Lazy per-node content. V1 returns a placeholder; once we wire the
-/// component-deserialiser this will hand back a JSON dump of the
-/// component's typetree-decoded values.
 #[derive(Deserialize, ToSchema)]
 pub struct NodeContentRequest {
     pub node_id: String,
 }
 
+/// Lazy per-node content.
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured/node",
@@ -113,25 +127,34 @@ pub async fn manifest_file_structured_node(
     Query(q): Query<FileViewQuery>,
     Json(body): Json<NodeContentRequest>,
 ) -> Result<Json<NodeContent>> {
-    #[cfg(feature = "unity")]
-    {
-        if has_unity_dispatch(&q.path) {
-            // Resolve the node id to a path-id; non-object ids (section
-            // headers, class-stats rows) get a friendly placeholder
-            // rather than a 400.
+    let snapshot = Arc::new(
+        state
+            .open_manifest(appid, depot_id, manifest_id, &q.branch)
+            .await?,
+    );
+    let file_sha = snapshot
+        .manifest()
+        .files
+        .iter()
+        .find(|f| f.path == q.path)
+        .and_then(|f| f.sha)
+        .ok_or_else(|| ApiError {
+            status: axum::http::StatusCode::NOT_FOUND,
+            message: format!("file not in manifest: {}", q.path),
+        })?;
+
+    match crate::transform::tools::transformer_for(&q.path) {
+        #[cfg(feature = "unity")]
+        Some(Transformer::UnitySerialized) => {
+            // Resolve the node id to a path-id; non-object ids
+            // (section headers, class-stats rows) get an empty body so
+            // the frontend hides the panel.
             let Some(path_id) = crate::unity::tree::parse_object_node_id(&body.node_id) else {
-                // Section / class-stats nodes — empty body, frontend
-                // hides the panel.
                 return Ok(Json(NodeContent {
                     mime: "text/plain".to_string(),
                     text: String::new(),
                 }));
             };
-            let snapshot = Arc::new(
-                state
-                    .open_manifest(appid, depot_id, manifest_id, &q.branch)
-                    .await?,
-            );
             let path = q.path.clone();
             let text = tokio::task::spawn_blocking(move || {
                 crate::unity::tree::dump_object_json(snapshot, &path, path_id)
@@ -145,28 +168,36 @@ pub async fn manifest_file_structured_node(
                 status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 message: e.to_string(),
             })?;
-            return Ok(Json(NodeContent {
+            Ok(Json(NodeContent {
                 mime: "application/json".to_string(),
                 text,
-            }));
+            }))
         }
+        Some(Transformer::Dll) => {
+            // `type:<fully-qualified-name>` → ilspy -t. Anything else
+            // (namespace nodes, file root) has no body.
+            let Some(type_name) = body.node_id.strip_prefix("type:") else {
+                return Ok(Json(NodeContent {
+                    mime: "text/plain".to_string(),
+                    text: String::new(),
+                }));
+            };
+            let cfg = state.config.load();
+            let bytes = snapshot.read_full(&q.path).await?;
+            let text = crate::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
+                .await
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e.to_string(),
+                })?;
+            Ok(Json(NodeContent {
+                mime: "text/x-csharp".to_string(),
+                text,
+            }))
+        }
+        _ => Err(ApiError {
+            status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            message: "no structured view for this file".to_string(),
+        }),
     }
-
-    let _ = (state, appid, depot_id, manifest_id, q, body);
-    Err(ApiError {
-        status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        message: "no structured view for this file".to_string(),
-    })
-}
-
-/// Today's only dispatch path. Mirrors the heuristic used by
-/// `transform::tools::transformer_for` so a file that gets a unity
-/// transformer also gets a unity tree.
-#[cfg(feature = "unity")]
-fn has_unity_dispatch(path: &str) -> bool {
-    use crate::transform::Transformer;
-    matches!(
-        crate::transform::tools::transformer_for(path),
-        Some(Transformer::UnitySerialized)
-    )
 }

@@ -24,7 +24,7 @@ pub fn transformer_for(path: &str) -> Option<Transformer> {
 
 fn extension_transformer(ext: &str) -> Option<Transformer> {
     match ext {
-        "dll" | "exe" => Some(Transformer::Cli(&DUMP_DLL)),
+        "dll" | "exe" => Some(Transformer::Dll),
         "so" => Some(Transformer::Cli(&NM_DYNAMIC)),
         #[cfg(feature = "unity")]
         "assets" => Some(Transformer::UnitySerialized),
@@ -45,12 +45,6 @@ fn filename_transformer(name: &str) -> Option<Transformer> {
     let _ = name;
     None
 }
-
-const DUMP_DLL: CliTool = CliTool {
-    cmd: "dump-dll",
-    args_before_path: &[],
-    output_mime: "text/x-csharp",
-};
 
 const NM_DYNAMIC: CliTool = CliTool {
     cmd: "nm",

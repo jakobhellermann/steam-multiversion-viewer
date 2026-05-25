@@ -1,4 +1,5 @@
 mod config;
+mod dll;
 mod downloads;
 mod error;
 mod extra_manifests;

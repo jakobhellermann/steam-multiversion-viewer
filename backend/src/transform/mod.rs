@@ -1,12 +1,13 @@
 // TODO(ai-review): review for style and correctness
 //! On-disk cache of "render this binary as text" results.
 //!
-//! Each transformer reads bytes from a depot file and produces a text
-//! representation (e.g. ilspycmd decompiles a .NET .dll into C# source).
-//! Output is cached under `{store_root}/transforms/{sha}.txt.zst`
-//! keyed by the file's manifest sha — manifest shas are content
-//! addresses, so the same file across multiple manifests hits the same
-//! entry. Tool definitions live in `tools.rs`.
+//! Each transformer reads bytes from a depot file and produces one or
+//! more text artifacts (e.g. ilspycmd's `-l` class listing plus a `-t`
+//! decompilation per type). Outputs live under
+//! `{store_root}/transforms/{sha}/{artifact}.txt.zst` keyed by the
+//! file's manifest sha plus a per-artifact name — manifest shas are
+//! content addresses, so the same file across multiple manifests
+//! shares one directory. Tool definitions live in `tools.rs`.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -38,6 +39,12 @@ pub enum Transformer {
     /// `crate::unity::dump_unity_serialized`.
     #[cfg(feature = "unity")]
     UnitySerialized,
+    /// .NET assembly — produces a namespace tree via
+    /// [`crate::dll::tree::build_tree`] and lazy per-type decompiles
+    /// via [`crate::dll::decompile_type`]. There's no
+    /// `/file/transformed`-style single-blob output for this one;
+    /// callers route through `/file/structured` instead.
+    Dll,
 }
 
 impl Transformer {
@@ -46,6 +53,7 @@ impl Transformer {
             Self::Cli(t) => t.output_mime,
             #[cfg(feature = "unity")]
             Self::UnitySerialized => "text/plain",
+            Self::Dll => "text/x-csharp",
         }
     }
 }
@@ -75,8 +83,16 @@ impl From<std::io::Error> for TransformError {
     }
 }
 
-/// Path of the cached output for a given content sha.
-fn cache_path(store_root: &Utf8Path, sha: &[u8; 20]) -> PathBuf {
+/// Default artifact name for the legacy "transform a binary to one
+/// text blob" pathway (whole-DLL ilspy dump, nm symbol list, …).
+/// New transformers should use [`cache_artifact_path`] directly with a
+/// more descriptive name (e.g. `"list"`, `"types/HeroController"`).
+pub const ARTIFACT_MAIN: &str = "main";
+
+/// Cache path for one artifact of a transformed file:
+/// `<store_root>/transforms/<sha-hex>/<artifact>.txt.zst`. `artifact`
+/// may contain `/` to nest further (e.g. `types/Foo.Bar`).
+pub fn cache_artifact_path(store_root: &Utf8Path, sha: &[u8; 20], artifact: &str) -> PathBuf {
     let mut hex = String::with_capacity(40);
     for b in sha {
         use std::fmt::Write as _;
@@ -85,16 +101,18 @@ fn cache_path(store_root: &Utf8Path, sha: &[u8; 20]) -> PathBuf {
     store_root
         .as_std_path()
         .join("transforms")
-        .join(format!("{hex}.txt.zst"))
+        .join(hex)
+        .join(format!("{artifact}.txt.zst"))
 }
 
-/// Try to read the cached output for `sha`. Returns `None` when not yet
-/// computed; returns `Err` on filesystem trouble.
-pub fn read_cached(
+/// Try to read a cached artifact. Returns `None` when not yet computed;
+/// returns `Err` on filesystem trouble.
+pub fn read_cached_artifact(
     store_root: &Utf8Path,
     sha: &[u8; 20],
+    artifact: &str,
 ) -> Result<Option<String>, std::io::Error> {
-    let path = cache_path(store_root, sha);
+    let path = cache_artifact_path(store_root, sha, artifact);
     if !path.exists() {
         return Ok(None);
     }
@@ -103,16 +121,15 @@ pub fn read_cached(
     Ok(Some(String::from_utf8_lossy(&decoded).into_owned()))
 }
 
-/// Run `tool` on `input_bytes`, write the compressed result to the
-/// cache, return the produced text.
-pub async fn run_and_cache(
+/// Persist `text` as a cached artifact under
+/// `transforms/<sha>/<artifact>.txt.zst`.
+pub fn write_cached_artifact(
     store_root: &Utf8Path,
-    tool: &CliTool,
     sha: &[u8; 20],
-    input_bytes: &[u8],
-) -> Result<String, TransformError> {
-    let text = run(tool, input_bytes).await?;
-    let path = cache_path(store_root, sha);
+    artifact: &str,
+    text: &str,
+) -> Result<(), std::io::Error> {
+    let path = cache_artifact_path(store_root, sha, artifact);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -120,6 +137,29 @@ pub async fn run_and_cache(
     // tool output. Decompression is single-digit ms for normal sizes.
     let compressed = zstd::encode_all(text.as_bytes(), 3)?;
     std::fs::write(&path, &compressed)?;
+    Ok(())
+}
+
+/// Backwards-compat alias for [`read_cached_artifact`] with the
+/// default [`ARTIFACT_MAIN`] name — used by the existing whole-file
+/// transform routes that don't carry an artifact id.
+pub fn read_cached(
+    store_root: &Utf8Path,
+    sha: &[u8; 20],
+) -> Result<Option<String>, std::io::Error> {
+    read_cached_artifact(store_root, sha, ARTIFACT_MAIN)
+}
+
+/// Run `tool` on `input_bytes`, write the compressed result to the
+/// cache under the [`ARTIFACT_MAIN`] name, return the produced text.
+pub async fn run_and_cache(
+    store_root: &Utf8Path,
+    tool: &CliTool,
+    sha: &[u8; 20],
+    input_bytes: &[u8],
+) -> Result<String, TransformError> {
+    let text = run(tool, input_bytes).await?;
+    write_cached_artifact(store_root, sha, ARTIFACT_MAIN, &text)?;
     Ok(text)
 }
 
@@ -149,10 +189,10 @@ async fn run(tool: &CliTool, input_bytes: &[u8]) -> Result<String, TransformErro
 }
 
 /// Hold the temp file in scope so it's removed when we're done with it.
-struct TempInput(std::path::PathBuf);
+pub(crate) struct TempInput(std::path::PathBuf);
 
 impl TempInput {
-    fn path(&self) -> &std::path::Path {
+    pub(crate) fn path(&self) -> &std::path::Path {
         &self.0
     }
 }
@@ -163,7 +203,7 @@ impl Drop for TempInput {
     }
 }
 
-fn tempfile_for(bytes: &[u8]) -> Result<TempInput, std::io::Error> {
+pub(crate) fn tempfile_for(bytes: &[u8]) -> Result<TempInput, std::io::Error> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
