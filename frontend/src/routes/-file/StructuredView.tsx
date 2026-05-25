@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { getRouteApi } from "@tanstack/react-router";
+import { getRouteApi, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { fetchFileStructured, fetchStructuredNodeContent, type StructuredNode } from "../../api";
@@ -920,10 +920,11 @@ function makeLinkifyPptrs(locator: FileLocator) {
         return `<span class="text-slate-400">${label}</span>${suffix}`;
       }
       // Same shape for local + external — the click handler dispatches:
-      // `data-pptr-ref` alone → hash nav inside this file; combined
-      // with `data-file-href` → route nav to another depot file.
+      // hash-only refs stay inside this file (no `href`), while external
+      // refs carry a real `href` so middle-/ctrl-click still open in a
+      // new tab and the click handler can route via tanstack-router.
       const linkAttrs = file
-        ? `data-pptr-ref="${escHTML(ref)}" data-file-href="${escHTML(fileHref(file))}"`
+        ? `href="${escHTML(fileHref(file))}#${escHTML(ref)}" data-pptr-ref="${escHTML(ref)}"`
         : `data-pptr-ref="${escHTML(ref)}"`;
       return `<a ${linkAttrs} class="cursor-pointer text-sky-400 underline decoration-sky-700 hover:decoration-sky-400 hover:text-sky-200">${label}</a>${suffix}`;
     });
@@ -980,26 +981,29 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
   const text = settled?.kind === "ok" ? settled.text : "";
   const mime = settled?.kind === "ok" ? settled.mime : "";
   const linkifyPptrs = useMemo(() => makeLinkifyPptrs(locator), [locator]);
-  // Delegated click — pptr anchors carry either a hash target
-  // (`data-pptr-ref`, same-file) or a full route URL (`data-file-href`,
-  // jumps to another depot file). Hash nav avoids tanstack-router
-  // intercepting `<a href="#…">`; file links we explicitly navigate.
-  const onClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const t = e.target as HTMLElement | null;
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-    const a = t?.closest("a[data-pptr-ref]") as HTMLAnchorElement | null;
-    if (!a) return;
-    e.preventDefault();
-    const ref = a.getAttribute("data-pptr-ref") ?? "";
-    const fileHref = a.getAttribute("data-file-href");
-    if (fileHref) {
-      // External pptr: jump to the other file with the same `#obj:N`
-      // anchor so the destination tree focuses on the target.
-      window.location.assign(`${fileHref}#${ref}`);
-    } else {
-      window.location.hash = ref;
-    }
-  }, []);
+  const router = useRouter();
+  // Delegated click — pptr anchors are either local hash refs (no
+  // `href`, just `data-pptr-ref`) or full route links (`href` set to
+  // the destination file + `#obj:N` hash). For the latter we route
+  // through tanstack-router so the destination's loader runs and the
+  // previous page stays mounted until data is ready.
+  const onClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const t = e.target as HTMLElement | null;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      const a = t?.closest("a[data-pptr-ref]") as HTMLAnchorElement | null;
+      if (!a) return;
+      e.preventDefault();
+      const ref = a.getAttribute("data-pptr-ref") ?? "";
+      const href = a.getAttribute("href");
+      if (href) {
+        router.navigate({ to: href });
+      } else {
+        window.location.hash = ref;
+      }
+    },
+    [router],
+  );
 
   if (!settled) return null;
   if (settled.kind === "err") {
