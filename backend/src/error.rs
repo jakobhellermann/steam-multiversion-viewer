@@ -25,6 +25,17 @@ struct ErrorBody {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        // 5xx are bugs / surprises — log the message so the per-request
+        // `request route=… status=500` line in the access log has a
+        // companion entry telling you *why* it failed. 4xx are routine
+        // (404 for missing files etc) so we stay quiet there.
+        if self.status.is_server_error() {
+            tracing::error!(
+                status = self.status.as_u16(),
+                message = %self.message,
+                "api error response",
+            );
+        }
         (
             self.status,
             Json(ErrorBody {
