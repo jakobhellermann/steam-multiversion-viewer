@@ -14,12 +14,12 @@ use std::collections::{HashMap, HashSet};
 use steam_depot_vfs::{ChunkHash, DepotStore};
 use steam_vent_depot::Manifest;
 
-use crate::steam::{DepotId, ManifestId};
+use crate::steam::{AppId, DepotId, ManifestId};
 
 pub struct StoreIndex {
     chunks_present: HashSet<ChunkHash>,
     chunk_refcount: HashMap<ChunkHash, u32>,
-    indexed_manifests: HashSet<(DepotId, ManifestId)>,
+    indexed_manifests: HashSet<(AppId, DepotId, ManifestId)>,
 }
 
 impl StoreIndex {
@@ -36,14 +36,15 @@ impl StoreIndex {
             idx.chunks_present.insert(hash?);
         }
 
-        for (depot_id_raw, gid_raw) in store.list_manifests()? {
-            match store.load_cached_manifest(depot_id_raw, gid_raw) {
+        for (app_id_raw, depot_id_raw, gid_raw) in store.list_manifests()? {
+            match store.load_cached_manifest(app_id_raw, depot_id_raw, gid_raw) {
                 Ok(Some(m)) => {
-                    idx.add_manifest(&m);
+                    idx.add_manifest(AppId(app_id_raw), &m);
                 }
                 Ok(None) => {}
                 Err(err) => {
                     tracing::warn!(
+                        app_id = app_id_raw,
                         depot_id = depot_id_raw,
                         gid = gid_raw,
                         %err,
@@ -65,11 +66,11 @@ impl StoreIndex {
 
     /// Fold a manifest's chunks into the refcount index. Returns `true` if
     /// this was a new entry, `false` if we'd already indexed this
-    /// `(depot_id, manifest_id)` pair.
-    pub fn add_manifest(&mut self, m: &Manifest) -> bool {
+    /// `(app_id, depot_id, manifest_id)` triple.
+    pub fn add_manifest(&mut self, app_id: AppId, m: &Manifest) -> bool {
         if !self
             .indexed_manifests
-            .insert((DepotId(m.depot_id), ManifestId(m.manifest_id)))
+            .insert((app_id, DepotId(m.depot_id), ManifestId(m.manifest_id)))
         {
             return false;
         }
