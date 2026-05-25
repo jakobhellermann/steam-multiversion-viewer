@@ -163,9 +163,14 @@ function TransformedPreview({ locator }: { locator: FileLocator }) {
 export const HighlightedPre = memo(function HighlightedPre({
   code,
   lang,
+  bare = false,
 }: {
   code: string;
   lang: ReturnType<typeof langForPath>;
+  /// When true, skip the rounded border + padding chrome — useful when
+  /// the caller already wraps the content in a styled card so we don't
+  /// nest borders.
+  bare?: boolean;
 }) {
   const html = useQuery({
     queryKey: ["syntax-highlight", lang, code.length, code.slice(0, 64)],
@@ -177,16 +182,13 @@ export const HighlightedPre = memo(function HighlightedPre({
   // Shiki emits its own <pre> with the theme background; wrap so our
   // own padding/border/scroll behavior stays consistent.
   if (html.data) {
-    return (
-      <div
-        className="overflow-x-auto rounded border border-slate-800 text-xs [&_pre]:m-0! [&_pre]:bg-slate-950! [&_pre]:p-3!"
-        dangerouslySetInnerHTML={{ __html: html.data }}
-      />
-    );
+    const chrome = bare
+      ? "text-xs [&_pre]:m-0! [&_pre]:bg-transparent! [&_pre]:p-0!"
+      : "overflow-x-auto rounded border border-slate-800 text-xs [&_pre]:m-0! [&_pre]:bg-slate-950! [&_pre]:p-3!";
+    return <div className={chrome} dangerouslySetInnerHTML={{ __html: html.data }} />;
   }
-  return (
-    <pre className="overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs wrap-break-word whitespace-pre-wrap">
-      {code}
-    </pre>
-  );
+  const chrome = bare
+    ? "font-mono text-xs wrap-break-word whitespace-pre-wrap"
+    : "overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs wrap-break-word whitespace-pre-wrap";
+  return <pre className={chrome}>{code}</pre>;
 });

@@ -320,56 +320,56 @@ function Tree({
   // collapses to the remaining row automatically. Both panes scroll
   // internally below.
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <div className="flex min-h-0 flex-col gap-2">
-        {showHeader && (
-          <div className="flex items-baseline gap-3">
-            <h2 className="text-sm font-semibold text-slate-400">Preview</h2>
-            <span className="text-xs text-slate-500 tabular-nums">
-              {matchedCount != null ? (
-                <>
-                  {matchedCount.toLocaleString()}
-                  <span className="text-slate-700"> / {totalCount.toLocaleString()}</span>
-                </>
-              ) : (
-                totalCount.toLocaleString()
-              )}
-            </span>
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter by label…"
-              spellCheck={false}
-              autoCorrect="off"
-              autoCapitalize="off"
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-1.5 pr-8 text-sm focus:border-sky-700 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery("")}
-                aria-label="Clear filter"
-                className="absolute top-1/2 right-1.5 -translate-y-1/2 px-1.5 text-lg leading-none text-slate-500 hover:text-slate-200"
-              >
-                ×
-              </button>
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {showHeader && (
+        <div className="flex items-baseline gap-3">
+          <h2 className="text-sm font-semibold text-slate-400">Preview</h2>
+          <span className="text-xs text-slate-500 tabular-nums">
+            {matchedCount != null ? (
+              <>
+                {matchedCount.toLocaleString()}
+                <span className="text-slate-700"> / {totalCount.toLocaleString()}</span>
+              </>
+            ) : (
+              totalCount.toLocaleString()
             )}
-          </div>
-          {facetSummary.map(({ key, counts }) => (
-            <FacetDropdown
-              key={key}
-              facetKey={key}
-              counts={counts}
-              selected={facetWhitelist.get(key) ?? EMPTY_SET}
-              onChange={(next) => setFacet(key, next)}
-            />
-          ))}
+          </span>
         </div>
+      )}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter by label…"
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
+            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-1.5 pr-8 text-sm focus:border-sky-700 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear filter"
+              className="absolute top-1/2 right-1.5 -translate-y-1/2 px-1.5 text-lg leading-none text-slate-500 hover:text-slate-200"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        {facetSummary.map(({ key, counts }) => (
+          <FacetDropdown
+            key={key}
+            facetKey={key}
+            counts={counts}
+            selected={facetWhitelist.get(key) ?? EMPTY_SET}
+            onChange={(next) => setFacet(key, next)}
+          />
+        ))}
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div
           ref={treeRef}
           role="tree"
@@ -381,11 +381,11 @@ function Tree({
           tabIndex={0}
           aria-activedescendant={focusedId ? rowDomId(treeUid, focusedId) : undefined}
           onKeyDown={onKeyDown}
-          className="min-h-0 flex-1 overflow-auto rounded border border-slate-800 bg-slate-950 p-2 focus:outline-none focus:ring-1 focus:ring-sky-600/40"
+          className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-2 focus:ring-1 focus:ring-sky-600/40 focus:outline-none"
         >
           {/* Spacer keeps the scroll thumb honest while we render only
-            the rows in view. Items are absolute-positioned by the
-            virtualizer's reported offset. */}
+              the rows in view. Items are absolute-positioned by the
+              virtualizer's reported offset. */}
           <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
             {virtualizer.getVirtualItems().map((vi) => {
               const row = visibleRows[vi.index];
@@ -415,13 +415,13 @@ function Tree({
             })}
           </div>
         </div>
-      </div>
-      <div className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-3">
-        {selectedId ? (
-          <NodeContentPanel locator={locator} nodeId={selectedId} />
-        ) : (
-          <p className="text-sm text-slate-500">Pick a node to inspect.</p>
-        )}
+        <div className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-3">
+          {selectedId ? (
+            <NodeContentPanel locator={locator} nodeId={selectedId} />
+          ) : (
+            <p className="text-sm text-slate-500">Pick a node to inspect.</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -708,5 +708,5 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
   if (!content.data || content.data.text.length === 0) {
     return null;
   }
-  return <HighlightedPre code={content.data.text} lang={langForMime(content.data.mime)} />;
+  return <HighlightedPre code={content.data.text} lang={langForMime(content.data.mime)} bare />;
 }
