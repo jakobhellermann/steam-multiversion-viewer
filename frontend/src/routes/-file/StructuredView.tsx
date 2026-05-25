@@ -953,18 +953,32 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
         nodeId,
       ),
     staleTime: Infinity,
-    // Keep the previous node's text on screen while a new node loads —
-    // avoids a "Loading…" flash for the typical sub-frame fetch.
-    placeholderData: (prev) => prev,
+    // No `placeholderData` — we keep prior content on screen ourselves
+    // via `lastSettledRef`, which works across node changes too.
   });
 
-  // Collapse each PPtr blob into a single-line sentinel string *before*
-  // shiki sees it, then turn those sentinels into pseudo-elements in
-  // the rendered HTML. Doing the rewrite on JSON instead of on the
-  // shiki output means we don't need to span lines. Hooks run
-  // unconditionally — early returns below stay below.
-  const rawText = content.data?.text ?? "";
-  const mime = content.data?.mime ?? "";
+  // We render whatever payload the most recent *settled* query
+  // produced — data on success, message on error — and leave it
+  // alone while a new node is still in-flight. react-query's per-key
+  // cache doesn't carry across nodes, so stash the last settled
+  // result ourselves.
+  type Settled = { kind: "ok"; text: string; mime: string } | { kind: "err"; message: string };
+  const lastSettledRef = useRef<Settled | null>(null);
+  if (content.data) {
+    lastSettledRef.current = {
+      kind: "ok",
+      text: content.data.text,
+      mime: content.data.mime,
+    };
+  } else if (content.error) {
+    lastSettledRef.current = {
+      kind: "err",
+      message: content.error instanceof Error ? content.error.message : String(content.error),
+    };
+  }
+  const settled = lastSettledRef.current;
+  const rawText = settled?.kind === "ok" ? settled.text : "";
+  const mime = settled?.kind === "ok" ? settled.mime : "";
   const prepared = useMemo(
     () => (langForMime(mime) === "json" ? preparePptrJson(rawText) : rawText),
     [rawText, mime],
@@ -983,16 +997,11 @@ function NodeContentPanel({ locator, nodeId }: { locator: FileLocator; nodeId: s
     if (ref) window.location.hash = ref;
   }, []);
 
-  if (content.error) {
-    return (
-      <p className="text-sm text-red-300">
-        {content.error instanceof Error ? content.error.message : String(content.error)}
-      </p>
-    );
+  if (!settled) return null;
+  if (settled.kind === "err") {
+    return <p className="text-sm text-red-300">{settled.message}</p>;
   }
-  if (!content.data || content.data.text.length === 0) {
-    return null;
-  }
+  if (settled.text.length === 0) return null;
   return (
     <div onClick={onClick}>
       <HighlightedPre code={prepared} lang={langForMime(mime)} bare postProcess={linkifyPptrs} />
