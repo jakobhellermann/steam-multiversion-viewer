@@ -272,6 +272,10 @@ function fileExtension(path: string): string {
   // Only look at the last segment so a "." in a dir name doesn't count.
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   const name = slash >= 0 ? path.slice(slash + 1) : path;
+  // Unity serialized scenes (`level0`, `level42`, …) have no extension
+  // by convention but conceptually share a type. Bucket them as `level`
+  // so the extension filter treats them as a group.
+  if (/^level\d+$/.test(name)) return "level";
   // Strip trailing version suffixes (libfoo.so.1, libfoo.so.1.2) before
   // picking the extension so versioned shared libs bucket as "so".
   const stripped = name.replace(/(?:\.\d+)+$/, "");

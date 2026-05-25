@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 
+[features]
+default = ["unity"]
+# Optional unity-asset support: serializedfile/bundle parsing via rabex,
+# the `levelN`/`*.assets`/`globalgamemanagers` transformer dispatch, and
+# anything else in `crate::unity`. Disable to build a viewer with zero
+# unity-specific code.
+unity = ["dep:rabex-env", "dep:rabex-env-steam-depot-vfs"]
+
 [dependencies]
 anyhow = "1.0"
 arc-swap = "1.9"
@@ -32,3 +40,5 @@ utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.2"
 zstd = "0.13.3"
 time = { version = "0.3.47", features = ["formatting", "macros"] }
+rabex-env = { version = "0.1.0", path = "../../../../../unity/rabex-env", optional = true }
+rabex-env-steam-depot-vfs = { version = "0.1.0", path = "../../../../../unity/rabex-env/crates/rabex-env-steam-depot-vfs", optional = true }

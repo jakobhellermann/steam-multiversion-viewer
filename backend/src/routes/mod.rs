@@ -672,7 +672,7 @@ pub async fn manifest_file(
 
     let transformer =
         crate::transform::tools::transformer_for(&file_path).map(|t| TransformerInfo {
-            mime: t.output_mime.to_string(),
+            mime: t.output_mime().to_string(),
         });
 
     Ok(Json(FileView {
@@ -809,7 +809,7 @@ pub async fn manifest_file_transformed(
             message: format!("no transformer for {file_path}"),
         })?;
 
-    let content_type = format!("{}; charset=utf-8", transformer.output_mime);
+    let content_type = format!("{}; charset=utf-8", transformer.output_mime());
 
     let cfg = state.config.load();
     // Cache hit short-circuits the (potentially expensive) tool run.
@@ -826,15 +826,43 @@ pub async fn manifest_file_transformed(
         .downloads
         .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
         .await;
-    let bytes = snapshot.read_full(&file_path).await?;
-    let text = crate::transform::run_and_cache(&cfg.store_root, transformer, &file_sha, &bytes)
+    let text = match transformer {
+        crate::transform::Transformer::Cli(tool) => {
+            let bytes = snapshot.read_full(&file_path).await?;
+            crate::transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
+                .await
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e.to_string(),
+                })?
+        }
+        #[cfg(feature = "unity")]
+        crate::transform::Transformer::UnitySerialized => {
+            run_unity_dump(snapshot.clone(), file_path.clone()).await?
+        }
+    };
+
+    Ok((ImmutableCache, [(header::CONTENT_TYPE, content_type)], text).into_response())
+}
+
+/// Run the synchronous rabex dump off the async worker — its inner
+/// `block_in_place`/`block_on` plumbing makes it unsafe to call
+/// directly from an async handler.
+#[cfg(feature = "unity")]
+async fn run_unity_dump(
+    snapshot: Arc<crate::state::Snapshot>,
+    path: String,
+) -> Result<String, ApiError> {
+    tokio::task::spawn_blocking(move || crate::unity::dump_unity_serialized(snapshot, &path))
         .await
         .map_err(|e| ApiError {
             status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("unity dump task panicked: {e}"),
+        })?
+        .map_err(|e| ApiError {
+            status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             message: e.to_string(),
-        })?;
-
-    Ok((ImmutableCache, [(header::CONTENT_TYPE, content_type)], text).into_response())
+        })
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]

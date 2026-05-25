@@ -416,13 +416,34 @@ async fn resolve_diff_text(
             .downloads
             .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
             .await;
-        let bytes = snapshot.read_full(&file_path).await?;
-        let text = crate::transform::run_and_cache(&cfg.store_root, transformer, &file_sha, &bytes)
-            .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })?;
+        let text = match transformer {
+            crate::transform::Transformer::Cli(tool) => {
+                let bytes = snapshot.read_full(&file_path).await?;
+                crate::transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
+                    .await
+                    .map_err(|e| ApiError {
+                        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        message: e.to_string(),
+                    })?
+            }
+            #[cfg(feature = "unity")]
+            crate::transform::Transformer::UnitySerialized => {
+                let snapshot = snapshot.clone();
+                let file_path = file_path.clone();
+                tokio::task::spawn_blocking(move || {
+                    crate::unity::dump_unity_serialized(snapshot, &file_path)
+                })
+                .await
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: format!("unity dump task panicked: {e}"),
+                })?
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e.to_string(),
+                })?
+            }
+        };
         return Ok(DiffSide {
             text,
             creation_time,

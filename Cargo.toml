@@ -4,3 +4,9 @@ members = ["backend"]
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# `rabex-env-steam-depot-vfs` pulls `rabex-env` via git; our path dep
+# would otherwise duplicate the crate. Point the git source at the same
+# local checkout so cargo treats them as one.
+[patch."https://github.com/jakobhellermann/rabex-env"]
+rabex-env = { path = "../../../../unity/rabex-env" }

@@ -26,6 +26,30 @@ pub struct CliTool {
     pub output_mime: &'static str,
 }
 
+/// Which kind of transformer should run for a file. Dispatched by
+/// `tools::transformer_for`; the actual "run + cache" call lives in
+/// the route handler so each variant can build the right input
+/// (raw bytes, full manifest store, etc).
+pub enum Transformer {
+    /// External program — feed it the file bytes, capture stdout.
+    Cli(&'static CliTool),
+    /// In-process unity rabex dump. The route is responsible for
+    /// handing the manifest store + relative path to
+    /// `crate::unity::dump_unity_serialized`.
+    #[cfg(feature = "unity")]
+    UnitySerialized,
+}
+
+impl Transformer {
+    pub fn output_mime(&self) -> &'static str {
+        match self {
+            Self::Cli(t) => t.output_mime,
+            #[cfg(feature = "unity")]
+            Self::UnitySerialized => "text/plain",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum TransformError {
     Io(std::io::Error),

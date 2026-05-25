@@ -9,6 +9,8 @@ mod state;
 mod steam;
 mod store_index;
 mod transform;
+#[cfg(feature = "unity")]
+mod unity;
 
 use std::path::{Path, PathBuf};
 
