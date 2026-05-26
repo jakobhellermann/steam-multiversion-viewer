@@ -78,20 +78,31 @@ function makePptrRenderer(locator: FileLocator, isLocalRefInTree: (ref: string) 
     if (!ref && !target && !type && !file) {
       return '<span class="text-slate-500">null</span>';
     }
-    // Label depends on locality: local refs show the target's name
-    // (resolved by the backend), external ones show the depot path
-    // of the file they live in — the latter is what's actually
-    // identifying since cross-file targets often have no `m_Name`.
-    const labelText = file ? shortFileLabel(file) : target;
-    const label = escHTML(labelText) || '<span class="text-slate-500">null</span>';
+    // Label shape:
+    //  - local refs: just the target name (the row in the tree they
+    //    point at carries everything else).
+    //  - external refs: `<file>: <name>` when the backend resolved a
+    //    real `m_Name`; `<file> #<pathid>` otherwise. Either way the
+    //    file is what makes the reference unambiguous.
     const ty = escHTML(type);
-    // If we couldn't recover a real name (backend fell back to
-    // `PathID=N`), keep that as a hint next to the type so the row
-    // still tells you *which* `Shader` you're looking at.
-    const pathHint =
-      file && /^PathID=\d+$/.test(target)
-        ? ` <span class="text-slate-500">${escHTML(target)}</span>`
-        : "";
+    const pathIdHint = (() => {
+      const m = /^obj:(\d+)$/.exec(ref);
+      return m ? ` <span class="text-slate-500">#${m[1]}</span>` : "";
+    })();
+    const hasResolvedName = target !== "" && !/^PathID=\d+$/.test(target);
+    let label: string;
+    let pathHint = "";
+    if (file) {
+      const shortFile = escHTML(shortFileLabel(file));
+      if (hasResolvedName) {
+        label = `${shortFile}<span class="text-slate-500">:</span> ${escHTML(target)}`;
+      } else {
+        label = shortFile;
+        pathHint = pathIdHint;
+      }
+    } else {
+      label = escHTML(target) || '<span class="text-slate-500">null</span>';
+    }
     const suffix = `${ty ? ` <span class="text-slate-500">(${ty})</span>` : ""}${pathHint}`;
     if (!ref) {
       return `<span class="text-slate-400">${label}</span>${suffix}`;
