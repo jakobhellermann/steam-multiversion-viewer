@@ -432,12 +432,12 @@ function Tree({
       const hasChildren = row != null && row.hasVisibleChildren;
       const wasSelected = id === focusedId;
       const isExpanded = effectiveExpanded.has(id);
-      // Push every selection into the hash so browser back/forward
-      // walks the same history the user clicked through. We compare
-      // against the current hash to avoid a redundant history entry
-      // when the row is already selected (second-click collapse).
+      // Reflect the selection in the URL hash so the page is shareable
+      // and survives reloads, but use replaceState — every click in the
+      // tree producing a history entry was too noisy on back/forward.
       if (window.location.hash !== `#${id}`) {
-        window.location.hash = id;
+        history.replaceState(null, "", `#${id}`);
+        setHashTarget(id);
       }
       setFocusedId(id);
       if (!hasChildren) return;
@@ -569,6 +569,7 @@ function Tree({
               locator={locator}
               nodeId={selectedId}
               isInTree={(id) => id === root.id || parentById.has(id)}
+              onHashTarget={setHashTarget}
             />
           ) : (
             <p className="text-sm text-slate-500">Pick a node to inspect.</p>
@@ -946,10 +947,12 @@ function NodeContentPanel({
   locator,
   nodeId,
   isInTree,
+  onHashTarget,
 }: {
   locator: FileLocator;
   nodeId: string;
   isInTree: (id: string) => boolean;
+  onHashTarget: (id: string) => void;
 }) {
   const content = useQuery({
     queryKey: [
@@ -1024,9 +1027,12 @@ function NodeContentPanel({
       // backend filters some pptrs out (self-transforms, etc) but
       // they still appear as `__PPTR__` sentinels in the json dump.
       if (!isInTree(ref)) return;
-      window.location.hash = ref;
+      if (window.location.hash !== `#${ref}`) {
+        history.replaceState(null, "", `#${ref}`);
+        onHashTarget(ref);
+      }
     },
-    [router, isInTree],
+    [router, isInTree, onHashTarget],
   );
 
   if (!settled) return null;
