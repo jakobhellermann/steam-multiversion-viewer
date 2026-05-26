@@ -325,28 +325,13 @@ function Tree({
     treeRef.current?.focus({ preventScroll: true });
   }, [locator.path]);
 
-  // Honor `#obj:<path-id>` hash links — the unity object dump turns
-  // local PPtrs into anchors, and the browser's default click on those
-  // updates `location.hash`. Listen and snap focus onto the target,
-  // expanding ancestors as needed.
-  useEffect(() => {
-    const idsInTree = new Set<string>();
-    walk(root, (n) => idsInTree.add(n.id));
-    // Track whether we've ever observed a non-empty hash for this
-    // mount — that lets us tell apart "page just loaded without a hash"
-    // (do nothing) from "user navigated back from a #obj:N entry"
-    // (snap to root so the preview clears).
-    let everSawHash = false;
-    const jump = () => {
-      const id = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-      if (!id) {
-        if (!everSawHash) return;
-        setHashTarget(null);
-        setFocusedId(root.id);
-        return;
-      }
-      everSawHash = true;
-      if (!idsInTree.has(id)) return;
+  // Snap focus + expansion onto a `#obj:<path-id>` deep-link target.
+  // Used both by the hashchange listener (browser-initiated nav, e.g.
+  // back/forward) and by same-file PPtr clicks in the preview, which
+  // update `location.hash` via `history.replaceState` and therefore
+  // never fire `hashchange` themselves.
+  const jumpToHashTarget = useCallback(
+    (id: string) => {
       // Track the target so `visibleSet` keeps it (and its ancestors)
       // visible even if a filter would normally hide it.
       setHashTarget(id);
@@ -361,11 +346,38 @@ function Tree({
         return out;
       });
       setFocusedId(id);
+    },
+    [parentById],
+  );
+
+  // Honor `#obj:<path-id>` hash links — the unity object dump turns
+  // local PPtrs into anchors, and the browser's default click on those
+  // updates `location.hash`. Listen and snap focus onto the target,
+  // expanding ancestors as needed.
+  useEffect(() => {
+    const idsInTree = new Set<string>();
+    walk(root, (n) => idsInTree.add(n.id));
+    // Track whether we've ever observed a non-empty hash for this
+    // mount — that lets us tell apart "page just loaded without a hash"
+    // (do nothing) from "user navigated back from a #obj:N entry"
+    // (snap to root so the preview clears).
+    let everSawHash = false;
+    const onHashChange = () => {
+      const id = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+      if (!id) {
+        if (!everSawHash) return;
+        setHashTarget(null);
+        setFocusedId(root.id);
+        return;
+      }
+      everSawHash = true;
+      if (!idsInTree.has(id)) return;
+      jumpToHashTarget(id);
     };
-    jump();
-    window.addEventListener("hashchange", jump);
-    return () => window.removeEventListener("hashchange", jump);
-  }, [root, parentById]);
+    onHashChange();
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [root, jumpToHashTarget]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -570,7 +582,7 @@ function Tree({
               locator={locator}
               nodeId={selectedId}
               isInTree={(id) => id === root.id || parentById.has(id)}
-              onHashTarget={setHashTarget}
+              onHashTarget={jumpToHashTarget}
             />
           ) : (
             <p className="text-sm text-slate-500">Pick a node to inspect.</p>
@@ -949,7 +961,11 @@ function NodeContentPanel({
       // they still appear as `__PPTR__` sentinels in the json dump.
       if (!isInTree(ref)) return;
       if (window.location.hash !== `#${ref}`) {
-        history.replaceState(null, "", `#${ref}`);
+        // Push (not replace) — a pptr click is an explicit jump the
+        // user should be able to undo with the back button. Arrow-key
+        // tree nav still uses replaceState in `activateRow` to avoid
+        // History spam on every row.
+        history.pushState(null, "", `#${ref}`);
         onHashTarget(ref);
       }
     },
