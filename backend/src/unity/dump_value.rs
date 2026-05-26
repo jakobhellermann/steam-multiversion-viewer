@@ -58,7 +58,7 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     // already does for similar cases.
     let object = file.object_at::<Value>(path_id)?;
     let mut value = object.read()?;
-    simplify_for_dump(&file, &data_dir, &mut value);
+    simplify_for_dump(&file, &data_dir, "", &mut value);
     Ok(serde_json::to_string_pretty(&value)?)
 }
 
@@ -120,7 +120,8 @@ pub fn dump_bundle_object_json<C: ChunkStore + 'static>(
     let value = {
         let _span = tracing::info_span!("simplify_for_dump").entered();
         let mut v = value;
-        simplify_for_dump(&file, &data_dir, &mut v);
+        let archive_prefix = format!("archive:{archive_entry}/");
+        simplify_for_dump(&file, &data_dir, &archive_prefix, &mut v);
         v
     };
     let json = {
@@ -141,6 +142,11 @@ pub fn dump_bundle_object_json<C: ChunkStore + 'static>(
 fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     data_dir: &str,
+    // Tree-id prefix for same-file pptrs ("" for bare SerializedFiles,
+    // `archive:<entry>/` when dumping an entry inside a bundle). Goes
+    // directly into the marker's `ref` field so the frontend's
+    // hash-link matches the tree-row id.
+    local_ref_prefix: &str,
     value: &mut Value,
 ) {
     match value {
@@ -148,7 +154,7 @@ fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
             // Whole-map rewrites — short-circuit before recursing into
             // children we're about to throw away.
             if let Some(pptr) = pptr_from_map(map) {
-                *value = qualify_pptr(file, data_dir, pptr);
+                *value = qualify_pptr(file, data_dir, local_ref_prefix, pptr);
                 return;
             }
             if let Some(hex) = color_hex_from_map(map) {
@@ -162,14 +168,14 @@ fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
             let taken = std::mem::take(map);
             let mut all_non_string = !taken.is_empty();
             for (mut k, mut v) in taken {
-                simplify_for_dump(file, data_dir, &mut k);
+                simplify_for_dump(file, data_dir, local_ref_prefix, &mut k);
                 // Null pptr keys land here as `Value::Unit`; JSON
                 // object keys can't be null, so swap in an explicit
                 // sentinel that matches the regular pptr null shape.
                 if matches!(k, Value::Unit) {
                     k = svalue_str(pptr_marker("", "", "", ""));
                 }
-                simplify_for_dump(file, data_dir, &mut v);
+                simplify_for_dump(file, data_dir, local_ref_prefix, &mut v);
                 if all_non_string && matches!(k, Value::String(_)) {
                     all_non_string = false;
                 }
@@ -194,13 +200,13 @@ fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
         }
         Value::Seq(items) => {
             for v in items {
-                simplify_for_dump(file, data_dir, v);
+                simplify_for_dump(file, data_dir, local_ref_prefix, v);
             }
         }
-        Value::Newtype(inner) => simplify_for_dump(file, data_dir, inner),
+        Value::Newtype(inner) => simplify_for_dump(file, data_dir, local_ref_prefix, inner),
         Value::Option(opt) => {
             if let Some(inner) = opt {
-                simplify_for_dump(file, data_dir, inner);
+                simplify_for_dump(file, data_dir, local_ref_prefix, inner);
             }
         }
         _ => {}
@@ -214,6 +220,11 @@ fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
 fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     data_dir: &str,
+    // Prefix glued onto the local `obj:<pathid>` so bundle ids
+    // (`archive:<entry>/obj:N`) match the tree-row ids the frontend
+    // sees. Empty for bare SerializedFiles. External pptrs ignore it
+    // — they're addressed by depot path + bare `obj:<pathid>`.
+    local_ref_prefix: &str,
     pptr: PPtr,
 ) -> Value {
     let Some(pptr) = pptr.optional() else {
@@ -230,11 +241,15 @@ fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
         .map(|data| display_name(&obj, &data))
         .unwrap_or_else(|| "(unreadable)".to_string());
 
-    // `ref` always carries the target's `obj:<pathid>` (a file-local
-    // id either way). External pptrs additionally fill `file` with the
-    // depot path of the referenced file — frontend combines the two
-    // into a route-level link.
-    let ref_part = format!("obj:{}", pptr.m_PathID);
+    // `ref` always points at the target's tree-row id. Local refs get
+    // the caller's prefix (`""` outside bundles, `archive:X/` inside);
+    // external refs use a bare `obj:<pathid>` because the route URL
+    // already targets a different file by depot path.
+    let ref_part = if pptr.is_local() {
+        format!("{local_ref_prefix}obj:{}", pptr.m_PathID)
+    } else {
+        format!("obj:{}", pptr.m_PathID)
+    };
     let file_part = if !pptr.is_local() {
         pptr.file_identifier(file.file)
             .map(|ext| external_to_depot_path(data_dir, &ext.pathName))
