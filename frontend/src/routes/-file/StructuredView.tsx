@@ -956,13 +956,33 @@ function NodeContentPanel({
     [router, isInTree, onHashTarget],
   );
 
+  // Scope ⌘A / ctrl-A to the preview contents instead of letting the
+  // browser select the whole page. Needs `tabIndex` so the wrapper can
+  // receive focus + keyboard events; the click handler grabs focus on
+  // any interaction inside the preview.
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === "a") {
+      e.preventDefault();
+      window.getSelection()?.selectAllChildren(e.currentTarget);
+    }
+  }, []);
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      // Focus first so the next ⌘A lands in our keydown handler;
+      // `preventScroll` keeps clicks from jumping the long preview.
+      e.currentTarget.focus({ preventScroll: true });
+      onClick(e);
+    },
+    [onClick],
+  );
+
   if (!settled) return null;
   if (settled.kind === "err") {
     return <p className="text-sm text-red-300">{settled.message}</p>;
   }
   if (settled.text.length === 0) return null;
   return (
-    <div onClick={onClick}>
+    <div tabIndex={-1} onClick={handleClick} onKeyDown={handleKeyDown} className="outline-none">
       <HighlightedPre code={text} lang={langForMime(mime)} bare postProcess={postProcess} />
     </div>
   );
