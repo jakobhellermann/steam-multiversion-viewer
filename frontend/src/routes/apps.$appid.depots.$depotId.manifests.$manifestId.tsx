@@ -1,6 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   downloadManifest,
@@ -802,9 +803,35 @@ function TreeList({
   compareTo: string | undefined;
   onToggle: (path: string, currentlyExpanded: boolean, anchor: HTMLElement | null) => void;
 }) {
+  // Virtualize against the window — the manifest page scrolls at the
+  // document level, not inside a fixed pane, so a window virtualizer
+  // keeps the existing UX while skipping render of off-screen rows.
+  // With 10k+ files the unvirtualized list lagged on toggle/filter.
+  //
+  // Capture the row container's offset from the page top so the
+  // virtualizer can map window scrollY → row index correctly. The ref
+  // sits on the *inner* spacer, not the outer card, so the header row
+  // above it isn't part of the virtualized coordinate space. A
+  // callback ref re-measures whenever the spacer re-mounts (e.g.
+  // empty state → results) instead of latching the initial value.
+  const [listOffset, setListOffset] = useState(0);
+  const listRef = useCallback((el: HTMLDivElement | null) => {
+    if (el) setListOffset(el.offsetTop);
+  }, []);
+  // Row height ≈ 33px (text-sm × py-1.5 + leading) but file rows can
+  // wrap on long paths because of `break-all`, so we measure each row
+  // and let the virtualizer adjust the spacer accordingly.
+  const virtualizer = useWindowVirtualizer({
+    count: rows.length,
+    estimateSize: () => 33,
+    overscan: 12,
+    scrollMargin: listOffset,
+  });
   if (rows.length === 0) {
     return <p className="text-sm text-slate-500">No matches.</p>;
   }
+  const items = virtualizer.getVirtualItems();
+  const scrollMargin = virtualizer.options.scrollMargin;
   return (
     <div className="overflow-hidden rounded border border-slate-800 text-sm">
       <div className="flex items-baseline gap-1 border-b border-slate-800 px-3 py-1.5 font-semibold text-slate-400">
@@ -812,22 +839,37 @@ function TreeList({
         <span className="ml-auto w-14 text-right">Files</span>
         <span className="w-20 text-right">Size</span>
       </div>
-      <ul>
-        {rows.map((row) => (
-          <TreeRow
-            key={row.node.path}
-            node={row.node}
-            depth={row.depth}
-            expanded={row.expanded}
-            appid={appid}
-            depotId={depotId}
-            manifestId={manifestId}
-            branch={branch}
-            compareTo={compareTo}
-            onToggle={onToggle}
-          />
-        ))}
-      </ul>
+      <div ref={listRef} className="relative" style={{ height: virtualizer.getTotalSize() }}>
+        {items.map((vi) => {
+          const row = rows[vi.index];
+          return (
+            <div
+              key={row.node.path}
+              ref={virtualizer.measureElement}
+              data-index={vi.index}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                transform: `translateY(${vi.start - scrollMargin}px)`,
+              }}
+            >
+              <TreeRow
+                node={row.node}
+                depth={row.depth}
+                expanded={row.expanded}
+                appid={appid}
+                depotId={depotId}
+                manifestId={manifestId}
+                branch={branch}
+                compareTo={compareTo}
+                onToggle={onToggle}
+              />
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -864,7 +906,7 @@ const TreeRow = memo(function TreeRow({
 
   if (isDir) {
     return (
-      <li className="border-b border-slate-800 last:border-b-0">
+      <div className="border-b border-slate-800">
         <button
           type="button"
           onClick={(e) => onToggle(node.path, expanded, e.currentTarget)}
@@ -880,7 +922,7 @@ const TreeRow = memo(function TreeRow({
             <Bytes value={node.size} />
           </span>
         </button>
-      </li>
+      </div>
     );
   }
 
@@ -888,7 +930,7 @@ const TreeRow = memo(function TreeRow({
   // file names line up with sibling dir names (which have a chevron).
   const file = node.file!;
   return (
-    <li className="border-b border-slate-800 last:border-b-0 hover:bg-slate-800/40">
+    <div className="border-b border-slate-800 hover:bg-slate-800/40">
       <Link
         to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
         params={{ appid, depotId, manifestId }}
@@ -909,7 +951,7 @@ const TreeRow = memo(function TreeRow({
           <Bytes value={file.size} />
         </span>
       </Link>
-    </li>
+    </div>
   );
 });
 
