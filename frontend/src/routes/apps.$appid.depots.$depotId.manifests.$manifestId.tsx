@@ -273,7 +273,11 @@ type TreeNode = {
   fileCount: number;
 };
 
-const NO_EXT = "";
+// Sentinel for "file has no extension". Has to be non-empty (and not a
+// plausible real extension) so URL serialization round-trips it — the
+// previous "" got dropped by `split(",").filter(Boolean)` and the UI
+// chip became unselectable as a result.
+const NO_EXT = "__none__";
 
 function fileExtension(path: string): string {
   // Only look at the last segment so a "." in a dir name doesn't count.
