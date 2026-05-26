@@ -60,17 +60,14 @@ function makePptrRenderer(locator: FileLocator, isLocalRefInTree: (ref: string) 
     locator.branch === "public" ? "" : `&branch=${encodeURIComponent(locator.branch)}`;
   const fileHref = (depotPath: string) =>
     `/apps/${locator.appid}/depots/${locator.depotId}/manifests/${locator.manifestId}/file?path=${encodeURIComponent(depotPath)}${branchParam}`;
-  // Strip the `<Game>_Data/` data-dir prefix from file labels — the
-  // user already knows which game/version they're in, so the extra
-  // prefix only wastes horizontal space.
-  const dataDirPrefix = (() => {
-    const slash = locator.path.indexOf("/");
-    return slash > 0 ? locator.path.slice(0, slash + 1) : "";
-  })();
-  const shortFileLabel = (depotPath: string) =>
-    dataDirPrefix && depotPath.startsWith(dataDirPrefix)
-      ? depotPath.slice(dataDirPrefix.length)
-      : depotPath;
+  // Only show the file's basename in the link label — the full depot
+  // path (the `<Game>_Data/StreamingAssets/aa/StandaloneWindows64/…`
+  // mouthful for addressables bundles) belongs in the `href` hover,
+  // not on screen for every pptr in the dump.
+  const shortFileLabel = (depotPath: string) => {
+    const slash = depotPath.lastIndexOf("/");
+    return slash >= 0 ? depotPath.slice(slash + 1) : depotPath;
+  };
   return (payload: string): string => {
     const [ref = "", target = "", type = "", file = ""] = payload.split(MARK_SEP);
     // Fully-empty payload = null pptr that landed in a map-key

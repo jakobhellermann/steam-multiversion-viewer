@@ -243,21 +243,68 @@ fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
 
     // `ref` always points at the target's tree-row id. Local refs get
     // the caller's prefix (`""` outside bundles, `archive:X/` inside);
-    // external refs use a bare `obj:<pathid>` because the route URL
-    // already targets a different file by depot path.
-    let ref_part = if pptr.is_local() {
-        format!("{local_ref_prefix}obj:{}", pptr.m_PathID)
+    // external refs use a bare `obj:<pathid>` unless they resolve to
+    // an addressables bundle (then `archive:<entry>/obj:<pathid>` so
+    // the route lands on the right SerializedFile inside).
+    let (file_part, ref_part) = if pptr.is_local() {
+        (
+            String::new(),
+            format!("{local_ref_prefix}obj:{}", pptr.m_PathID),
+        )
     } else {
-        format!("obj:{}", pptr.m_PathID)
-    };
-    let file_part = if !pptr.is_local() {
-        pptr.file_identifier(file.file)
-            .map(|ext| external_to_depot_path(data_dir, &ext.pathName))
-            .unwrap_or_default()
-    } else {
-        String::new()
+        let raw_name = pptr
+            .file_identifier(file.file)
+            .map(|ext| ext.pathName.clone())
+            .unwrap_or_default();
+        external_target(file.env, data_dir, &raw_name, pptr.m_PathID)
     };
     svalue_str(pptr_marker(&ref_part, &target, &class_id, &file_part))
+}
+
+/// Resolve an external pptr target into (depot-path, ref-id).
+///
+/// Three cases:
+/// - `Library/foo` → `<DataDir>/Resources/foo`, ref `obj:<pathid>`.
+/// - `archive:/<bundle>/<file>` (an addressables CAB) → look the
+///   bundle CAB up in [`AddressablesData::cab_to_bundle`] to find
+///   the depot-relative bundle path; ref becomes
+///   `archive:<file>/obj:<pathid>` to land inside the right
+///   SerializedFile in the bundle's tree.
+/// - Anything else (plain depot-relative names) → `<DataDir>/<name>`,
+///   ref `obj:<pathid>`.
+///
+/// On any failure for the addressables case (no settings, no bundle
+/// for this CAB, etc) we fall back to the raw name so the frontend
+/// gets a deterministic — and visibly wrong — depot path rather than
+/// a silently broken link.
+fn external_target<R: EnvResolver, P: TypeTreeProvider>(
+    env: &rabex_env::Environment<R, P>,
+    data_dir: &str,
+    raw_name: &str,
+    path_id: PathId,
+) -> (String, String) {
+    use std::path::Path;
+
+    use rabex_env::addressables::ArchivePath;
+
+    let bare_ref = format!("obj:{path_id}");
+
+    let Some(archive) = ArchivePath::try_parse(Path::new(raw_name)).ok().flatten() else {
+        return (external_to_depot_path(data_dir, raw_name), bare_ref);
+    };
+
+    let addressables = env.addressables().ok().flatten();
+    let aa_build = env.addressables_build_folder().ok().flatten();
+    let bundle_rel = addressables.and_then(|a| a.cab_to_bundle.get(archive.bundle));
+    let (Some(aa_build), Some(bundle_rel)) = (aa_build, bundle_rel) else {
+        return (external_to_depot_path(data_dir, raw_name), bare_ref);
+    };
+
+    let depot_path = format!("{data_dir}/{}/{}", aa_build.display(), bundle_rel.display());
+    (
+        depot_path,
+        format!("archive:{}/obj:{path_id}", archive.file),
+    )
 }
 
 /// Translate an external-file identifier (as ilspy / rabex prints
