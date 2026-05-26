@@ -950,9 +950,12 @@ function NodeContentPanel({
       if (!a) return;
       e.preventDefault();
       const ref = a.getAttribute("data-pptr-ref") ?? "";
-      const href = a.getAttribute("href");
-      if (href) {
-        router.navigate({ to: href });
+      // External refs carry `data-pptr-file` + a route href; everything
+      // else is a same-file hash jump. The `href` exists in both cases
+      // (so hover/middle-click work) but we can't dispatch on it alone.
+      if (a.hasAttribute("data-pptr-file")) {
+        const href = a.getAttribute("href");
+        if (href) router.navigate({ to: href });
         return;
       }
       // Same-file ref: only navigate the hash if the target actually

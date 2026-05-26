@@ -87,13 +87,14 @@ function makePptrRenderer(locator: FileLocator) {
     if (!ref) {
       return `<span class="text-slate-400">${label}</span>${suffix}`;
     }
-    // Same shape for local + external — the click handler dispatches:
-    // hash-only refs stay inside this file (no `href`), while external
-    // refs carry a real `href` so middle-/ctrl-click still open in a
-    // new tab and the click handler can route via tanstack-router.
+    // Both local and external refs get a real `href` so browsers show
+    // the target on hover and middle-/ctrl-click opens a new tab. The
+    // click handler tells them apart via `data-pptr-file`: same-file
+    // refs go through the in-page hash logic, external refs through
+    // tanstack-router.
     const linkAttrs = file
-      ? `href="${escHTML(fileHref(file))}#${escHTML(ref)}" data-pptr-ref="${escHTML(ref)}"`
-      : `data-pptr-ref="${escHTML(ref)}"`;
+      ? `href="${escHTML(fileHref(file))}#${escHTML(ref)}" data-pptr-ref="${escHTML(ref)}" data-pptr-file="1"`
+      : `href="#${escHTML(ref)}" data-pptr-ref="${escHTML(ref)}"`;
     return `<a ${linkAttrs} class="cursor-pointer text-sky-400 underline decoration-sky-700 hover:decoration-sky-400 hover:text-sky-200">${label}</a>${suffix}`;
   };
 }
