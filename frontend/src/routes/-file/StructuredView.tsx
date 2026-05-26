@@ -987,9 +987,14 @@ function NodeContentPanel({
   }, []);
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      // Focus first so the next ⌘A lands in our keydown handler;
+      // Focus the wrapper so the next ⌘A lands in our keydown handler;
       // `preventScroll` keeps clicks from jumping the long preview.
-      e.currentTarget.focus({ preventScroll: true });
+      // Skip if the user just made a text selection — in Firefox,
+      // `element.focus()` collapses the live selection, so clicks that
+      // end a drag-select would lose what was just highlighted.
+      const sel = window.getSelection();
+      const isSelecting = sel != null && !sel.isCollapsed && sel.toString().length > 0;
+      if (!isSelecting) e.currentTarget.focus({ preventScroll: true });
       onClick(e);
     },
     [onClick],
