@@ -26,10 +26,10 @@ similar = "2.6"
 thiserror = "2.0"
 serde_json = "1"
 serde-value = "0.7"
-steam-depot-vfs = { path = "../../steam-depot-vfs/crates/steam-depot-vfs" }
-steam-depot-mount = { path = "../../steam-depot-vfs/crates/steam-depot-mount" }
+steam-depot-vfs = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
+steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
 steam-vent = "0.5"
-steam-vent-depot = { path = "../../steam-vent-depot" }
+steam-vent-depot = { git = "https://github.com/jakobhellermann/steam-vent-depot" }
 steam-vent-proto = "0.5"
 tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "net", "sync", "signal", "time", "process"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -41,5 +41,5 @@ utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.2"
 zstd = "0.13.3"
 time = { version = "0.3.47", features = ["formatting", "macros"] }
-rabex-env = { version = "0.1.0", path = "../../../../../unity/rabex-env", optional = true }
-rabex-env-steam-depot-vfs = { version = "0.1.0", path = "../../../../../unity/rabex-env/crates/rabex-env-steam-depot-vfs", optional = true }
+rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true }
+rabex-env-steam-depot-vfs = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true }
