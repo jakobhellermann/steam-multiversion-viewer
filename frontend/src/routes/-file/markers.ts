@@ -105,7 +105,7 @@ function renderColor(payload: string): string {
   if (!/^#[0-9a-f]{8}$/.test(payload)) {
     return `<span class="text-slate-400">${escHTML(payload)}</span>`;
   }
-  return `<span class="inline-flex items-baseline gap-1 align-baseline"><span class="inline-block h-3 w-3 self-center rounded-sm border border-slate-700/60" style="background-color: ${payload}"></span><span class="text-slate-300">${payload}</span></span>`;
+  return `<span class="inline-block h-[0.9em] w-[0.9em] mr-1 rounded-sm border border-slate-700/60" style="background-color: ${payload}; vertical-align: -0.08em"></span><span class="text-slate-300">${payload}</span>`;
 }
 
 function escHTML(s: string): string {
