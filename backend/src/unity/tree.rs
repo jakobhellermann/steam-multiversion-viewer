@@ -86,6 +86,7 @@ pub fn build_tree<C: ChunkStore + 'static>(
 /// ids are bare (`obj:N`, `section:hierarchy`, …); callers that splice
 /// the result into a larger tree (e.g. a bundle) should run
 /// [`Node::prefix_ids`] on the returned node before merging.
+#[tracing::instrument(skip_all, fields(label))]
 pub fn build_root_node<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     label: &str,
@@ -112,6 +113,7 @@ pub fn build_root_node<R: EnvResolver, P: TypeTreeProvider>(
 
 // ---- class-stats section -------------------------------------------------
 
+#[tracing::instrument(skip_all)]
 fn collect_class_stats<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
 ) -> BTreeMap<ClassId, usize> {
@@ -159,6 +161,7 @@ struct HierarchySection {
     covered: HashSet<PathId>,
 }
 
+#[tracing::instrument(skip_all)]
 fn build_hierarchy_section<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
 ) -> Result<HierarchySection> {
@@ -286,6 +289,7 @@ fn build_gameobject_node<R: EnvResolver, P: TypeTreeProvider>(
 
 // ---- loose section -------------------------------------------------------
 
+#[tracing::instrument(skip_all)]
 fn build_loose_section<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     covered: &HashSet<PathId>,
@@ -320,6 +324,7 @@ fn build_loose_section<R: EnvResolver, P: TypeTreeProvider>(
 /// repeats across the section (need an id to tell rows apart) and
 /// cleared for components hanging under a gameobject (you rarely see
 /// the same class twice on one object — the noise outweighs the info).
+#[tracing::instrument(level = "debug", skip_all, fields(?class_id, ?path_id))]
 fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     path_id: PathId,

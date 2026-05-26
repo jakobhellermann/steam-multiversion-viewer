@@ -34,6 +34,7 @@ use rabex_env::resolver::EnvResolver;
 use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::chunk_store::ChunkStore;
 use steam_depot_vfs::fs::DepotManifestStore;
+use tracing::info_span;
 
 use crate::structured::{Node, StructuredTree};
 
@@ -65,29 +66,37 @@ pub fn parse_archive_id(id: &str) -> Option<(&str, &str)> {
 
 /// Construct the structured tree for the bundle at `path`. Synchronous;
 /// callers from async context must wrap in `tokio::task::spawn_blocking`.
+#[tracing::instrument(skip_all, fields(path))]
 pub fn build_tree<C: ChunkStore + 'static>(
     manifest_store: Arc<DepotManifestStore<C>>,
     path: &str,
 ) -> Result<StructuredTree> {
     let game_files = SteamDepotGameFiles::new(manifest_store)?;
     let relative = strip_data_prefix(&game_files, path).to_owned();
-    let raw = game_files
-        .read_path(Path::new(&relative))
-        .with_context(|| format!("reading bundle bytes {relative}"))?;
 
-    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let raw = {
+        let _span = info_span!("read_bundle_bytes").entered();
+        game_files
+            .read_path(Path::new(&relative))
+            .with_context(|| format!("reading bundle bytes {relative}"))?
+    };
+
+    let tpk = info_span!("get tpk").in_scope(|| TypeTreeCache::new(TpkTypeTreeBlob::embedded()));
+
     let env = Environment::new(game_files, &tpk);
     // Bundles don't carry a unity-version header — the version lives in
     // the SerializedFiles inside, which the reader hasn't parsed yet at
     // open time. Pull the version from globalgamemanagers via the env
     // and hand it over as the bundle's fallback.
     let unity_version = env.unity_version()?.clone();
-    let bundle = BundleFileReader::from_reader(
-        Cursor::new(raw.as_ref()),
-        &ExtractionConfig::default().with_fallback_unity_version(unity_version),
-    )?;
+    let bundle = {
+        let _span = info_span!("parse_bundle_header").entered();
+        let config = ExtractionConfig::default().with_fallback_unity_version(unity_version);
+        BundleFileReader::from_reader(Cursor::new(raw.as_ref()), &config)?
+    };
 
     let mut children = Vec::new();
+    let _walk = info_span!("walk_entries", entries = bundle.files().len()).entered();
     for entry in bundle.files() {
         let is_serialized = (entry.flags & BUNDLE_ENTRY_FLAG_SERIALIZED_FILE) != 0;
         children.push(if is_serialized {
@@ -117,6 +126,7 @@ pub fn build_tree<C: ChunkStore + 'static>(
     })
 }
 
+#[tracing::instrument(skip_all, fields(entry_path))]
 fn build_archive_subtree<'env, R, P, T>(
     env: &'env Environment<R, P>,
     bundle: &BundleFileReader<Cursor<T>>,

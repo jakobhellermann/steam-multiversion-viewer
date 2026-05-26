@@ -37,6 +37,7 @@ use super::markers::{
 
 /// Read the object at `path_id` and pretty-print it as JSON using the
 /// typetree, applying [`simplify_for_dump`] on the way out.
+#[tracing::instrument(skip_all, fields(path, path_id))]
 pub fn dump_object_json<C: ChunkStore + 'static>(
     manifest_store: Arc<DepotManifestStore<C>>,
     path: &str,
@@ -66,6 +67,7 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
 /// `path_id` from it. Builds its own [`Environment`] because the env
 /// has to know about the inner SerializedFile by-path (PPtr resolution
 /// inside the dump walks back through `env`).
+#[tracing::instrument(skip_all, fields(bundle_path, archive_entry, path_id))]
 pub fn dump_bundle_object_json<C: ChunkStore + 'static>(
     manifest_store: Arc<DepotManifestStore<C>>,
     bundle_path: &str,
@@ -84,25 +86,48 @@ pub fn dump_bundle_object_json<C: ChunkStore + 'static>(
     let relative = bundle_path
         .strip_prefix(&format!("{data_dir}/"))
         .unwrap_or(bundle_path);
-    let bundle_bytes = game_files.read_path(std::path::Path::new(relative))?;
+    let bundle_bytes = {
+        let _span = tracing::info_span!("read_bundle_bytes").entered();
+        game_files.read_path(std::path::Path::new(relative))?
+    };
     let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
     let env = Environment::new(game_files, &tpk);
-    // See `unity::bundle::build_tree` for the rationale — bundles have
-    // no version of their own; the SerializedFiles inside do.
-    let unity_version = env.unity_version()?.clone();
-    let bundle = BundleFileReader::from_reader(
-        Cursor::new(bundle_bytes.as_ref()),
-        &ExtractionConfig::default().with_fallback_unity_version(unity_version),
-    )?;
+    let unity_version = {
+        let _span = tracing::info_span!("unity_version").entered();
+        env.unity_version()?.clone()
+    };
+    let bundle = {
+        let _span = tracing::info_span!("parse_bundle_header").entered();
+        BundleFileReader::from_reader(
+            Cursor::new(bundle_bytes.as_ref()),
+            &ExtractionConfig::default().with_fallback_unity_version(unity_version),
+        )?
+    };
     let entry_bytes = bundle
         .read_at(archive_entry)?
         .ok_or_else(|| anyhow::anyhow!("entry {archive_entry} not found in bundle"))?;
-    let sf = SerializedFile::from_reader(&mut Cursor::new(entry_bytes.as_slice()))?;
+    let sf = {
+        let _span =
+            tracing::info_span!("parse_serializedfile", bytes = entry_bytes.len()).entered();
+        SerializedFile::from_reader(&mut Cursor::new(entry_bytes.as_slice()))?
+    };
     let file = env.insert_cache(archive_entry.into(), sf, Data::InMemory(entry_bytes));
-    let object = file.object_at::<Value>(path_id)?;
-    let mut value = object.read()?;
-    simplify_for_dump(&file, &data_dir, &mut value);
-    Ok(serde_json::to_string_pretty(&value)?)
+    let value = {
+        let _span = tracing::info_span!("read_object").entered();
+        let object = file.object_at::<Value>(path_id)?;
+        object.read()?
+    };
+    let value = {
+        let _span = tracing::info_span!("simplify_for_dump").entered();
+        let mut v = value;
+        simplify_for_dump(&file, &data_dir, &mut v);
+        v
+    };
+    let json = {
+        let _span = tracing::info_span!("serialize_json").entered();
+        serde_json::to_string_pretty(&value)?
+    };
+    Ok(json)
 }
 
 /// Single-pass rewrite of a deserialised object tree:
