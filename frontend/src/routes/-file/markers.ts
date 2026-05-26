@@ -108,6 +108,6 @@ function renderColor(payload: string): string {
   return `<span class="inline-block h-[0.9em] w-[0.9em] mr-1 rounded-sm border border-slate-700/60" style="background-color: ${payload}; vertical-align: -0.08em"></span><span class="text-slate-300">${payload}</span>`;
 }
 
-function escHTML(s: string): string {
+export function escHTML(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

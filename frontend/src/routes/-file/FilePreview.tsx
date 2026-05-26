@@ -6,6 +6,7 @@ import { fetchTransformedFile, type FileView } from "../../api";
 import { formatBytes } from "../../lib/format";
 import { mediaKindForPath } from "../../lib/mediaKind";
 import { highlight, langForMime, langForPath } from "../../lib/syntax";
+import { escHTML } from "./markers";
 import { MediaPlayer } from "./MediaPlayer";
 import { StructuredView } from "./StructuredView";
 import type { FileLocator } from "./types";
@@ -217,10 +218,20 @@ export const HighlightedPre = memo(function HighlightedPre({
   const chrome = bare
     ? "font-mono text-xs wrap-break-word whitespace-pre-wrap"
     : "overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs wrap-break-word whitespace-pre-wrap";
-  // Plain `<pre>` path ignores `postProcess` — that transform only
-  // makes sense when there's already escaped HTML to inject markup
-  // into (the shiki path above). React's children render escapes the
-  // raw text safely here.
+  // Pre-shiki / too-big-for-shiki fallback. Escape first, then run
+  // `postProcess` on the escaped text so `__MARK__…` sentinels are
+  // already swapped for their HTML on the very first paint — without
+  // this, every node switch flashes raw markers for the frames it
+  // takes shiki to tokenise.
+  if (postProcess) {
+    return (
+      <pre
+        className={chrome}
+        style={cvStyle}
+        dangerouslySetInnerHTML={{ __html: postProcess(escHTML(code)) }}
+      />
+    );
+  }
   return (
     <pre className={chrome} style={cvStyle}>
       {code}
