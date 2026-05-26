@@ -272,6 +272,14 @@ function Tree({
 
   const parentById = parentByIdEarly;
 
+  // Stable across renders so memoised consumers (e.g. `makePostProcess`
+  // in the preview pane) don't get a fresh function reference every
+  // time the tree state ticks.
+  const isInTree = useCallback(
+    (id: string) => id === root.id || parentById.has(id),
+    [root.id, parentById],
+  );
+
   const setExpanded = useCallback(
     (id: string, next: boolean) => {
       // With a filter active, `effectiveExpanded` auto-includes every
@@ -581,7 +589,7 @@ function Tree({
             <NodeContentPanel
               locator={locator}
               nodeId={selectedId}
-              isInTree={(id) => id === root.id || parentById.has(id)}
+              isInTree={isInTree}
               onHashTarget={jumpToHashTarget}
             />
           ) : (
@@ -935,7 +943,7 @@ function NodeContentPanel({
   const settled = lastSettledRef.current;
   const text = settled?.kind === "ok" ? settled.text : "";
   const mime = settled?.kind === "ok" ? settled.mime : "";
-  const postProcess = useMemo(() => makePostProcess(locator), [locator]);
+  const postProcess = useMemo(() => makePostProcess(locator, isInTree), [locator, isInTree]);
   const router = useRouter();
   // Delegated click — pptr anchors are either local hash refs (no
   // `href`, just `data-pptr-ref`) or full route links (`href` set to

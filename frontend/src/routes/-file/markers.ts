@@ -31,8 +31,17 @@ const MARKER_RE = new RegExp(`"${MARK_PREFIX}([a-z]+)${MARK_SEP}([^"]*)"`, "g");
 /// rendered HTML. Unknown types pass through untouched so a backend
 /// that ships a marker before the frontend understands it doesn't
 /// crash the page.
-export function makePostProcess(locator: FileLocator): (html: string) => string {
-  const renderPptr = makePptrRenderer(locator);
+///
+/// `isLocalRefInTree` decides whether a same-file pptr ref is a real
+/// jump target (rendered as a link) or a dead one (rendered as plain
+/// text). The backend filters most dead refs (self-transforms, etc)
+/// but some — like Transform refs on components when the tree only
+/// lists GameObjects — still come through with the marker shape.
+export function makePostProcess(
+  locator: FileLocator,
+  isLocalRefInTree: (ref: string) => boolean,
+): (html: string) => string {
+  const renderPptr = makePptrRenderer(locator, isLocalRefInTree);
   return (html) =>
     html.replace(MARKER_RE, (whole, type, payload) => {
       switch (type) {
@@ -46,7 +55,7 @@ export function makePostProcess(locator: FileLocator): (html: string) => string 
     });
 }
 
-function makePptrRenderer(locator: FileLocator) {
+function makePptrRenderer(locator: FileLocator, isLocalRefInTree: (ref: string) => boolean) {
   const branchParam =
     locator.branch === "public" ? "" : `&branch=${encodeURIComponent(locator.branch)}`;
   const fileHref = (depotPath: string) =>
@@ -85,6 +94,12 @@ function makePptrRenderer(locator: FileLocator) {
         : "";
     const suffix = `${ty ? ` <span class="text-slate-500">(${ty})</span>` : ""}${pathHint}`;
     if (!ref) {
+      return `<span class="text-slate-400">${label}</span>${suffix}`;
+    }
+    // Same-file refs to objects the tree doesn't list (e.g. Transform
+    // components when the tree only carries GameObjects) have no jump
+    // target — render plain so the user doesn't chase a dead click.
+    if (!file && !isLocalRefInTree(ref)) {
       return `<span class="text-slate-400">${label}</span>${suffix}`;
     }
     // Both local and external refs get a real `href` so browsers show
