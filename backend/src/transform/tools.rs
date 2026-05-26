@@ -28,6 +28,8 @@ fn extension_transformer(ext: &str) -> Option<Transformer> {
         "so" => Some(Transformer::Cli(&NM_DYNAMIC)),
         #[cfg(feature = "unity")]
         "assets" => Some(Transformer::UnitySerialized),
+        #[cfg(feature = "unity")]
+        "bundle" | "unity3d" => Some(Transformer::UnityBundle),
         _ => None,
     }
 }

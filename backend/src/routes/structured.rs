@@ -90,6 +90,23 @@ pub async fn manifest_file_structured(
             })?;
             Ok((ImmutableCache, Json(tree)))
         }
+        #[cfg(feature = "unity")]
+        Some(Transformer::UnityBundle) => {
+            let snapshot_for_blocking = snapshot.clone();
+            let tree = tokio::task::spawn_blocking(move || {
+                crate::unity::bundle::build_tree(snapshot_for_blocking, &path)
+            })
+            .await
+            .map_err(|e| ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!("structured-tree task panicked: {e}"),
+            })?
+            .map_err(|e| ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: e.to_string(),
+            })?;
+            Ok((ImmutableCache, Json(tree)))
+        }
         Some(Transformer::Dll) => {
             let cfg = state.config.load();
             let bytes = snapshot.read_full(&path).await?;
@@ -166,6 +183,58 @@ pub async fn manifest_file_structured_node(
             let path = q.path.clone();
             let text = tokio::task::spawn_blocking(move || {
                 crate::unity::dump_value::dump_object_json(snapshot, &path, path_id)
+            })
+            .await
+            .map_err(|e| ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!("structured-node task panicked: {e}"),
+            })?
+            .map_err(|e| ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: e.to_string(),
+            })?;
+            Ok((
+                ImmutableCache,
+                Json(NodeContent {
+                    mime: "application/json".to_string(),
+                    text,
+                }),
+            ))
+        }
+        #[cfg(feature = "unity")]
+        Some(Transformer::UnityBundle) => {
+            // Bundle node ids carry an archive prefix
+            // (`archive:<entry>/obj:<pid>`) so the dump can find the
+            // right SerializedFile inside the container. Non-object ids
+            // (archive headers, sections, raw blobs) get an empty body.
+            let Some((archive_entry, inner)) = crate::unity::bundle::parse_archive_id(&q.node_id)
+            else {
+                return Ok((
+                    ImmutableCache,
+                    Json(NodeContent {
+                        mime: "text/plain".to_string(),
+                        text: String::new(),
+                    }),
+                ));
+            };
+            let Some(path_id) = crate::unity::tree::parse_object_node_id(inner) else {
+                return Ok((
+                    ImmutableCache,
+                    Json(NodeContent {
+                        mime: "text/plain".to_string(),
+                        text: String::new(),
+                    }),
+                ));
+            };
+            let bundle_path = q.path.clone();
+            let archive_entry = archive_entry.to_string();
+            let text = tokio::task::spawn_blocking(move || {
+                crate::unity::dump_value::dump_bundle_object_json(
+                    snapshot,
+                    &bundle_path,
+                    &archive_entry,
+                    path_id,
+                )
             })
             .await
             .map_err(|e| ApiError {

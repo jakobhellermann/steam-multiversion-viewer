@@ -453,6 +453,16 @@ async fn resolve_diff_text(
                     message: ".NET assemblies have no text-diff representation yet".to_string(),
                 });
             }
+            #[cfg(feature = "unity")]
+            crate::transform::Transformer::UnityBundle => {
+                // Bundles contain multiple SerializedFiles; a single
+                // text dump for diff is awkward and the structured
+                // tree carries the actual signal. Punt for now.
+                return Err(ApiError {
+                    status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    message: "Unity bundles have no text-diff representation yet".to_string(),
+                });
+            }
         };
         return Ok(DiffSide {
             text,

@@ -1955,7 +1955,7 @@ dependencies = [
 [[package]]
 name = "rabex-env"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#43d70356c0ab12442c97bcacdd2ad1d4492221a6"
+source = "git+https://github.com/jakobhellermann/rabex-env#1225952b4597c3144488cf88c117b6893dd6fb7d"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -1976,13 +1976,14 @@ dependencies = [
 [[package]]
 name = "rabex-env-steam-depot-vfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#43d70356c0ab12442c97bcacdd2ad1d4492221a6"
+source = "git+https://github.com/jakobhellermann/rabex-env#1225952b4597c3144488cf88c117b6893dd6fb7d"
 dependencies = [
  "anyhow",
  "rabex-env",
  "steam-depot-vfs",
  "steam-vent-depot",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2603,7 +2604,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "steam-depot-mount"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-depot-vfs#5ea34284b504ab384dba19c8bf5207ac903705bd"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#8eb1a24ed944143c28f618c367e40f50662e6184"
 dependencies = [
  "bytes",
  "fuser",
@@ -2619,7 +2620,7 @@ dependencies = [
 [[package]]
 name = "steam-depot-vfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-depot-vfs#5ea34284b504ab384dba19c8bf5207ac903705bd"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#8eb1a24ed944143c28f618c367e40f50662e6184"
 dependencies = [
  "bytes",
  "directories 6.0.0",
@@ -3541,7 +3542,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

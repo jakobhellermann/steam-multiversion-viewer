@@ -710,7 +710,7 @@ fn structured_info_for(path: &str) -> Option<StructuredInfo> {
     use crate::transform::Transformer;
     match crate::transform::tools::transformer_for(path) {
         #[cfg(feature = "unity")]
-        Some(Transformer::UnitySerialized) => Some(StructuredInfo {
+        Some(Transformer::UnitySerialized | Transformer::UnityBundle) => Some(StructuredInfo {
             kind: crate::unity::tree::TREE_KIND.to_string(),
         }),
         Some(Transformer::Dll) => Some(StructuredInfo {
@@ -876,6 +876,14 @@ pub async fn manifest_file_transformed(
                 message:
                     ".NET assemblies are served through /file/structured, not /file/transformed"
                         .to_string(),
+            });
+        }
+        #[cfg(feature = "unity")]
+        crate::transform::Transformer::UnityBundle => {
+            return Err(ApiError {
+                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                message: "Unity bundles are served through /file/structured, not /file/transformed"
+                    .to_string(),
             });
         }
     };

@@ -61,6 +61,50 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     Ok(serde_json::to_string_pretty(&value)?)
 }
 
+/// Bundle equivalent of [`dump_object_json`]: load the SerializedFile
+/// at `archive_entry` inside the bundle at `bundle_path`, then dump
+/// `path_id` from it. Builds its own [`Environment`] because the env
+/// has to know about the inner SerializedFile by-path (PPtr resolution
+/// inside the dump walks back through `env`).
+pub fn dump_bundle_object_json<C: ChunkStore + 'static>(
+    manifest_store: Arc<DepotManifestStore<C>>,
+    bundle_path: &str,
+    archive_entry: &str,
+    path_id: PathId,
+) -> Result<String> {
+    use std::io::Cursor;
+
+    use rabex_env::env::Data;
+    use rabex_env::rabex::files::SerializedFile;
+    use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
+    use rabex_env::resolver::EnvResolver;
+
+    let game_files = SteamDepotGameFiles::new(manifest_store)?;
+    let data_dir = game_files.data_dir().display().to_string();
+    let relative = bundle_path
+        .strip_prefix(&format!("{data_dir}/"))
+        .unwrap_or(bundle_path);
+    let bundle_bytes = game_files.read_path(std::path::Path::new(relative))?;
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let env = Environment::new(game_files, &tpk);
+    // See `unity::bundle::build_tree` for the rationale — bundles have
+    // no version of their own; the SerializedFiles inside do.
+    let unity_version = env.unity_version()?.clone();
+    let bundle = BundleFileReader::from_reader(
+        Cursor::new(bundle_bytes.as_ref()),
+        &ExtractionConfig::default().with_fallback_unity_version(unity_version),
+    )?;
+    let entry_bytes = bundle
+        .read_at(archive_entry)?
+        .ok_or_else(|| anyhow::anyhow!("entry {archive_entry} not found in bundle"))?;
+    let sf = SerializedFile::from_reader(&mut Cursor::new(entry_bytes.as_slice()))?;
+    let file = env.insert_cache(archive_entry.into(), sf, Data::InMemory(entry_bytes));
+    let object = file.object_at::<Value>(path_id)?;
+    let mut value = object.read()?;
+    simplify_for_dump(&file, &data_dir, &mut value);
+    Ok(serde_json::to_string_pretty(&value)?)
+}
+
 /// Single-pass rewrite of a deserialised object tree:
 ///
 /// - PPtr-shaped maps → `__PPTR__…` marker string,

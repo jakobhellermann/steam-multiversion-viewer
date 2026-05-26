@@ -91,6 +91,18 @@ impl Node {
         self.facets.insert(key.into(), value.into());
         self
     }
+
+    /// Prepend `prefix` to this node's id and every descendant's. Used
+    /// when a builder splices an existing per-file subtree into a
+    /// larger tree (e.g. a bundle containing many SerializedFiles) so
+    /// the resulting ids stay unique across the merged tree without
+    /// having to thread the prefix through every builder helper.
+    pub fn prefix_ids(&mut self, prefix: &str) {
+        self.id = format!("{prefix}{}", self.id);
+        for child in &mut self.children {
+            child.prefix_ids(prefix);
+        }
+    }
 }
 
 /// Top-level response for `/file/structured`. `kind` lets the frontend

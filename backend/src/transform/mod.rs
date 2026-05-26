@@ -39,6 +39,11 @@ pub enum Transformer {
     /// `crate::unity::dump_unity_serialized`.
     #[cfg(feature = "unity")]
     UnitySerialized,
+    /// Unity asset bundle (`*.bundle`, `*.unity3d`). Multiple
+    /// SerializedFiles inside one container; structured view delegates
+    /// to [`crate::unity::bundle::build_tree`].
+    #[cfg(feature = "unity")]
+    UnityBundle,
     /// .NET assembly — produces a namespace tree via
     /// [`crate::dll::tree::build_tree`] and lazy per-type decompiles
     /// via [`crate::dll::decompile_type`]. There's no
@@ -53,6 +58,8 @@ impl Transformer {
             Self::Cli(t) => t.output_mime,
             #[cfg(feature = "unity")]
             Self::UnitySerialized => "text/plain",
+            #[cfg(feature = "unity")]
+            Self::UnityBundle => "text/plain",
             Self::Dll => "text/x-csharp",
         }
     }

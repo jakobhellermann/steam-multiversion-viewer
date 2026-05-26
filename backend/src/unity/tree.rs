@@ -82,7 +82,11 @@ pub fn build_tree<C: ChunkStore + 'static>(
     })
 }
 
-fn build_root_node<R: EnvResolver, P: TypeTreeProvider>(
+/// Build the per-file root node (class-stats / hierarchy / loose). The
+/// ids are bare (`obj:N`, `section:hierarchy`, …); callers that splice
+/// the result into a larger tree (e.g. a bundle) should run
+/// [`Node::prefix_ids`] on the returned node before merging.
+pub fn build_root_node<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     label: &str,
 ) -> Result<Node> {
