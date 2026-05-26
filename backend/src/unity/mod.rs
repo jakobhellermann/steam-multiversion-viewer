@@ -16,7 +16,9 @@ use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::chunk_store::ChunkStore;
 use steam_depot_vfs::fs::DepotManifestStore;
 
+pub mod dump_value;
 mod format;
+mod markers;
 pub mod tree;
 
 /// Dump a unity serialized-file as text

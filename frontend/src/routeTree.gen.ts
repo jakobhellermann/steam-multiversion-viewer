@@ -8,170 +8,173 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from "./routes/__root";
-import { Route as SettingsRouteImport } from "./routes/settings";
-import { Route as IndexRouteImport } from "./routes/index";
-import { Route as AppsAppidRouteImport } from "./routes/apps.$appid";
-import { Route as AppsAppidIndexRouteImport } from "./routes/apps.$appid.index";
-import { Route as AppsAppidDepotsDepotIdManifestsManifestIdRouteImport } from "./routes/apps.$appid.depots.$depotId.manifests.$manifestId";
-import { Route as AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport } from "./routes/apps.$appid.depots.$depotId.manifests.$manifestId_.file";
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppsAppidRouteImport } from './routes/apps.$appid'
+import { Route as AppsAppidIndexRouteImport } from './routes/apps.$appid.index'
+import { Route as AppsAppidDepotsDepotIdManifestsManifestIdRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId'
+import { Route as AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId_.file'
 
 const SettingsRoute = SettingsRouteImport.update({
-  id: "/settings",
-  path: "/settings",
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const IndexRoute = IndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const AppsAppidRoute = AppsAppidRouteImport.update({
-  id: "/apps/$appid",
-  path: "/apps/$appid",
+  id: '/apps/$appid',
+  path: '/apps/$appid',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const AppsAppidIndexRoute = AppsAppidIndexRouteImport.update({
-  id: "/",
-  path: "/",
+  id: '/',
+  path: '/',
   getParentRoute: () => AppsAppidRoute,
-} as any);
+} as any)
 const AppsAppidDepotsDepotIdManifestsManifestIdRoute =
   AppsAppidDepotsDepotIdManifestsManifestIdRouteImport.update({
-    id: "/depots/$depotId/manifests/$manifestId",
-    path: "/depots/$depotId/manifests/$manifestId",
+    id: '/depots/$depotId/manifests/$manifestId',
+    path: '/depots/$depotId/manifests/$manifestId',
     getParentRoute: () => AppsAppidRoute,
-  } as any);
+  } as any)
 const AppsAppidDepotsDepotIdManifestsManifestIdFileRoute =
   AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport.update({
-    id: "/depots/$depotId/manifests/$manifestId_/file",
-    path: "/depots/$depotId/manifests/$manifestId/file",
+    id: '/depots/$depotId/manifests/$manifestId_/file',
+    path: '/depots/$depotId/manifests/$manifestId/file',
     getParentRoute: () => AppsAppidRoute,
-  } as any);
+  } as any)
 
 export interface FileRoutesByFullPath {
-  "/": typeof IndexRoute;
-  "/settings": typeof SettingsRoute;
-  "/apps/$appid": typeof AppsAppidRouteWithChildren;
-  "/apps/$appid/": typeof AppsAppidIndexRoute;
-  "/apps/$appid/depots/$depotId/manifests/$manifestId": typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute;
-  "/apps/$appid/depots/$depotId/manifests/$manifestId/file": typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute;
+  '/': typeof IndexRoute
+  '/settings': typeof SettingsRoute
+  '/apps/$appid': typeof AppsAppidRouteWithChildren
+  '/apps/$appid/': typeof AppsAppidIndexRoute
+  '/apps/$appid/depots/$depotId/manifests/$manifestId': typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
+  '/apps/$appid/depots/$depotId/manifests/$manifestId/file': typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute
 }
 export interface FileRoutesByTo {
-  "/": typeof IndexRoute;
-  "/settings": typeof SettingsRoute;
-  "/apps/$appid": typeof AppsAppidIndexRoute;
-  "/apps/$appid/depots/$depotId/manifests/$manifestId": typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute;
-  "/apps/$appid/depots/$depotId/manifests/$manifestId/file": typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute;
+  '/': typeof IndexRoute
+  '/settings': typeof SettingsRoute
+  '/apps/$appid': typeof AppsAppidIndexRoute
+  '/apps/$appid/depots/$depotId/manifests/$manifestId': typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
+  '/apps/$appid/depots/$depotId/manifests/$manifestId/file': typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  "/": typeof IndexRoute;
-  "/settings": typeof SettingsRoute;
-  "/apps/$appid": typeof AppsAppidRouteWithChildren;
-  "/apps/$appid/": typeof AppsAppidIndexRoute;
-  "/apps/$appid/depots/$depotId/manifests/$manifestId": typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute;
-  "/apps/$appid/depots/$depotId/manifests/$manifestId_/file": typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute;
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/settings': typeof SettingsRoute
+  '/apps/$appid': typeof AppsAppidRouteWithChildren
+  '/apps/$appid/': typeof AppsAppidIndexRoute
+  '/apps/$appid/depots/$depotId/manifests/$manifestId': typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
+  '/apps/$appid/depots/$depotId/manifests/$manifestId_/file': typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
+  fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | "/"
-    | "/settings"
-    | "/apps/$appid"
-    | "/apps/$appid/"
-    | "/apps/$appid/depots/$depotId/manifests/$manifestId"
-    | "/apps/$appid/depots/$depotId/manifests/$manifestId/file";
-  fileRoutesByTo: FileRoutesByTo;
+    | '/'
+    | '/settings'
+    | '/apps/$appid'
+    | '/apps/$appid/'
+    | '/apps/$appid/depots/$depotId/manifests/$manifestId'
+    | '/apps/$appid/depots/$depotId/manifests/$manifestId/file'
+  fileRoutesByTo: FileRoutesByTo
   to:
-    | "/"
-    | "/settings"
-    | "/apps/$appid"
-    | "/apps/$appid/depots/$depotId/manifests/$manifestId"
-    | "/apps/$appid/depots/$depotId/manifests/$manifestId/file";
+    | '/'
+    | '/settings'
+    | '/apps/$appid'
+    | '/apps/$appid/depots/$depotId/manifests/$manifestId'
+    | '/apps/$appid/depots/$depotId/manifests/$manifestId/file'
   id:
-    | "__root__"
-    | "/"
-    | "/settings"
-    | "/apps/$appid"
-    | "/apps/$appid/"
-    | "/apps/$appid/depots/$depotId/manifests/$manifestId"
-    | "/apps/$appid/depots/$depotId/manifests/$manifestId_/file";
-  fileRoutesById: FileRoutesById;
+    | '__root__'
+    | '/'
+    | '/settings'
+    | '/apps/$appid'
+    | '/apps/$appid/'
+    | '/apps/$appid/depots/$depotId/manifests/$manifestId'
+    | '/apps/$appid/depots/$depotId/manifests/$manifestId_/file'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute;
-  SettingsRoute: typeof SettingsRoute;
-  AppsAppidRoute: typeof AppsAppidRouteWithChildren;
+  IndexRoute: typeof IndexRoute
+  SettingsRoute: typeof SettingsRoute
+  AppsAppidRoute: typeof AppsAppidRouteWithChildren
 }
 
-declare module "@tanstack/react-router" {
+declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    "/settings": {
-      id: "/settings";
-      path: "/settings";
-      fullPath: "/settings";
-      preLoaderRoute: typeof SettingsRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/": {
-      id: "/";
-      path: "/";
-      fullPath: "/";
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/apps/$appid": {
-      id: "/apps/$appid";
-      path: "/apps/$appid";
-      fullPath: "/apps/$appid";
-      preLoaderRoute: typeof AppsAppidRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
-    "/apps/$appid/": {
-      id: "/apps/$appid/";
-      path: "/";
-      fullPath: "/apps/$appid/";
-      preLoaderRoute: typeof AppsAppidIndexRouteImport;
-      parentRoute: typeof AppsAppidRoute;
-    };
-    "/apps/$appid/depots/$depotId/manifests/$manifestId": {
-      id: "/apps/$appid/depots/$depotId/manifests/$manifestId";
-      path: "/depots/$depotId/manifests/$manifestId";
-      fullPath: "/apps/$appid/depots/$depotId/manifests/$manifestId";
-      preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdRouteImport;
-      parentRoute: typeof AppsAppidRoute;
-    };
-    "/apps/$appid/depots/$depotId/manifests/$manifestId_/file": {
-      id: "/apps/$appid/depots/$depotId/manifests/$manifestId_/file";
-      path: "/depots/$depotId/manifests/$manifestId/file";
-      fullPath: "/apps/$appid/depots/$depotId/manifests/$manifestId/file";
-      preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport;
-      parentRoute: typeof AppsAppidRoute;
-    };
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/apps/$appid': {
+      id: '/apps/$appid'
+      path: '/apps/$appid'
+      fullPath: '/apps/$appid'
+      preLoaderRoute: typeof AppsAppidRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/apps/$appid/': {
+      id: '/apps/$appid/'
+      path: '/'
+      fullPath: '/apps/$appid/'
+      preLoaderRoute: typeof AppsAppidIndexRouteImport
+      parentRoute: typeof AppsAppidRoute
+    }
+    '/apps/$appid/depots/$depotId/manifests/$manifestId': {
+      id: '/apps/$appid/depots/$depotId/manifests/$manifestId'
+      path: '/depots/$depotId/manifests/$manifestId'
+      fullPath: '/apps/$appid/depots/$depotId/manifests/$manifestId'
+      preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdRouteImport
+      parentRoute: typeof AppsAppidRoute
+    }
+    '/apps/$appid/depots/$depotId/manifests/$manifestId_/file': {
+      id: '/apps/$appid/depots/$depotId/manifests/$manifestId_/file'
+      path: '/depots/$depotId/manifests/$manifestId/file'
+      fullPath: '/apps/$appid/depots/$depotId/manifests/$manifestId/file'
+      preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport
+      parentRoute: typeof AppsAppidRoute
+    }
   }
 }
 
 interface AppsAppidRouteChildren {
-  AppsAppidIndexRoute: typeof AppsAppidIndexRoute;
-  AppsAppidDepotsDepotIdManifestsManifestIdRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute;
-  AppsAppidDepotsDepotIdManifestsManifestIdFileRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute;
+  AppsAppidIndexRoute: typeof AppsAppidIndexRoute
+  AppsAppidDepotsDepotIdManifestsManifestIdRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
+  AppsAppidDepotsDepotIdManifestsManifestIdFileRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute
 }
 
 const AppsAppidRouteChildren: AppsAppidRouteChildren = {
   AppsAppidIndexRoute: AppsAppidIndexRoute,
-  AppsAppidDepotsDepotIdManifestsManifestIdRoute: AppsAppidDepotsDepotIdManifestsManifestIdRoute,
+  AppsAppidDepotsDepotIdManifestsManifestIdRoute:
+    AppsAppidDepotsDepotIdManifestsManifestIdRoute,
   AppsAppidDepotsDepotIdManifestsManifestIdFileRoute:
     AppsAppidDepotsDepotIdManifestsManifestIdFileRoute,
-};
+}
 
-const AppsAppidRouteWithChildren = AppsAppidRoute._addFileChildren(AppsAppidRouteChildren);
+const AppsAppidRouteWithChildren = AppsAppidRoute._addFileChildren(
+  AppsAppidRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRoute: SettingsRoute,
   AppsAppidRoute: AppsAppidRouteWithChildren,
-};
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()

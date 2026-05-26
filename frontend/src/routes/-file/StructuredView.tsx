@@ -7,6 +7,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { fetchFileStructured, fetchStructuredNodeContent, type StructuredNode } from "../../api";
 import { langForMime } from "../../lib/syntax";
 import { HighlightedPre } from "./FilePreview";
+import { makePostProcess } from "./markers";
 import type { FileLocator } from "./types";
 
 const fileRoute = getRouteApi("/apps/$appid/depots/$depotId/manifests/$manifestId_/file");
@@ -863,86 +864,6 @@ function FacetDropdown({
   );
 }
 
-/// Sentinel string used to smuggle a PPtr blob through shiki as a
-/// single-line JSON string. `\x1f` (ASCII Unit Separator) is the
-/// classic record-separator codepoint — it cannot legally appear in
-/// the user-facing JSON content we render, so it's a safer field
-/// delimiter than `|` (which can show up in gameobject paths).
-const PPTR_PREFIX = "__PPTR__";
-// `␞` (U+241E SYMBOL FOR RECORD SEPARATOR) is a printable codepoint
-// JSON.stringify passes through unescaped, so shiki sees it as plain
-// text and keeps the whole sentinel inside a single string-token —
-// regex-on-output stays simple. A raw `\x1f` would be JSON-escaped to
-// ``, which shiki then re-tokenises as a string escape, breaking
-// the token in three.
-const PPTR_SEP = "␞";
-
-/// Replace each PPtr sentinel in the rendered HTML with a compact
-/// pseudo-element. Shiki wraps the whole sentinel string in one
-/// `<span ...>"…"</span>` (it's a JSON string), so a single regex
-/// reliably picks it up. The HTML-escaped `&quot;` matches what shiki
-/// actually emits.
-function makeLinkifyPptrs(locator: FileLocator) {
-  const branchParam =
-    locator.branch === "public" ? "" : `&branch=${encodeURIComponent(locator.branch)}`;
-  const fileHref = (depotPath: string) =>
-    `/apps/${locator.appid}/depots/${locator.depotId}/manifests/${locator.manifestId}/file?path=${encodeURIComponent(depotPath)}${branchParam}`;
-  // Strip the `<Game>_Data/` data-dir prefix from file labels — the
-  // user already knows which game/version they're in, so the extra
-  // prefix only wastes horizontal space.
-  const dataDirPrefix = (() => {
-    const slash = locator.path.indexOf("/");
-    return slash > 0 ? locator.path.slice(0, slash + 1) : "";
-  })();
-  const shortFileLabel = (depotPath: string) =>
-    dataDirPrefix && depotPath.startsWith(dataDirPrefix)
-      ? depotPath.slice(dataDirPrefix.length)
-      : depotPath;
-  return function linkifyPptrs(html: string): string {
-    const sep = PPTR_SEP;
-    const noSep = `[^"${sep}]*`;
-    const pattern = new RegExp(
-      `"${PPTR_PREFIX}(${noSep})${sep}(${noSep})${sep}(${noSep})${sep}([^"]*)"`,
-      "g",
-    );
-    return html.replace(pattern, (_, ref, target, type, file) => {
-      // Fully-empty sentinel = null pptr that landed in a map-key
-      // position. Render as plain `null` to avoid a stray "()".
-      if (!ref && !target && !type && !file) {
-        return '<span class="text-slate-500">null</span>';
-      }
-      const escHTML = (s: string) =>
-        s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      // Label depends on locality: local refs show the target's name
-      // (resolved by the backend), external ones show the depot path
-      // of the file they live in — the latter is what's actually
-      // identifying since cross-file targets often have no `m_Name`.
-      const labelText = file ? shortFileLabel(file) : target;
-      const label = escHTML(labelText) || '<span class="text-slate-500">null</span>';
-      const ty = escHTML(type);
-      // If we couldn't recover a real name (backend fell back to
-      // `PathID=N`), keep that as a hint next to the type so the row
-      // still tells you *which* `Shader` you're looking at.
-      const pathHint =
-        file && /^PathID=\d+$/.test(target)
-          ? ` <span class="text-slate-500">${escHTML(target)}</span>`
-          : "";
-      const suffix = `${ty ? ` <span class="text-slate-500">(${ty})</span>` : ""}${pathHint}`;
-      if (!ref) {
-        return `<span class="text-slate-400">${label}</span>${suffix}`;
-      }
-      // Same shape for local + external — the click handler dispatches:
-      // hash-only refs stay inside this file (no `href`), while external
-      // refs carry a real `href` so middle-/ctrl-click still open in a
-      // new tab and the click handler can route via tanstack-router.
-      const linkAttrs = file
-        ? `href="${escHTML(fileHref(file))}#${escHTML(ref)}" data-pptr-ref="${escHTML(ref)}"`
-        : `data-pptr-ref="${escHTML(ref)}"`;
-      return `<a ${linkAttrs} class="cursor-pointer text-sky-400 underline decoration-sky-700 hover:decoration-sky-400 hover:text-sky-200">${label}</a>${suffix}`;
-    });
-  };
-}
-
 function NodeContentPanel({
   locator,
   nodeId,
@@ -1002,7 +923,7 @@ function NodeContentPanel({
   const settled = lastSettledRef.current;
   const text = settled?.kind === "ok" ? settled.text : "";
   const mime = settled?.kind === "ok" ? settled.mime : "";
-  const linkifyPptrs = useMemo(() => makeLinkifyPptrs(locator), [locator]);
+  const postProcess = useMemo(() => makePostProcess(locator), [locator]);
   const router = useRouter();
   // Delegated click — pptr anchors are either local hash refs (no
   // `href`, just `data-pptr-ref`) or full route links (`href` set to
@@ -1042,7 +963,7 @@ function NodeContentPanel({
   if (settled.text.length === 0) return null;
   return (
     <div onClick={onClick}>
-      <HighlightedPre code={text} lang={langForMime(mime)} bare postProcess={linkifyPptrs} />
+      <HighlightedPre code={text} lang={langForMime(mime)} bare postProcess={postProcess} />
     </div>
   );
 }
