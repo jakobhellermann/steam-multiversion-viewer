@@ -20,12 +20,13 @@ use std::sync::Arc;
 use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::handle::SerializedFileHandle;
+use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::{PPtr, PathId};
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env::resolver::EnvResolver;
-use rabex_env::unity::types::GameObject;
+use rabex_env::unity::types::{GameObject, MonoBehaviour};
 use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use serde_value::Value;
 use steam_depot_vfs::chunk_store::ChunkStore;
@@ -234,7 +235,21 @@ fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
         Ok(o) => o,
         Err(_) => return pptr_placeholder(pptr, "unresolved"),
     };
-    let class_id = format!("{:?}", obj.class_id());
+    let class_id_raw = obj.class_id();
+    // For MonoBehaviours the engine class name (`MonoBehaviour`) is
+    // uselessly generic — the actual script name is what users think
+    // of as the type. Substitute it into the marker's type suffix when
+    // available; everything else keeps the engine class name.
+    let class_id = if class_id_raw == ClassId::MonoBehaviour {
+        obj.cast::<MonoBehaviour>()
+            .mono_script()
+            .ok()
+            .flatten()
+            .map(|s| s.full_name().into_owned())
+            .unwrap_or_else(|| format!("{class_id_raw:?}"))
+    } else {
+        format!("{class_id_raw:?}")
+    };
     let target = obj
         .read()
         .ok()
