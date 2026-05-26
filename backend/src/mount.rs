@@ -12,27 +12,37 @@
 //! The active mount holds onto an [`Arc<SteamClient>`] and
 //! [`Arc<DepotStore>`] cloned out of `AppState`, so it survives
 //! independently of any single request.
+//!
+//! FUSE is linux-only — on other platforms `MountManager` exists but
+//! every operation returns [`MountControlError::Unsupported`] and
+//! `status()` returns [`MountStatus::Unsupported`]. The HTTP routes are
+//! always wired up so the frontend can talk to them unchanged.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
-use steam_depot_mount::{Mount, MountConfig, MountError};
 use steam_depot_vfs::DepotStore;
-use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
 use tokio::runtime::Handle;
 
 use crate::extra_manifests::ExtraManifestsStore;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient};
 
+#[cfg(target_os = "linux")]
+use parking_lot::Mutex;
+#[cfg(target_os = "linux")]
+use steam_depot_mount::{Mount, MountConfig, MountError};
+#[cfg(target_os = "linux")]
+use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
+
+#[cfg(target_os = "linux")]
 type ChunkStoreC = FsCacheStore<CdnChunkStore<SteamClient>>;
 
 pub struct MountManager {
-    /// `None` until [`MountManager::start_with`] succeeds; reset to
-    /// `None` on `stop` or when the mount drops itself.
+    #[cfg(target_os = "linux")]
     active: Mutex<Option<Active>>,
 }
 
+#[cfg(target_os = "linux")]
 struct Active {
     mount: Arc<Mount<ChunkStoreC>>,
     mountpoint: PathBuf,
@@ -41,17 +51,23 @@ struct Active {
 impl MountManager {
     pub fn new() -> Self {
         Self {
+            #[cfg(target_os = "linux")]
             active: Mutex::new(None),
         }
     }
 
     pub fn status(&self) -> MountStatus {
-        match &*self.active.lock() {
-            Some(a) => MountStatus::Mounted {
-                mountpoint: a.mountpoint.clone(),
-            },
-            None => MountStatus::Idle,
+        #[cfg(target_os = "linux")]
+        {
+            match &*self.active.lock() {
+                Some(a) => MountStatus::Mounted {
+                    mountpoint: a.mountpoint.clone(),
+                },
+                None => MountStatus::Idle,
+            }
         }
+        #[cfg(not(target_os = "linux"))]
+        MountStatus::Unsupported
     }
 
     /// Mount at `mountpoint` and register every entry in
@@ -59,6 +75,7 @@ impl MountManager {
     /// entry. The snapshot is taken by the caller (typically
     /// `store_index.read().iter_indexed().collect()`) so we don't hold
     /// the read lock across the FUSE start.
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     pub fn start_with(
         &self,
         mountpoint: PathBuf,
@@ -68,102 +85,114 @@ impl MountManager {
         index_snapshot: impl IntoIterator<Item = (AppId, DepotId, ManifestId)>,
         extra_manifests: &ExtraManifestsStore,
     ) -> Result<MountStatus, MountControlError> {
-        let mut slot = self.active.lock();
-        if slot.is_some() {
-            return Err(MountControlError::AlreadyMounted);
-        }
-        prepare_mountpoint(&mountpoint).map_err(MountControlError::PrepareMountpoint)?;
+        #[cfg(not(target_os = "linux"))]
+        return Err(MountControlError::Unsupported);
 
-        let mount: Mount<ChunkStoreC> = match start_fuse(&mountpoint, rt.clone()) {
-            Ok(m) => m,
-            Err(e) if is_stale_mount(&e) => {
-                // `prepare_mountpoint`'s read_dir check can succeed
-                // (path lists fine) even when the kernel still has a
-                // half-dead FUSE entry for it. Recover and retry once.
-                tracing::warn!(
-                    path = %mountpoint.display(),
-                    "FUSE session start failed with ENOTCONN; running fusermount -uz and retrying",
-                );
-                run_fusermount(&mountpoint, &["-uz"])
-                    .map_err(MountControlError::PrepareMountpoint)?;
-                std::fs::create_dir_all(&mountpoint)
-                    .map_err(MountControlError::PrepareMountpoint)?;
-                start_fuse(&mountpoint, rt).map_err(MountControlError::Start)?
+        #[cfg(target_os = "linux")]
+        {
+            let mut slot = self.active.lock();
+            if slot.is_some() {
+                return Err(MountControlError::AlreadyMounted);
             }
-            Err(e) => return Err(MountControlError::Start(e)),
-        };
-        let mount = Arc::new(mount);
+            prepare_mountpoint(&mountpoint).map_err(MountControlError::PrepareMountpoint)?;
 
-        // Dedup across store-index entries and extra-manifests entries;
-        // either source can mention the same `(app, depot, gid)` and
-        // `Mount::add_lazy` would return `AlreadyMounted` for the second
-        // insert.
-        let mut registered = 0usize;
-        let mut seen = std::collections::HashSet::new();
-        for (app_id, depot_id, manifest_id) in index_snapshot {
-            if !seen.insert((app_id, depot_id, manifest_id)) {
-                continue;
-            }
-            register_one(
-                &mount,
-                &steam,
-                &store,
-                app_id,
-                depot_id,
-                manifest_id,
-                "public",
-            );
-            registered += 1;
-        }
-        for (app_id, entries) in extra_manifests.get_all() {
-            for e in entries {
-                if !seen.insert((app_id, e.depot_id, e.manifest_id)) {
+            let mount: Mount<ChunkStoreC> = match start_fuse(&mountpoint, rt.clone()) {
+                Ok(m) => m,
+                Err(e) if is_stale_mount(&e) => {
+                    // `prepare_mountpoint`'s read_dir check can succeed
+                    // (path lists fine) even when the kernel still has a
+                    // half-dead FUSE entry for it. Recover and retry once.
+                    tracing::warn!(
+                        path = %mountpoint.display(),
+                        "FUSE session start failed with ENOTCONN; running fusermount -uz and retrying",
+                    );
+                    run_fusermount(&mountpoint, &["-uz"])
+                        .map_err(MountControlError::PrepareMountpoint)?;
+                    std::fs::create_dir_all(&mountpoint)
+                        .map_err(MountControlError::PrepareMountpoint)?;
+                    start_fuse(&mountpoint, rt).map_err(MountControlError::Start)?
+                }
+                Err(e) => return Err(MountControlError::Start(e)),
+            };
+            let mount = Arc::new(mount);
+
+            // Dedup across store-index entries and extra-manifests entries;
+            // either source can mention the same `(app, depot, gid)` and
+            // `Mount::add_lazy` would return `AlreadyMounted` for the second
+            // insert.
+            let mut registered = 0usize;
+            let mut seen = std::collections::HashSet::new();
+            for (app_id, depot_id, manifest_id) in index_snapshot {
+                if !seen.insert((app_id, depot_id, manifest_id)) {
                     continue;
                 }
-                let branch = e.branch.as_deref().unwrap_or("public").to_string();
-                register_one_with_branch(
+                register_one(
                     &mount,
                     &steam,
                     &store,
                     app_id,
-                    e.depot_id,
-                    e.manifest_id,
-                    branch,
+                    depot_id,
+                    manifest_id,
+                    "public",
                 );
                 registered += 1;
             }
-        }
+            for (app_id, entries) in extra_manifests.get_all() {
+                for e in entries {
+                    if !seen.insert((app_id, e.depot_id, e.manifest_id)) {
+                        continue;
+                    }
+                    let branch = e.branch.as_deref().unwrap_or("public").to_string();
+                    register_one_with_branch(
+                        &mount,
+                        &steam,
+                        &store,
+                        app_id,
+                        e.depot_id,
+                        e.manifest_id,
+                        branch,
+                    );
+                    registered += 1;
+                }
+            }
 
-        tracing::info!(
-            mountpoint = %mountpoint.display(),
-            registered,
-            "mount started",
-        );
-        *slot = Some(Active {
-            mount: Arc::clone(&mount),
-            mountpoint: mountpoint.clone(),
-        });
-        Ok(MountStatus::Mounted { mountpoint })
+            tracing::info!(
+                mountpoint = %mountpoint.display(),
+                registered,
+                "mount started",
+            );
+            *slot = Some(Active {
+                mount: Arc::clone(&mount),
+                mountpoint: mountpoint.clone(),
+            });
+            Ok(MountStatus::Mounted { mountpoint })
+        }
     }
 
     /// Unmount and drop the FUSE session. Returns `NotMounted` if
     /// nothing was mounted.
     pub fn stop(&self) -> Result<(), MountControlError> {
-        let Some(active) = self.active.lock().take() else {
-            return Err(MountControlError::NotMounted);
-        };
-        // Try to unwrap the Arc — if any callback still holds a clone
-        // we can't run `umount_and_join`, so fall through to dropping
-        // the Arc and let fuser tear down when the last ref goes.
-        match Arc::try_unwrap(active.mount) {
-            Ok(mount) => mount.unmount().map_err(MountControlError::Unmount)?,
-            Err(_) => {
-                tracing::warn!(
-                    "mount stop: outstanding Arc references; falling back to drop-on-last-ref",
-                );
+        #[cfg(not(target_os = "linux"))]
+        return Err(MountControlError::Unsupported);
+
+        #[cfg(target_os = "linux")]
+        {
+            let Some(active) = self.active.lock().take() else {
+                return Err(MountControlError::NotMounted);
+            };
+            // Try to unwrap the Arc — if any callback still holds a clone
+            // we can't run `umount_and_join`, so fall through to dropping
+            // the Arc and let fuser tear down when the last ref goes.
+            match Arc::try_unwrap(active.mount) {
+                Ok(mount) => mount.unmount().map_err(MountControlError::Unmount)?,
+                Err(_) => {
+                    tracing::warn!(
+                        "mount stop: outstanding Arc references; falling back to drop-on-last-ref",
+                    );
+                }
             }
+            Ok(())
         }
-        Ok(())
     }
 }
 
@@ -173,6 +202,7 @@ impl MountManager {
 /// an entry but `read_dir` returns ENOTCONN ("Transport endpoint is not
 /// connected"). Try `fusermount -u`, then `fusermount -uz` (lazy) as a
 /// fallback before giving up.
+#[cfg(target_os = "linux")]
 fn prepare_mountpoint(path: &std::path::Path) -> Result<(), std::io::Error> {
     // Fast path: dir already exists and is healthy, or we can create it.
     if let Some(()) = try_use(path)? {
@@ -201,6 +231,7 @@ fn prepare_mountpoint(path: &std::path::Path) -> Result<(), std::io::Error> {
 /// Try to use `path` as an empty mountpoint dir. Returns `Some(())` on
 /// success, `None` if the path is a stale FUSE mount that needs
 /// recovery, `Err` for any other I/O error.
+#[cfg(target_os = "linux")]
 fn try_use(path: &std::path::Path) -> Result<Option<()>, std::io::Error> {
     match std::fs::create_dir_all(path) {
         Ok(()) => return Ok(Some(())),
@@ -224,6 +255,7 @@ fn try_use(path: &std::path::Path) -> Result<Option<()>, std::io::Error> {
 
 /// Run `Mount::start` and flatten its single-variant error wrapper down
 /// to `io::Error` so callers don't see "FUSE error: FUSE error: …".
+#[cfg(target_os = "linux")]
 fn start_fuse(
     mountpoint: &std::path::Path,
     rt: tokio::runtime::Handle,
@@ -235,10 +267,12 @@ fn start_fuse(
 
 /// True if `e` indicates the mountpoint has a half-dead FUSE entry the
 /// kernel still remembers (a `fusermount -uz` is the usual fix).
+#[cfg(target_os = "linux")]
 fn is_stale_mount(e: &std::io::Error) -> bool {
     e.raw_os_error() == Some(107)
 }
 
+#[cfg(target_os = "linux")]
 fn run_fusermount(path: &std::path::Path, args: &[&str]) -> Result<(), std::io::Error> {
     let status = std::process::Command::new("fusermount")
         .args(args)
@@ -255,6 +289,7 @@ fn run_fusermount(path: &std::path::Path, args: &[&str]) -> Result<(), std::io::
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn register_one(
     mount: &Mount<ChunkStoreC>,
     steam: &Arc<SteamClient>,
@@ -275,6 +310,7 @@ fn register_one(
     )
 }
 
+#[cfg(target_os = "linux")]
 fn register_one_with_branch(
     mount: &Mount<ChunkStoreC>,
     steam: &Arc<SteamClient>,
@@ -308,15 +344,19 @@ fn register_one_with_branch(
 
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
+#[allow(dead_code)] // Idle/Mounted only constructed on linux; kept for the wire shape.
 pub enum MountStatus {
     Idle,
     Mounted {
         #[schema(value_type = String)]
         mountpoint: PathBuf,
     },
+    /// This build / OS doesn't support FUSE mounts.
+    Unsupported,
 }
 
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)] // Linux-only variants stay for parity with the linux build.
 pub enum MountControlError {
     #[error("a mount is already active; stop it first")]
     AlreadyMounted,
@@ -328,4 +368,6 @@ pub enum MountControlError {
     Start(#[source] std::io::Error),
     #[error("could not unmount: {0}")]
     Unmount(#[source] std::io::Error),
+    #[error("FUSE mount is not supported on this platform")]
+    Unsupported,
 }

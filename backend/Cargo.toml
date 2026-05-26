@@ -27,7 +27,6 @@ thiserror = "2.0"
 serde_json = "1"
 serde-value = "0.7"
 steam-depot-vfs = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
-steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
 steam-vent = "0.5"
 steam-vent-depot = { git = "https://github.com/jakobhellermann/steam-vent-depot" }
 steam-vent-proto = "0.5"
@@ -43,3 +42,7 @@ zstd = "0.13.3"
 time = { version = "0.3.47", features = ["formatting", "macros"] }
 rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true }
 rabex-env-steam-depot-vfs = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true }
+
+# FUSE mount is linux-only.
+[target.'cfg(target_os = "linux")'.dependencies]
+steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }

@@ -57,7 +57,8 @@ impl ExtraManifestsStore {
     }
 
     /// Snapshot of every app's manifest list. Used by the mount
-    /// bootstrap to register everything in one go.
+    /// bootstrap to register everything in one go (linux-only consumer).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn get_all(&self) -> Vec<(AppId, Vec<ExtraManifestEntry>)> {
         let state = self.state.lock().expect("extra_manifests poisoned");
         state

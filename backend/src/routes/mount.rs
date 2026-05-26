@@ -52,6 +52,7 @@ fn mount_err(e: MountControlError) -> ApiError {
     use axum::http::StatusCode;
     let status = match &e {
         MountControlError::AlreadyMounted | MountControlError::NotMounted => StatusCode::CONFLICT,
+        MountControlError::Unsupported => StatusCode::NOT_IMPLEMENTED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     // The catch-all `impl From<E> for ApiError` would log, but we go
