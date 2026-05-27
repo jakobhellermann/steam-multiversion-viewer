@@ -788,16 +788,13 @@ function TreeRow({
 }) {
   const { node, depth, hasVisibleChildren: hasChildren } = row;
   // Status colouring is only set in diff trees — `node.status` stays
-  // undefined elsewhere. Colour the label (not the row background)
-  // so selection / focus rings stay readable on top.
+  // undefined elsewhere. `changed` rows are unstyled: the diff tree
+  // already prunes unchanged subtrees, so every leaf is by default a
+  // change — the bulk of rows being yellow would be visual noise.
+  // Reserve colour + glyph for the structurally distinct cases
+  // (added / removed) where the call-out is actually informative.
   const statusLabelClass =
-    node.status === "added"
-      ? "text-emerald-300"
-      : node.status === "removed"
-        ? "text-rose-300"
-        : node.status === "changed"
-          ? "text-amber-200"
-          : "";
+    node.status === "added" ? "text-emerald-300" : node.status === "removed" ? "text-rose-300" : "";
   return (
     <div
       id={domId}
@@ -833,21 +830,13 @@ function TreeRow({
   );
 }
 
-/// Inline `+` / `−` / `~` glyph in diff trees — fixed-width container
-/// so labels line up across rows. Returns null for non-diff trees so
-/// the row layout is unchanged.
+/// Inline `+` / `−` glyph in diff trees — fixed-width container so
+/// labels line up across rows. Returns an empty (but space-holding)
+/// span for `changed` / `unchanged` / non-diff trees so column
+/// alignment is preserved while the row stays visually quiet.
 function DiffStatusGlyph({ status }: { status: NodeStatus | undefined }) {
-  if (!status) return null;
-  const glyph =
-    status === "added" ? "+" : status === "removed" ? "−" : status === "changed" ? "~" : " ";
-  const cls =
-    status === "added"
-      ? "text-emerald-400"
-      : status === "removed"
-        ? "text-rose-400"
-        : status === "changed"
-          ? "text-amber-300"
-          : "text-slate-600";
+  const glyph = status === "added" ? "+" : status === "removed" ? "−" : "";
+  const cls = status === "added" ? "text-emerald-400" : status === "removed" ? "text-rose-400" : "";
   return (
     <span aria-hidden="true" className={`inline-block w-3 text-center ${cls}`}>
       {glyph}
