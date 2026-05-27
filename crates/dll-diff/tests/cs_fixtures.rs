@@ -112,3 +112,18 @@ fn nested() {
 fn accessibility() {
     assert_diff("accessibility", &[("Demo.Foo", Status::Changed)]);
 }
+
+/// `Demo.Foo` is byte-identical on both sides; the `to` side just
+/// has an unrelated decoy class in front of it that pushes Foo's
+/// metadata-table indices around. ilspy decompiles both as
+/// identical C# — dll-diff should say `Unchanged`. Currently flips
+/// to `Changed` because `Hash::hash(td)` walks `TypeRefIndex(N)` /
+/// `MethodRefIndex(N)` operands inside IL and their numeric values
+/// differ across parses even though they resolve to the same
+/// external entries. Pinned as a regression marker for the eventual
+/// "resolve indices before hashing" fix; ignored until then.
+#[test]
+#[ignore = "cascading-index false positive — pending Hash-by-resolution fix"]
+fn cascading_indices_unchanged() {
+    assert_diff("cascading_indices", &[("Demo.Foo", Status::Unchanged)]);
+}
