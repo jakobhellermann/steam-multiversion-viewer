@@ -175,11 +175,17 @@ fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
                 return;
             }
             // Take + rebuild so we can mutate keys (BTreeMap keys are
-            // immutable in place). This also lets us notice if every
+            // immutable in place). This also lets us notice if any
             // key turns out non-string, which means we need to flatten
             // the map into a {key,value} sequence on the way back up.
+            // Mixed-key maps happen in practice (e.g. ScriptMapper's
+            // `m_ObjectToName` resolves most pptrs to `__MARK__…`
+            // strings but stragglers fall back to a
+            // `{$target,error}` placeholder map) — we flatten as soon
+            // as *any* non-string key shows up so serde_json doesn't
+            // explode further down.
             let taken = std::mem::take(map);
-            let mut all_non_string = !taken.is_empty();
+            let mut any_non_string = false;
             for (mut k, mut v) in taken {
                 simplify_for_dump(file, data_dir, local_ref_prefix, &mut k);
                 // Null pptr keys land here as `Value::Unit`; JSON
@@ -189,15 +195,12 @@ fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
                     k = svalue_str(pptr_marker("", "", "", ""));
                 }
                 simplify_for_dump(file, data_dir, local_ref_prefix, &mut v);
-                if all_non_string && matches!(k, Value::String(_)) {
-                    all_non_string = false;
+                if !matches!(k, Value::String(_)) {
+                    any_non_string = true;
                 }
                 map.insert(k, v);
             }
-            // Homogeneous non-string-keyed map — flatten. A mixed-key
-            // map would be a real schema oddity, so we leave those
-            // alone (and serde_json will fail loudly downstream).
-            if all_non_string {
+            if any_non_string {
                 let taken = std::mem::take(map);
                 let pairs: Vec<Value> = taken
                     .into_iter()
