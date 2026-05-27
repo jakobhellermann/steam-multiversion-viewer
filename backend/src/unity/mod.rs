@@ -17,6 +17,7 @@ use steam_depot_vfs::chunk_store::ChunkStore;
 use steam_depot_vfs::fs::DepotManifestStore;
 
 pub mod bundle;
+pub mod diff;
 pub mod dump_value;
 mod format;
 mod markers;

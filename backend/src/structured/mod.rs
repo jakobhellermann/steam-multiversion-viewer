@@ -58,8 +58,40 @@ pub struct Node {
     /// interpret keys, just groups by them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub facets: BTreeMap<String, String>,
+    /// Set by diff trees only — tags this node as added / removed /
+    /// changed / unchanged so the frontend can colour the row. Absent
+    /// on plain (non-diff) structured trees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<NodeStatus>,
+    /// Set in diff trees when the matched node has a different id on
+    /// the target side (e.g. Unity renumbered path-ids across the
+    /// patch). The non-diff content endpoint takes [`id`] as-is; the
+    /// diff content endpoint takes both `id` (base) and `target_id`
+    /// to dump both sides. `None` either means "non-diff tree" or
+    /// "diff matched both sides with the same id".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
+    /// When `true`, the content endpoint will return a body for this
+    /// node (e.g. a JSON dump, a decompiled type). False / absent on
+    /// rows that exist only to group or summarise (sections,
+    /// class-stat aggregates). Frontend skips the content fetch and
+    /// shows a placeholder for those.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub has_content: bool,
     /// Direct children. Empty for leaves.
     pub children: Vec<Node>,
+}
+
+/// Per-node diff status. Lives in [`Node`] as `Option<NodeStatus>` so
+/// the same tree shape covers both the non-diff renderer (where it's
+/// `None` for every row) and the diff renderer.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum NodeStatus {
+    Unchanged,
+    Changed,
+    Added,
+    Removed,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -78,6 +110,9 @@ impl Node {
             hide_unless_matched: false,
             include_descendants_on_match: false,
             facets: BTreeMap::new(),
+            status: None,
+            target_id: None,
+            has_content: false,
             children: Vec::new(),
         }
     }

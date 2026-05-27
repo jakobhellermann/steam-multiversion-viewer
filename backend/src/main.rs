@@ -55,6 +55,8 @@ async fn main() -> Result<()> {
         .routes(routes!(routes::diff::manifest_diff))
         .routes(routes!(routes::diff::file_diff_targets))
         .routes(routes!(routes::diff::manifest_file_diff))
+        .routes(routes!(routes::diff::manifest_file_structured_diff))
+        .routes(routes!(routes::diff::manifest_file_structured_diff_node))
         .routes(routes!(routes::manifest_info))
         .routes(routes!(routes::manifest_files))
         .routes(routes!(routes::manifest_file))

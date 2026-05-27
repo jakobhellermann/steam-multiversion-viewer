@@ -329,6 +329,7 @@ fn leaf_node(entity: &EntityEntry) -> Node {
         facets: [("kind".to_string(), kind.to_string())]
             .into_iter()
             .collect(),
+        has_content: true,
         ..Default::default()
     }
 }

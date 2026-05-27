@@ -485,3 +485,300 @@ async fn resolve_diff_text(
         creation_time,
     })
 }
+
+/// Query string for the structured-diff endpoint. Extends
+/// [`FileViewQuery`] (which carries `path` + `branch` of the base) with
+/// the target side, named as flat params so the whole call is GETtable
+/// — POST would block the immutable Cache-Control from doing its job.
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct StructuredDiffQuery {
+    pub path: String,
+    /// Branch of the base manifest. Defaults to `public` like
+    /// [`FileViewQuery`].
+    #[serde(default = "default_branch")]
+    pub branch: String,
+    pub target_depot_id: DepotId,
+    pub target_manifest_id: ManifestId,
+    #[serde(default = "default_branch")]
+    pub target_branch: String,
+}
+
+fn default_branch() -> String {
+    "public".to_string()
+}
+
+/// Structured per-object diff between two SerializedFiles. Returns a
+/// pruned tree where each node is tagged `added`/`removed`/`changed`/
+/// `unchanged`; unchanged leaves are dropped so the payload carries
+/// only the spine to every difference.
+///
+/// Only `UnitySerialized` files are supported today; everything else
+/// returns 415. Per-node content (the actual JSON dump for changed
+/// objects) is fetched lazily by the client via the existing
+/// `/file/structured/node` endpoint, once per side.
+#[cfg(feature = "unity")]
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured-diff",
+    params(StructuredDiffQuery)
+)]
+#[tracing::instrument(skip_all, fields(path = %q.path))]
+pub async fn manifest_file_structured_diff(
+    State(state): State<AppState>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
+    Query(q): Query<StructuredDiffQuery>,
+) -> Result<(
+    crate::http::ImmutableCache,
+    Json<crate::structured::StructuredTree>,
+)> {
+    use crate::transform::Transformer;
+
+    match crate::transform::tools::transformer_for(&q.path) {
+        Some(Transformer::UnitySerialized) => {}
+        _ => {
+            return Err(ApiError {
+                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                message: format!("structured diff only supports SerializedFiles: {}", q.path),
+            });
+        }
+    }
+
+    // Open both manifests + pre-download the file's chunks on each
+    // side in parallel — both passes are needed before we can hand the
+    // pair to the blocking diff builder.
+    let (base, target) = tokio::try_join!(
+        prepare_structured_side(&state, appid, depot_id, manifest_id, &q.path, &q.branch),
+        prepare_structured_side(
+            &state,
+            appid,
+            q.target_depot_id,
+            q.target_manifest_id,
+            &q.path,
+            &q.target_branch,
+        ),
+    )?;
+
+    let path = q.path.clone();
+    let diff =
+        tokio::task::spawn_blocking(move || crate::unity::diff::build_diff(base, target, &path))
+            .await
+            .map_err(|e| ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!("structured-diff task panicked: {e}"),
+            })?
+            .map_err(|e| ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: e.to_string(),
+            })?;
+
+    Ok((crate::http::ImmutableCache, Json(diff)))
+}
+
+/// Query string for the per-node structured-diff content endpoint.
+/// Identifies which sides to dump and from where. `base_id` / `target_id`
+/// are opaque tree-node ids — same shape as the `id` field on
+/// [`crate::structured::Node`], parsed by the format-specific dump
+/// helper. Omitting one of them marks the node as added/removed.
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct StructuredDiffNodeQuery {
+    pub path: String,
+    #[serde(default = "default_branch")]
+    pub branch: String,
+    pub target_depot_id: DepotId,
+    pub target_manifest_id: ManifestId,
+    #[serde(default = "default_branch")]
+    pub target_branch: String,
+    /// Tree-node id on the base side. Omit when the node is `removed`.
+    pub base_id: Option<String>,
+    /// Tree-node id on the target side. Omit when the node is `added`.
+    /// When the diff matched both sides under the same id, the frontend
+    /// only sends `base_id` and lets the backend dump that id on both
+    /// sides.
+    pub target_id: Option<String>,
+}
+
+/// Per-node body for a structured diff entry. Dumps both sides as
+/// JSON, then runs the same unified-diff used by `/file/diff` so
+/// the frontend can render with `lang="diff"` and get colouring for
+/// free. When only one side has a path-id the body returns that
+/// side's JSON unchanged (no `+`/`-` decorations) so an "added" or
+/// "removed" node still shows useful content.
+#[cfg(feature = "unity")]
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured-diff/node",
+    params(StructuredDiffNodeQuery)
+)]
+#[tracing::instrument(skip_all, fields(path = %q.path))]
+pub async fn manifest_file_structured_diff_node(
+    State(state): State<AppState>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
+    Query(q): Query<StructuredDiffNodeQuery>,
+) -> Result<(crate::http::ImmutableCache, Response)> {
+    use crate::transform::Transformer;
+
+    match crate::transform::tools::transformer_for(&q.path) {
+        Some(Transformer::UnitySerialized) => {}
+        _ => {
+            return Err(ApiError {
+                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                message: format!("structured diff only supports SerializedFiles: {}", q.path),
+            });
+        }
+    }
+
+    // Parse node-ids into path-ids on each side. Today's only node id
+    // shape with a body is `obj:<pathid>`; other shapes (section
+    // headers, class-stats rows) have no per-object content and we
+    // reject them here.
+    fn parse_obj_id(node_id: &str) -> Option<i64> {
+        crate::unity::tree::parse_object_node_id(node_id)
+    }
+
+    let base_pid = q.base_id.as_deref().and_then(parse_obj_id);
+    let target_pid = q.target_id.as_deref().and_then(parse_obj_id);
+    if q.base_id.is_none() && q.target_id.is_none() {
+        return Err(ApiError {
+            status: axum::http::StatusCode::BAD_REQUEST,
+            message: "structured-diff/node needs at least one of base_id / target_id".to_string(),
+        });
+    }
+
+    // Two snapshots in parallel (skip whichever side has no id).
+    let base_snap = if base_pid.is_some() {
+        Some(
+            state
+                .open_manifest(appid, depot_id, manifest_id, &q.branch)
+                .await?,
+        )
+    } else {
+        None
+    };
+    let target_snap = if target_pid.is_some() {
+        Some(
+            state
+                .open_manifest(
+                    appid,
+                    q.target_depot_id,
+                    q.target_manifest_id,
+                    &q.target_branch,
+                )
+                .await?,
+        )
+    } else {
+        None
+    };
+
+    let path = q.path.clone();
+    let base_arc = base_snap.map(Arc::new);
+    let target_arc = target_snap.map(Arc::new);
+
+    let (base_text, target_text) = tokio::task::spawn_blocking(move || {
+        let b = base_arc
+            .zip(base_pid)
+            .map(|(snap, pid)| crate::unity::dump_value::dump_object_json(snap, &path, pid))
+            .transpose();
+        let t = target_arc
+            .zip(target_pid)
+            .map(|(snap, pid)| crate::unity::dump_value::dump_object_json(snap, &path, pid))
+            .transpose();
+        (b, t)
+    })
+    .await
+    .map_err(|e| ApiError {
+        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        message: format!("structured-diff/node task panicked: {e}"),
+    })?;
+
+    let base_text = base_text.map_err(|e| ApiError {
+        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        message: e.to_string(),
+    })?;
+    let target_text = target_text.map_err(|e| ApiError {
+        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        message: e.to_string(),
+    })?;
+
+    // One-sided node → return the available JSON verbatim. Both-sided
+    // → unified diff so the frontend can highlight with `lang="diff"`.
+    let body = match (base_text, target_text) {
+        (Some(b), Some(t)) => {
+            let diff = similar::TextDiff::from_lines(&t, &b);
+            let text = diff
+                .unified_diff()
+                .context_radius(3)
+                .header("target", "base")
+                .to_string();
+            (
+                [(
+                    header::CONTENT_TYPE,
+                    "text/x-diff; charset=utf-8".to_string(),
+                )],
+                text,
+            )
+                .into_response()
+        }
+        (Some(b), None) => (
+            [(
+                header::CONTENT_TYPE,
+                "application/json; charset=utf-8".to_string(),
+            )],
+            b,
+        )
+            .into_response(),
+        (None, Some(t)) => (
+            [(
+                header::CONTENT_TYPE,
+                "application/json; charset=utf-8".to_string(),
+            )],
+            t,
+        )
+            .into_response(),
+        (None, None) => {
+            return Err(ApiError {
+                status: axum::http::StatusCode::BAD_REQUEST,
+                message: "structured-diff/node ids did not parse to object ids".to_string(),
+            });
+        }
+    };
+    Ok((crate::http::ImmutableCache, body))
+}
+
+/// Open a manifest, find the file, enqueue its chunks for download
+/// and wait. Returns the (Arc'd) snapshot, ready to be handed to a
+/// blocking task that needs `chunk_store` access.
+#[cfg(feature = "unity")]
+async fn prepare_structured_side(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    path: &str,
+    branch: &str,
+) -> Result<Arc<crate::state::Snapshot>> {
+    let snapshot = Arc::new(
+        state
+            .open_manifest(appid, depot_id, manifest_id, branch)
+            .await?,
+    );
+    let chunks_for_dl: Vec<_> = {
+        let file = snapshot
+            .manifest()
+            .files
+            .iter()
+            .find(|f| f.path == path)
+            .ok_or_else(|| ApiError {
+                status: axum::http::StatusCode::NOT_FOUND,
+                message: format!("file not in manifest {depot_id}/{manifest_id}: {path}"),
+            })?;
+        file.chunks
+            .iter()
+            .map(|c| (c.sha, u64::from(c.size_compressed)))
+            .collect()
+    };
+    state
+        .downloads
+        .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
+        .await;
+    Ok(snapshot)
+}

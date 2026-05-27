@@ -282,6 +282,7 @@ fn build_gameobject_node<R: EnvResolver, P: TypeTreeProvider>(
         // frontend uses this flag to splice descendants into the
         // visible set when the gameobject itself matches.
         include_descendants_on_match: true,
+        has_content: true,
         children,
         ..Default::default()
     })
@@ -346,6 +347,7 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     };
     let mut node = Node::leaf(format!("obj:{path_id}"), &class_label, "component")
         .with_facet("class", &class_label);
+    node.has_content = true;
     if with_pathid_badge {
         node = node.with_badge(format!("[{path_id}]"));
     }
