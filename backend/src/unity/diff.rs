@@ -217,6 +217,11 @@ fn diff_class_stats<R: EnvResolver, P: TypeTreeProvider>(
             )
         }),
         children: pruned,
+        // Class-stats is a counts-table — useful to drill into when
+        // hunting for a specific class id change, noisy when reading
+        // the diff top-down. Collapsed by default, same as the
+        // non-diff structured view.
+        default_collapsed: true,
         ..make_node("section:class-stats", "Class stats", "section", status)
     }
 }
@@ -758,8 +763,40 @@ fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
     let base_bodies = build_body_index(&base_file);
     let target_bodies = build_body_index(&target_file);
 
-    let mut base_items = collect_loose(&base_file, &covered.base)?;
-    let mut target_items = collect_loose(&target_file, &covered.target)?;
+    let base_raw = collect_loose(&base_file, &covered.base)?;
+    let target_raw = collect_loose(&target_file, &covered.target)?;
+
+    // A class that occurs exactly once on each side is conventionally
+    // a singleton (RenderSettings, NavMeshSettings, LightmapSettings,
+    // every `globalgamemanagers` entry, …). Pair those by class
+    // alone so a path-id renumber or a missing `m_Name` doesn't make
+    // them register as a removal + addition. Bucket by raw class id
+    // (not the resolved label): `MonoBehaviour` is one class id for
+    // every user script, so MBs never accidentally collapse to a
+    // singleton even when the script name happens to be unique.
+    let base_counts = class_id_counts(&base_raw);
+    let target_counts = class_id_counts(&target_raw);
+    let is_singleton = |class_id: ClassId| {
+        base_counts.get(&class_id) == Some(&1) && target_counts.get(&class_id) == Some(&1)
+    };
+    let key_for = |raw: &RawLoose| LooseKey {
+        label: raw.label.clone(),
+        name: if is_singleton(raw.class_id) {
+            String::new()
+        } else if raw.name.is_empty() {
+            format!("__pid:{}", raw.path_id)
+        } else {
+            raw.name.clone()
+        },
+    };
+    let mut base_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
+    for r in &base_raw {
+        base_items.insert(key_for(r), LooseItem { path_id: r.path_id });
+    }
+    let mut target_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
+    for r in &target_raw {
+        target_items.insert(key_for(r), LooseItem { path_id: r.path_id });
+    }
 
     let mut keys: Vec<LooseKey> = base_items
         .keys()
@@ -850,13 +887,38 @@ struct LooseItem {
     path_id: PathId,
 }
 
+/// One row of a side's loose-object listing, before the per-side
+/// data is folded together into [`LooseKey`]s. Held as a flat list
+/// so [`diff_loose`] can count occurrences per `class_id` (to
+/// detect singletons) before deciding how to key each item.
+struct RawLoose {
+    /// Raw Unity class id. Used as the singleton-detection axis —
+    /// `RenderSettings` etc each have a unique class id, while every
+    /// user script shares `ClassId::MonoBehaviour` so MBs never
+    /// accidentally collapse to singletons.
+    class_id: ClassId,
+    /// User-facing class label: the raw class id for engine types,
+    /// the resolved `MonoScript::full_name()` for MBs.
+    label: String,
+    name: String,
+    path_id: PathId,
+}
+
+fn class_id_counts(items: &[RawLoose]) -> std::collections::HashMap<ClassId, usize> {
+    let mut m: std::collections::HashMap<ClassId, usize> = std::collections::HashMap::new();
+    for r in items {
+        *m.entry(r.class_id).or_default() += 1;
+    }
+    m
+}
+
 #[tracing::instrument(skip_all)]
 fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     covered: &HashSet<PathId>,
-) -> Result<BTreeMap<LooseKey, LooseItem>> {
+) -> Result<Vec<RawLoose>> {
     use serde_value::Value;
-    let mut out: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
+    let mut out: Vec<RawLoose> = Vec::new();
     for obj in file.file.objects() {
         let path_id = obj.m_PathID;
         if covered.contains(&path_id) {
@@ -865,7 +927,7 @@ fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
         let class_id = obj.m_ClassID;
         let _obj_span = tracing::info_span!("loose_object", ?class_id, path_id).entered();
         // Try to read `m_Name` for the typical asset shape. Failure
-        // is OK — we fall back to a per-pid synthetic name.
+        // is OK — we fall back to a per-pid synthetic name later.
         let name = file
             .object_at::<Value>(path_id)
             .ok()
@@ -890,18 +952,12 @@ fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
         } else {
             format!("{class_id:?}")
         };
-        let key_name = if name.is_empty() {
-            format!("__pid:{path_id}")
-        } else {
-            name
-        };
-        out.insert(
-            LooseKey {
-                label,
-                name: key_name,
-            },
-            LooseItem { path_id },
-        );
+        out.push(RawLoose {
+            class_id,
+            label,
+            name,
+            path_id,
+        });
     }
     Ok(out)
 }
