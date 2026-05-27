@@ -51,8 +51,8 @@ pub async fn build_tree(
 
 /// Pure helper — assemble the tree out of a list of entities. Split
 /// from `build_tree` so it's unit-testable without needing ilspy on
-/// PATH.
-fn build_root(file_label: &str, entities: &[EntityEntry]) -> Node {
+/// PATH, and reused by [`super::diff`] for the diff-tagged variant.
+pub fn build_root(file_label: &str, entities: &[EntityEntry]) -> Node {
     // ilspy's `-l` output prints nested types as `Outer.Inner`, the same
     // shape as a namespaced type — there's no syntactic marker. But the
     // listing also contains the outer type as its own entry. So a `.`

@@ -70,6 +70,7 @@ pub enum TransformError {
     Io(std::io::Error),
     ToolNotFound { cmd: &'static str },
     ToolFailed { cmd: &'static str, stderr: String },
+    Other(String),
 }
 
 impl std::fmt::Display for TransformError {
@@ -78,6 +79,7 @@ impl std::fmt::Display for TransformError {
             Self::Io(e) => write!(f, "io: {e}"),
             Self::ToolNotFound { cmd } => write!(f, "{cmd} not found on PATH"),
             Self::ToolFailed { cmd, stderr } => write!(f, "{cmd} failed: {stderr}"),
+            Self::Other(msg) => f.write_str(msg),
         }
     }
 }

@@ -159,10 +159,5 @@ function DiffNodeBody({
   // in the non-diff view: a unified diff carries markers from both
   // sides, and each side's pptr should resolve against its own
   // manifest. Punted for now — markers render as raw sentinels.
-  return (
-    <HighlightedPre
-      code={content.data.text}
-      lang={content.data.kind === "diff" ? "diff" : "json"}
-    />
-  );
+  return <HighlightedPre code={content.data.text} lang={content.data.kind} />;
 }

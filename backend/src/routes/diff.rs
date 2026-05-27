@@ -533,15 +533,7 @@ pub async fn manifest_file_structured_diff(
 )> {
     use crate::transform::Transformer;
 
-    match crate::transform::tools::transformer_for(&q.path) {
-        Some(Transformer::UnitySerialized) => {}
-        _ => {
-            return Err(ApiError {
-                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message: format!("structured diff only supports SerializedFiles: {}", q.path),
-            });
-        }
-    }
+    let kind = crate::transform::tools::transformer_for(&q.path);
 
     // Open both manifests + pre-download the file's chunks on each
     // side in parallel — both passes are needed before we can hand the
@@ -558,20 +550,207 @@ pub async fn manifest_file_structured_diff(
         ),
     )?;
 
-    let path = q.path.clone();
-    let diff =
-        tokio::task::spawn_blocking(move || crate::unity::diff::build_diff(base, target, &path))
+    let diff = match kind {
+        Some(Transformer::UnitySerialized) => {
+            let path = q.path.clone();
+            tokio::task::spawn_blocking(move || crate::unity::diff::build_diff(base, target, &path))
+                .await
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: format!("structured-diff task panicked: {e}"),
+                })?
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e.to_string(),
+                })?
+        }
+        Some(Transformer::Dll) => {
+            let cfg = state.config.load();
+            let store_root = cfg.store_root.clone();
+            // dll-diff is GNU-conventional: `(in to only) → Added`.
+            // The viewer's `base` is the URL-path manifest (what the
+            // user is currently looking at) and `target` is the
+            // `compare_to=` manifest. Aligning frontend semantics
+            // (Added = in current view) with dll-diff means
+            // `from = target` and `to = base`.
+            let (to_bytes, to_sha) = dll_side_bytes(&base, &q.path).await?;
+            let (from_bytes, from_sha) = dll_side_bytes(&target, &q.path).await?;
+            let tree = crate::dll::diff::build_tree(
+                &store_root,
+                &from_sha,
+                &from_bytes,
+                &to_sha,
+                &to_bytes,
+                &q.path,
+            )
             .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: format!("structured-diff task panicked: {e}"),
-            })?
             .map_err(|e| ApiError {
                 status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 message: e.to_string(),
             })?;
+            // Kick `ilspycmd -p` for both DLLs in the background.
+            // Per-type lazy decompile calls from the node endpoint then
+            // hit the cache instead of spawning a fresh `ilspycmd -t`.
+            // Idempotent: skipped if already warming this sha.
+            crate::dll::warm_full_decompile(&store_root, from_sha, from_bytes);
+            crate::dll::warm_full_decompile(&store_root, to_sha, to_bytes);
+            tree
+        }
+        _ => {
+            return Err(ApiError {
+                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                message: format!("structured diff not supported for: {}", q.path),
+            });
+        }
+    };
 
     Ok((crate::http::ImmutableCache, Json(diff)))
+}
+
+/// Read a file's content + manifest-recorded sha1 from one side of
+/// the structured-diff pipeline. The sha keys the `decompile_type`
+/// cache, so feeding the wrong one would silently duplicate every
+/// per-type artefact.
+async fn dll_side_bytes(
+    snap: &Arc<crate::state::Snapshot>,
+    path: &str,
+) -> Result<(Vec<u8>, [u8; 20])> {
+    let sha = snap
+        .manifest()
+        .files
+        .iter()
+        .find(|f| f.path == path)
+        .and_then(|f| f.sha)
+        .ok_or_else(|| ApiError {
+            status: axum::http::StatusCode::BAD_REQUEST,
+            message: format!("file has no content sha: {path}"),
+        })?;
+    let bytes = snap.read_full(path).await?.to_vec();
+    Ok((bytes, sha))
+}
+
+/// Per-node body for the Dll structured-diff route. `base_id` /
+/// `target_id` are `type:<FQN>` ids from
+/// [`crate::dll::diff::build_tree`]; we decompile the type via
+/// `ilspycmd -t` on each side (cached) and return either a unified
+/// diff of the two C# texts (both-sided) or the available text
+/// verbatim (added/removed).
+async fn dll_node_body(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    q: &StructuredDiffNodeQuery,
+) -> Result<(crate::http::ImmutableCache, Response)> {
+    fn parse_type_id(id: &str) -> Option<&str> {
+        id.strip_prefix("type:")
+    }
+    let base_type = q.base_id.as_deref().and_then(parse_type_id);
+    let target_type = q.target_id.as_deref().and_then(parse_type_id);
+    if base_type.is_none() && target_type.is_none() {
+        return Err(ApiError {
+            status: axum::http::StatusCode::BAD_REQUEST,
+            message: "structured-diff/node needs at least one of base_id / target_id".to_string(),
+        });
+    }
+
+    let cfg = state.config.load();
+    let store_root = cfg.store_root.clone();
+
+    // Open + read whichever side(s) we actually need. Both sides are
+    // independent — try_join.
+    let want_base = base_type.is_some();
+    let want_target = target_type.is_some();
+    let base_fut = async {
+        if want_base {
+            let snap = Arc::new(
+                state
+                    .open_manifest(appid, depot_id, manifest_id, &q.branch)
+                    .await?,
+            );
+            Ok::<_, ApiError>(Some(dll_side_bytes(&snap, &q.path).await?))
+        } else {
+            Ok(None)
+        }
+    };
+    let target_fut = async {
+        if want_target {
+            let snap = Arc::new(
+                state
+                    .open_manifest(
+                        appid,
+                        q.target_depot_id,
+                        q.target_manifest_id,
+                        &q.target_branch,
+                    )
+                    .await?,
+            );
+            Ok::<_, ApiError>(Some(dll_side_bytes(&snap, &q.path).await?))
+        } else {
+            Ok(None)
+        }
+    };
+    let (base_side, target_side) = tokio::try_join!(base_fut, target_fut)?;
+
+    let base_text = match (base_type, base_side.as_ref()) {
+        (Some(t), Some((bytes, sha))) => Some(
+            crate::dll::decompile_type(&store_root, sha, bytes, t)
+                .await
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e.to_string(),
+                })?,
+        ),
+        _ => None,
+    };
+    let target_text = match (target_type, target_side.as_ref()) {
+        (Some(t), Some((bytes, sha))) => Some(
+            crate::dll::decompile_type(&store_root, sha, bytes, t)
+                .await
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e.to_string(),
+                })?,
+        ),
+        _ => None,
+    };
+
+    let body = match (base_text, target_text) {
+        (Some(b), Some(t)) => {
+            let text = crate::unity::dump_value::dump_object_json_unified_diff(&b, &t);
+            (
+                [(
+                    header::CONTENT_TYPE,
+                    "text/x-diff; charset=utf-8".to_string(),
+                )],
+                text,
+            )
+                .into_response()
+        }
+        (Some(b), None) => (
+            [(
+                header::CONTENT_TYPE,
+                "text/x-csharp; charset=utf-8".to_string(),
+            )],
+            b,
+        )
+            .into_response(),
+        (None, Some(t)) => (
+            [(
+                header::CONTENT_TYPE,
+                "text/x-csharp; charset=utf-8".to_string(),
+            )],
+            t,
+        )
+            .into_response(),
+        (None, None) => {
+            return Err(ApiError {
+                status: axum::http::StatusCode::BAD_REQUEST,
+                message: "structured-diff/node could not resolve either side".to_string(),
+            });
+        }
+    };
+    Ok((crate::http::ImmutableCache, body))
 }
 
 /// Query string for the per-node structured-diff content endpoint.
@@ -617,14 +796,19 @@ pub async fn manifest_file_structured_diff_node(
 ) -> Result<(crate::http::ImmutableCache, Response)> {
     use crate::transform::Transformer;
 
-    match crate::transform::tools::transformer_for(&q.path) {
-        Some(Transformer::UnitySerialized) => {}
+    let kind = crate::transform::tools::transformer_for(&q.path);
+    match kind {
+        Some(Transformer::UnitySerialized) | Some(Transformer::Dll) => {}
         _ => {
             return Err(ApiError {
                 status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message: format!("structured diff only supports SerializedFiles: {}", q.path),
+                message: format!("structured diff not supported for: {}", q.path),
             });
         }
+    }
+
+    if matches!(kind, Some(Transformer::Dll)) {
+        return dll_node_body(&state, appid, depot_id, manifest_id, &q).await;
     }
 
     // Parse node-ids into path-ids on each side. Today's only node id

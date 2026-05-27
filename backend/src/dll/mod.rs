@@ -28,6 +28,7 @@ use tokio::process::Command;
 
 use crate::transform::{TempInput, TransformError, tempfile_for};
 
+pub mod diff;
 pub mod tree;
 
 /// Where to find ilspycmd. Plain PATH lookup for now; revisit when
@@ -255,6 +256,7 @@ pub fn warm_full_decompile(store_root: &Utf8Path, dll_sha: [u8; 20], dll_bytes: 
 /// in the caller's task and returns the number of types cached.
 /// Useful when a script wants to pre-fill the cache before its own
 /// per-type pass instead of racing against a background tokio task.
+#[allow(dead_code)]
 pub async fn run_full_decompile(
     store_root: &Utf8Path,
     dll_sha: &[u8; 20],

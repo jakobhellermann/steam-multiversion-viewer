@@ -342,9 +342,12 @@ export async function fetchStructuredDiff(
 }
 
 export type StructuredDiffNodeContent = {
-  /// `"diff"` when both sides resolved (unified diff text), `"json"`
-  /// for one-sided nodes (the available side's JSON dump).
-  kind: "diff" | "json";
+  /// `"diff"` when both sides resolved (unified diff text). For
+  /// one-sided nodes, falls through to the source kind of the
+  /// available side: `"csharp"` for `.dll` decompiles, `"json"` for
+  /// unity JSON dumps. Lets the renderer pick the right syntax
+  /// highlighter without rebuilding the diff machinery per format.
+  kind: "diff" | "csharp" | "json";
   text: string;
 };
 
@@ -375,9 +378,14 @@ export async function fetchStructuredDiffNode(
     `/api/apps/${appid}/depots/${baseDepotId}/manifests/${baseManifestId}/file/structured-diff/node?${qs}`,
   );
   if (!r.ok) throw new Error(await extractErrorMessage(r));
-  const ct = r.headers.get("content-type") ?? "";
+  const ct = (r.headers.get("content-type") ?? "").toLowerCase();
   const text = await r.text();
-  return { kind: ct.startsWith("text/x-diff") ? "diff" : "json", text };
+  const kind = ct.startsWith("text/x-diff")
+    ? "diff"
+    : ct.startsWith("text/x-csharp") || ct.startsWith("application/x-csharp")
+      ? "csharp"
+      : "json";
+  return { kind, text };
 }
 
 /// Fetch the structured tree for a file. The path/branch identify the
