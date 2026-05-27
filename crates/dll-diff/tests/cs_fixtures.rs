@@ -86,13 +86,11 @@ fn il_change() {
     assert_diff("il_change", &[("Demo.Foo", Status::Changed)]);
 }
 
-/// Reordering methods in source currently registers as `Changed`
-/// because the signature is `Hash::hash(td)` which folds method
-/// order in. Locked in as a regression marker — flip to `Unchanged`
-/// if/when the signature is made order-independent.
+/// Reordering methods in source must not register as `Changed` —
+/// the resolution-aware walker sorts methods by name before hashing.
 #[test]
 fn reorder_methods() {
-    assert_diff("reorder_methods", &[("Demo.Foo", Status::Changed)]);
+    assert_diff("reorder_methods", &[("Demo.Foo", Status::Unchanged)]);
 }
 
 /// Nested types render with `.` (ilspy shape), and changes inside the
@@ -115,15 +113,10 @@ fn accessibility() {
 
 /// `Demo.Foo` is byte-identical on both sides; the `to` side just
 /// has an unrelated decoy class in front of it that pushes Foo's
-/// metadata-table indices around. ilspy decompiles both as
-/// identical C# — dll-diff should say `Unchanged`. Currently flips
-/// to `Changed` because `Hash::hash(td)` walks `TypeRefIndex(N)` /
-/// `MethodRefIndex(N)` operands inside IL and their numeric values
-/// differ across parses even though they resolve to the same
-/// external entries. Pinned as a regression marker for the eventual
-/// "resolve indices before hashing" fix; ignored until then.
+/// metadata-table indices around. The resolution-aware walker
+/// resolves every index reference to a name+namespace+scope before
+/// hashing, so cascade shifts in the table layout don't propagate.
 #[test]
-#[ignore = "cascading-index false positive — pending Hash-by-resolution fix"]
 fn cascading_indices_unchanged() {
     assert_diff("cascading_indices", &[("Demo.Foo", Status::Unchanged)]);
 }

@@ -20,7 +20,7 @@ const TO_MANIFEST: u64 = 708613018541602983;
 const BRANCH: &str = "public";
 const DLL_PATH: &str = "hollow_knight_Data/Managed/Assembly-CSharp.dll";
 
-const FQN: &str = "HutongGames.PlayMaker.Actions.GetASine";
+const FQN: &str = "InControl.TouchInputDevice";
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {

@@ -17,14 +17,14 @@
 //! dll-tree builder in the viewer.
 
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 use dotnetdll::dll::DLLError;
 use dotnetdll::prelude::{ReadOptions, Resolution, TypeIndex};
 use tracing::info_span;
 
 pub use dotnetdll;
+
+mod sig;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -126,9 +126,7 @@ pub fn type_signatures(res: &Resolution<'_>) -> HashMap<String, u64> {
     let mut out: HashMap<String, u64> = HashMap::new();
     for (idx, td) in res.enumerate_type_definitions() {
         let fqn = type_fqn(idx, res);
-        let mut h = DefaultHasher::new();
-        td.hash(&mut h);
-        out.insert(fqn, h.finish());
+        out.insert(fqn, sig::hash_type(td, res));
     }
     out
 }
