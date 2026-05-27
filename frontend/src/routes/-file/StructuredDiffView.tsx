@@ -1,5 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
+import { useRef } from "react";
 
 import { fetchStructuredDiff, fetchStructuredDiffNode, type StructuredNode } from "../../api";
 import { HighlightedPre } from "./FilePreview";
@@ -135,29 +136,49 @@ function DiffNodeBody({
     retry: false,
   });
 
+  // Same "keep last settled on screen" pattern the non-diff view
+  // uses: react-query's cache doesn't carry across keys, so stash
+  // the last successful response in a ref. Loading shimmer for a
+  // sub-second fetch is noisier than just leaving the previous body
+  // up.
+  type Settled =
+    | { kind: "ok"; lang: "diff" | "csharp" | "json"; text: string }
+    | { kind: "err"; message: string };
+  const lastSettledRef = useRef<Settled | null>(null);
   if (!enabled) {
-    return (
-      <p className="text-sm text-slate-500">
-        Section / group node — pick an object leaf to see its diff.
-      </p>
-    );
+    // Section / group / namespace rows have no body — drop whatever
+    // we showed for the previous leaf so the pane reflects the new
+    // selection.
+    lastSettledRef.current = null;
+    return null;
   }
-  if (content.isPending) {
-    return <p className="text-sm text-slate-500">Computing diff…</p>;
+  if (content.data) {
+    lastSettledRef.current = {
+      kind: "ok",
+      lang: content.data.kind,
+      text: content.data.text,
+    };
+  } else if (content.error) {
+    lastSettledRef.current = {
+      kind: "err",
+      message: content.error instanceof Error ? content.error.message : String(content.error),
+    };
   }
-  if (content.error) {
-    return (
-      <p className="text-sm text-red-300">
-        {content.error instanceof Error ? content.error.message : String(content.error)}
-      </p>
-    );
+  const settled = lastSettledRef.current;
+  if (!settled) {
+    // First render before anything settles — keep the pane blank
+    // rather than flash a spinner.
+    return null;
   }
-  if (!content.data || content.data.text.length === 0) {
+  if (settled.kind === "err") {
+    return <p className="text-sm text-red-300">{settled.message}</p>;
+  }
+  if (settled.text.length === 0) {
     return <p className="text-sm text-slate-500">No content.</p>;
   }
   // TODO: postProcess (pptr markers → clickable links). Trickier than
   // in the non-diff view: a unified diff carries markers from both
   // sides, and each side's pptr should resolve against its own
   // manifest. Punted for now — markers render as raw sentinels.
-  return <HighlightedPre code={content.data.text} lang={content.data.kind} />;
+  return <HighlightedPre code={settled.text} lang={settled.lang} />;
 }
