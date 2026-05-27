@@ -879,20 +879,35 @@ fn hash_method_source<H: Hasher>(ms: &MethodSource, res: &Resolution<'_>, h: &mu
     }
 }
 
+/// Hash a method call/reference as a C#-level identity: parent type's
+/// `namespace + name`, method name, and signature shape (return type
+/// + parameter types). Doesn't distinguish whether the callee lives
+/// in the current DLL (`UserMethod::Definition`) or in an external
+/// assembly (`UserMethod::Reference`) — same rationale as
+/// [`hash_user_type`].
 fn hash_user_method<H: Hasher>(um: &UserMethod, res: &Resolution<'_>, h: &mut H) {
     match um {
         UserMethod::Definition(mi) => {
-            h.write_u8(0);
-            hash_type_def_identity(mi.parent_type(), res, h);
+            hash_parent_as_user_type(&UserType::Definition(mi.parent_type()), res, h);
             let m: &Method<'_> = &res[*mi];
             m.name.hash(h);
-            h.write_usize(m.signature.parameters.len());
+            hash_method_signature_shape(&m.signature, res, h);
         }
         UserMethod::Reference(mri) => {
-            h.write_u8(1);
             hash_external_method_ref(&res[*mri], res, h);
         }
     }
+}
+
+/// Hash a method/field parent so Definition (where the parent is a
+/// `UserType`) and Reference-with-user-type-parent emit the **same**
+/// bytes. Without this, the Reference path would route through
+/// `hash_method_type` and pick up extra discriminant tags (Base /
+/// Type / value_kind / TypeSource::User) that the Definition path
+/// doesn't write.
+fn hash_parent_as_user_type<H: Hasher>(u: &UserType, res: &Resolution<'_>, h: &mut H) {
+    h.write_u8(1); // tag for "user-type parent"
+    hash_user_type(u, res, h);
 }
 
 fn hash_external_method_ref<H: Hasher>(
@@ -900,28 +915,40 @@ fn hash_external_method_ref<H: Hasher>(
     res: &Resolution<'_>,
     h: &mut H,
 ) {
-    r.name.hash(h);
     match &r.parent {
         MethodReferenceParent::Type(t) => {
-            h.write_u8(0);
-            hash_method_type(t, res, h);
+            // Common case (~all OOP calls): the parent is a user type
+            // wrapped in MethodType::Base(BaseType::Type). Strip it
+            // back down so a Reference call and a Definition call on
+            // the same logical type hash to the same bytes.
+            if let MethodType::Base(b) = t
+                && let BaseType::Type {
+                    source: TypeSource::User(u),
+                    ..
+                } = b.as_ref()
+            {
+                hash_parent_as_user_type(u, res, h);
+            } else {
+                // Rare: method on array/generic/primitive — full
+                // type-kind hash so we don't lose precision.
+                h.write_u8(0);
+                hash_method_type(t, res, h);
+            }
         }
-        MethodReferenceParent::Module(m) => {
-            h.write_u8(1);
-            res[*m].name.hash(h);
-        }
+        MethodReferenceParent::Module(_) => h.write_u8(2),
         MethodReferenceParent::VarargMethod(mi) => {
-            h.write_u8(2);
-            // VarargMethod points to an internal definition; resolve
-            // identity via the same MethodIndex helper used for
-            // `UserMethod::Definition`.
-            hash_type_def_identity(mi.parent_type(), res, h);
-            let m: &Method<'_> = &res[*mi];
-            m.name.hash(h);
-            h.write_usize(m.signature.parameters.len());
+            hash_parent_as_user_type(&UserType::Definition(mi.parent_type()), res, h);
         }
     }
-    let sig = &r.signature;
+    r.name.hash(h);
+    hash_method_signature_shape(&r.signature, res, h);
+}
+
+fn hash_method_signature_shape<H: Hasher>(
+    sig: &dotnetdll::resolved::signature::ManagedMethod<MethodType>,
+    res: &Resolution<'_>,
+    h: &mut H,
+) {
     sig.instance.hash(h);
     sig.explicit_this.hash(h);
     sig.calling_convention.hash(h);
@@ -940,16 +967,17 @@ fn hash_generic_method<H: Hasher>(g: &GenericMethodInstantiation, res: &Resoluti
     }
 }
 
+/// Hash a field access — same Definition/Reference unification as
+/// [`hash_user_type`] / [`hash_user_method`].
 fn hash_field_source<H: Hasher>(fs: &FieldSource, res: &Resolution<'_>, h: &mut H) {
     match fs {
         FieldSource::Definition(fi) => {
-            h.write_u8(0);
-            hash_type_def_identity(fi.parent_type(), res, h);
+            hash_parent_as_user_type(&UserType::Definition(fi.parent_type()), res, h);
             let f: &Field<'_> = &res[*fi];
             f.name.hash(h);
+            hash_member_type(&f.return_type, res, h);
         }
         FieldSource::Reference(fri) => {
-            h.write_u8(1);
             hash_external_field_ref(&res[*fri], res, h);
         }
     }
@@ -960,17 +988,23 @@ fn hash_external_field_ref<H: Hasher>(
     res: &Resolution<'_>,
     h: &mut H,
 ) {
-    r.name.hash(h);
     match &r.parent {
         FieldReferenceParent::Type(t) => {
-            h.write_u8(0);
-            hash_method_type(t, res, h);
+            if let MethodType::Base(b) = t
+                && let BaseType::Type {
+                    source: TypeSource::User(u),
+                    ..
+                } = b.as_ref()
+            {
+                hash_parent_as_user_type(u, res, h);
+            } else {
+                h.write_u8(0);
+                hash_method_type(t, res, h);
+            }
         }
-        FieldReferenceParent::Module(m) => {
-            h.write_u8(1);
-            res[*m].name.hash(h);
-        }
+        FieldReferenceParent::Module(_) => h.write_u8(2),
     }
+    r.name.hash(h);
     hash_member_type(&r.field_type, res, h);
     hash_custom_modifiers(&r.custom_modifiers, res, h);
 }

@@ -120,3 +120,14 @@ fn accessibility() {
 fn cascading_indices_unchanged() {
     assert_diff("cascading_indices", &[("Demo.Foo", Status::Unchanged)]);
 }
+
+/// `Shared.Helper` is inlined into `from.dll` (TypeDefinition there)
+/// and lives in a separate `lib.dll` referenced from `to.dll`
+/// (TypeReference there). `Demo.User` calls into it with byte-
+/// identical source, so dll-diff must report Unchanged for the
+/// user-visible class. Mirrors the real HK pattern of a 3rd-party
+/// class being extracted to its own assembly between patches.
+#[test]
+fn external_type_ref_unchanged() {
+    assert_diff("external_type_ref", &[("Demo.User", Status::Unchanged)]);
+}
