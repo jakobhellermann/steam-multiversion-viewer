@@ -111,8 +111,21 @@ fn union_entities(from: &[EntityEntry], to: &[EntityEntry]) -> Vec<EntityEntry> 
 /// Added / Removed don't propagate upward — a namespace stays
 /// `changed` when it gains/loses entries.
 fn apply_statuses(node: &mut Node, statuses: &HashMap<String, NodeStatus>) {
-    if let Some(fqn) = node.id.strip_prefix("type:") {
-        node.status = Some(statuses.get(fqn).copied().unwrap_or(NodeStatus::Unchanged));
+    if node.id.starts_with("type:") {
+        let status = statuses
+            .get(node.id.strip_prefix("type:").unwrap())
+            .copied()
+            .unwrap_or(NodeStatus::Unchanged);
+        node.status = Some(status);
+        // Tag one-sided rows with the side prefix so the content
+        // endpoint dumps only the manifest the type actually lives on.
+        // Matched rows (Changed / Unchanged) keep the bare `type:` id
+        // — both sides hold the same FQN and the endpoint dumps both.
+        match status {
+            NodeStatus::Added => node.id = format!("base:{}", node.id),
+            NodeStatus::Removed => node.id = format!("target:{}", node.id),
+            NodeStatus::Changed | NodeStatus::Unchanged => {}
+        }
     }
     let mut child_status = ChildStatus::default();
     for child in &mut node.children {
