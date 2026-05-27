@@ -160,17 +160,23 @@ function DiffBody({
   rawSrc: string;
 }) {
   if (base?.structured && target.structured) {
+    // Cap the height so the Tree's virtualizer has a bounded scroll
+    // container — otherwise it grows to fit every row and the whole
+    // point of virtualization is lost. Quick fix; the broader page
+    // layout refactor will land its own sizing strategy.
     return (
-      <StructuredDiffView
-        appid={baseLocator.appid}
-        base={{
-          depotId: baseLocator.depotId,
-          manifestId: baseLocator.manifestId,
-          branch: baseLocator.branch,
-        }}
-        target={locator}
-        path={baseLocator.path}
-      />
+      <div className="flex h-[70vh] min-h-0 flex-col">
+        <StructuredDiffView
+          appid={baseLocator.appid}
+          base={{
+            depotId: baseLocator.depotId,
+            manifestId: baseLocator.manifestId,
+            branch: baseLocator.branch,
+          }}
+          target={locator}
+          path={baseLocator.path}
+        />
+      </div>
     );
   }
   if (canDiffText(base) && canDiffText(target)) {
