@@ -272,7 +272,14 @@ fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
     };
     let obj = match file.deref(pptr.typed::<Value>()) {
         Ok(o) => o,
-        Err(_) => return pptr_placeholder(pptr, "unresolved"),
+        Err(e) => {
+            // Surface the actual failure (missing external entry, file
+            // load error, missing path-id, …) so the placeholder
+            // doesn't just say "unresolved" with no clue why.
+            let reason = format!("{e:#}");
+            tracing::warn!(pptr = ?pptr, %reason, "qualify_pptr deref failed");
+            return pptr_placeholder(pptr, &reason);
+        }
     };
     let class_id_raw = obj.class_id();
     // For MonoBehaviours the engine class name (`MonoBehaviour`) is
