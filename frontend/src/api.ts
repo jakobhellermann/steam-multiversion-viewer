@@ -152,11 +152,18 @@ export async function fetchFileDiff(
   return r.text();
 }
 
+export type ManifestDiffStatus = "added" | "changed";
+
+export type ManifestDiffEntry = {
+  path: string;
+  status: ManifestDiffStatus;
+};
+
 export async function fetchManifestDiff(
   appid: AppId,
   base: ManifestRef,
   others: ManifestRef[],
-): Promise<string[]> {
+): Promise<ManifestDiffEntry[]> {
   if (others.length === 0) return [];
   const r = await fetch(`/api/apps/${appid}/manifests/diff`, {
     method: "POST",
@@ -164,8 +171,8 @@ export async function fetchManifestDiff(
     body: JSON.stringify({ base, others }),
   });
   if (!r.ok) throw new Error(await extractErrorMessage(r));
-  const body: { changed_paths: string[] } = await r.json();
-  return body.changed_paths;
+  const body: { entries: ManifestDiffEntry[] } = await r.json();
+  return body.entries;
 }
 
 export type FileDiffStatus = "same" | "different" | "missing";

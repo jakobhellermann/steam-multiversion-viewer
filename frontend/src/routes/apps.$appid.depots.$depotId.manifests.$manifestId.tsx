@@ -14,6 +14,7 @@ import {
   type AppInfo,
   type EnqueueSummary,
   type ExtraManifestEntry,
+  type ManifestDiffStatus,
   type ManifestFile,
   type ManifestInfo,
   type ManifestRef,
@@ -558,10 +559,16 @@ function FilesPanel({
     // the tree doesn't flash back to "all files" in between.
     placeholderData: (prev) => prev,
   });
-  const diffPaths = useMemo<Set<string> | null>(() => {
+  // Per-path diff status from the backend. `null` when no compare
+  // target is active (or the query hasn't landed yet) — callers treat
+  // that as "no diff filter". `has(path)` mirrors the old Set API,
+  // and `get(path)` gives the colour (added/changed) for the row.
+  const diffStatus = useMemo<Map<string, ManifestDiffStatus> | null>(() => {
     if (diffTargets.size === 0) return null;
     if (!diffQuery.data) return null;
-    return new Set(diffQuery.data);
+    const m = new Map<string, ManifestDiffStatus>();
+    for (const e of diffQuery.data) m.set(e.path, e.status);
+    return m;
   }, [diffTargets, diffQuery.data]);
   // `initialData` (not `?? new Set()`) so the cache entry's reference is
   // stable across renders — otherwise the `flattenTree` useMemo below
@@ -594,7 +601,7 @@ function FilesPanel({
     const counts = new Map<string, number>();
     const tokens = deferred.toLowerCase().split(/\s+/).filter(Boolean);
     for (const f of allFiles) {
-      if (diffPaths != null && !diffPaths.has(f.path)) continue;
+      if (diffStatus != null && !diffStatus.has(f.path)) continue;
       if (tokens.length > 0) {
         const path = f.path.toLowerCase();
         if (!tokens.every((t) => path.includes(t))) continue;
@@ -603,23 +610,23 @@ function FilesPanel({
       counts.set(ext, (counts.get(ext) ?? 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [allFiles, diffPaths, deferred]);
+  }, [allFiles, diffStatus, deferred]);
 
   const matches = useMemo<Set<string> | null>(() => {
     const tokens = deferred.toLowerCase().split(/\s+/).filter(Boolean);
     const hasExtFilter = extFilter.size > 0;
-    const hasDiffFilter = diffPaths != null;
+    const hasDiffFilter = diffStatus != null;
     if (tokens.length === 0 && !hasExtFilter && !hasDiffFilter) return null;
     const m = new Set<string>();
     for (const f of allFiles) {
       const path = f.path.toLowerCase();
       if (tokens.length > 0 && !tokens.every((t) => path.includes(t))) continue;
       if (hasExtFilter && !extFilter.has(fileExtension(f.path))) continue;
-      if (hasDiffFilter && !diffPaths!.has(f.path)) continue;
+      if (hasDiffFilter && !diffStatus!.has(f.path)) continue;
       m.add(f.path);
     }
     return m;
-  }, [allFiles, deferred, extFilter, diffPaths]);
+  }, [allFiles, deferred, extFilter, diffStatus]);
 
   const rows = useMemo(
     () => flattenTree(tree, expanded, collapsed, matches),
@@ -786,6 +793,7 @@ function FilesPanel({
         // the file-view (with `compare_to` kept), where the user
         // picks which one to diff against from the inline list.
         singleDiffTarget={diffRefs.length === 1 ? diffRefs[0] : undefined}
+        diffStatus={diffStatus}
         onToggle={toggleDir}
       />
     </>
@@ -800,6 +808,7 @@ function TreeList({
   branch,
   compareTo,
   singleDiffTarget,
+  diffStatus,
   onToggle,
 }: {
   rows: FlatRow[];
@@ -809,6 +818,7 @@ function TreeList({
   branch: string;
   compareTo: string | undefined;
   singleDiffTarget: ManifestRef | undefined;
+  diffStatus: Map<string, ManifestDiffStatus> | null;
   onToggle: (path: string, currentlyExpanded: boolean, anchor: HTMLElement | null) => void;
 }) {
   // Virtualize against the window — the manifest page scrolls at the
@@ -873,6 +883,7 @@ function TreeList({
                 branch={branch}
                 compareTo={compareTo}
                 singleDiffTarget={singleDiffTarget}
+                fileDiffStatus={row.node.file ? (diffStatus?.get(row.node.path) ?? null) : null}
                 onToggle={onToggle}
               />
             </div>
@@ -897,6 +908,7 @@ const TreeRow = memo(function TreeRow({
   branch,
   compareTo,
   singleDiffTarget,
+  fileDiffStatus,
   onToggle,
 }: {
   node: TreeNode;
@@ -908,12 +920,23 @@ const TreeRow = memo(function TreeRow({
   branch: string;
   compareTo: string | undefined;
   singleDiffTarget: ManifestRef | undefined;
+  /// Per-row diff status. `null` outside compare mode and for plain
+  /// `changed` files keeps the default sky link colour; `"added"`
+  /// recolours the row so the user can tell at a glance that the
+  /// file does not exist in any compare target.
+  fileDiffStatus: ManifestDiffStatus | null;
   onToggle: (path: string, currentlyExpanded: boolean, anchor: HTMLElement | null) => void;
 }) {
   const isDir = node.file == null;
   // 16px per nesting level for the row, plus 16px for the chevron column
   // (files have no chevron; we reserve the same slot so names align).
   const indentPx = 12 + depth * 16;
+  // Sky is the default file-link colour; emerald flags "added in base"
+  // so the user can scan added vs. changed entries at a glance. We pin
+  // the colour on the <Link> rather than wrapping the row so the link
+  // text — including the size column — stays consistently coloured.
+  const linkColorClass = fileDiffStatus === "added" ? "text-emerald-400" : "text-sky-400";
+  const sizeColorClass = fileDiffStatus === "added" ? "text-emerald-400/70" : "text-slate-400";
 
   if (isDir) {
     return (
@@ -951,7 +974,7 @@ const TreeRow = memo(function TreeRow({
         target_manifest_id: singleDiffTarget.manifest_id,
         target_branch: singleDiffTarget.branch === "public" ? undefined : singleDiffTarget.branch,
       }}
-      className="flex items-baseline gap-1 py-1.5 pr-3 text-sky-400"
+      className={`flex items-baseline gap-1 py-1.5 pr-3 ${linkColorClass}`}
       style={{ paddingLeft: indentPx + 16 }}
     >
       <span className="text-sm break-all">{node.name}</span>
@@ -959,7 +982,7 @@ const TreeRow = memo(function TreeRow({
         <span className="font-mono text-xs text-slate-500"> → {file.linktarget}</span>
       )}
       <span className="ml-auto w-14" aria-hidden="true" />
-      <span className="w-20 text-right text-xs whitespace-nowrap text-slate-400 tabular-nums">
+      <span className={`w-20 text-right text-xs whitespace-nowrap tabular-nums ${sizeColorClass}`}>
         <Bytes value={file.size} />
       </span>
     </Link>
@@ -972,7 +995,7 @@ const TreeRow = memo(function TreeRow({
         path: file.path,
         compare_to: compareTo,
       }}
-      className="flex items-baseline gap-1 py-1.5 pr-3 text-sky-400"
+      className={`flex items-baseline gap-1 py-1.5 pr-3 ${linkColorClass}`}
       style={{ paddingLeft: indentPx + 16 }}
     >
       <span className="text-sm break-all">{node.name}</span>
@@ -980,7 +1003,7 @@ const TreeRow = memo(function TreeRow({
         <span className="font-mono text-xs text-slate-500"> → {file.linktarget}</span>
       )}
       <span className="ml-auto w-14" aria-hidden="true" />
-      <span className="w-20 text-right text-xs whitespace-nowrap text-slate-400 tabular-nums">
+      <span className={`w-20 text-right text-xs whitespace-nowrap tabular-nums ${sizeColorClass}`}>
         <Bytes value={file.size} />
       </span>
     </Link>
