@@ -44,13 +44,18 @@ pub const MARK_TYPE_COLOR: &str = "color";
 
 /// Build a `pptr` marker. Empty fields are allowed (a null pptr lands
 /// in a map key as the all-empty variant; see the walker).
-pub fn pptr_marker(ref_: &str, target: &str, type_id: &str, file: &str) -> String {
+///
+/// `side` is `""` outside of diff dumps; in the diff content endpoint
+/// it's `"base"` / `"target"` so the frontend can resolve the marker
+/// against the correct manifest (a `-` line's pptr targets the
+/// target side, a `+` line's the base side).
+pub fn pptr_marker(ref_: &str, target: &str, type_id: &str, file: &str, side: &str) -> String {
     let mut out = String::with_capacity(
-        MARK_PREFIX.len() + 6 + ref_.len() + target.len() + type_id.len() + file.len(),
+        MARK_PREFIX.len() + 7 + ref_.len() + target.len() + type_id.len() + file.len() + side.len(),
     );
     let _ = write!(
         &mut out,
-        "{MARK_PREFIX}{MARK_TYPE_PPTR}{MARK_SEP}{ref_}{MARK_SEP}{target}{MARK_SEP}{type_id}{MARK_SEP}{file}",
+        "{MARK_PREFIX}{MARK_TYPE_PPTR}{MARK_SEP}{ref_}{MARK_SEP}{target}{MARK_SEP}{type_id}{MARK_SEP}{file}{MARK_SEP}{side}",
     );
     out
 }

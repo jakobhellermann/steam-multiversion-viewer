@@ -51,8 +51,18 @@ async fn main() -> Result<()> {
     let started = Instant::now();
     let (base_text, target_text) =
         tokio::task::spawn_blocking(move || -> Result<(String, String)> {
-            let b = dump_value::dump_object_json(Arc::new(base), PATH, BASE_PATH_ID)?;
-            let t = dump_value::dump_object_json(Arc::new(target), PATH, TARGET_PATH_ID)?;
+            let b = dump_value::dump_object_json(
+                Arc::new(base),
+                PATH,
+                BASE_PATH_ID,
+                dump_value::DumpSide::Base,
+            )?;
+            let t = dump_value::dump_object_json(
+                Arc::new(target),
+                PATH,
+                TARGET_PATH_ID,
+                dump_value::DumpSide::Target,
+            )?;
             Ok((b, t))
         })
         .await??;

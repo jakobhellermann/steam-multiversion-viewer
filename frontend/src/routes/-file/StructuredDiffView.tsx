@@ -4,6 +4,7 @@ import { useRef } from "react";
 
 import { fetchStructuredDiff, fetchStructuredDiffNode, type StructuredNode } from "../../api";
 import { HighlightedPre } from "./FilePreview";
+import { makePostProcess } from "./markers";
 import { Tree } from "./StructuredView";
 import type { FileLocator } from "./types";
 
@@ -170,9 +171,23 @@ function DiffNodeBody({
   if (settled.text.length === 0) {
     return <p className="text-sm text-slate-500">No content.</p>;
   }
-  // TODO: postProcess (pptr markers → clickable links). Trickier than
-  // in the non-diff view: a unified diff carries markers from both
-  // sides, and each side's pptr should resolve against its own
-  // manifest. Punted for now — markers render as raw sentinels.
-  return <HighlightedPre code={settled.text} lang={settled.lang} />;
+  // Pptr markers carry a `side` field in diff dumps; the renderer
+  // dispatches base-side pptrs against `baseLocator` and target-side
+  // against `targetLocator` so hover-href / middle-click open the
+  // right manifest. Same-page hash clicks may still land off-target
+  // (the diff tree's ids are prefixed) — improving that is a separate
+  // step.
+  const baseLocator: FileLocator = {
+    appid,
+    depotId: base.depotId,
+    manifestId: base.manifestId,
+    branch: base.branch,
+    path,
+  };
+  const targetLocator: FileLocator = { ...target, appid, path };
+  const postProcess = makePostProcess(baseLocator, () => true, {
+    base: baseLocator,
+    target: targetLocator,
+  });
+  return <HighlightedPre code={settled.text} lang={settled.lang} postProcess={postProcess} />;
 }

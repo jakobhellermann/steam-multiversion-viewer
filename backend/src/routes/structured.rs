@@ -182,7 +182,12 @@ pub async fn manifest_file_structured_node(
             };
             let path = q.path.clone();
             let text = tokio::task::spawn_blocking(move || {
-                crate::unity::dump_value::dump_object_json(snapshot, &path, path_id)
+                crate::unity::dump_value::dump_object_json(
+                    snapshot,
+                    &path,
+                    path_id,
+                    crate::unity::dump_value::DumpSide::None,
+                )
             })
             .await
             .map_err(|e| ApiError {
@@ -234,6 +239,7 @@ pub async fn manifest_file_structured_node(
                     &bundle_path,
                     &archive_entry,
                     path_id,
+                    crate::unity::dump_value::DumpSide::None,
                 )
             })
             .await

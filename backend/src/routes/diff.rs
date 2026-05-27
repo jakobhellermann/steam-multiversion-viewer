@@ -871,13 +871,18 @@ pub async fn manifest_file_structured_diff_node(
     let target_arc = target_snap.map(Arc::new);
 
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
+        use crate::unity::dump_value::DumpSide;
         let b = base_arc
             .zip(base_pid)
-            .map(|(snap, pid)| crate::unity::dump_value::dump_object_json(snap, &path, pid))
+            .map(|(snap, pid)| {
+                crate::unity::dump_value::dump_object_json(snap, &path, pid, DumpSide::Base)
+            })
             .transpose();
         let t = target_arc
             .zip(target_pid)
-            .map(|(snap, pid)| crate::unity::dump_value::dump_object_json(snap, &path, pid))
+            .map(|(snap, pid)| {
+                crate::unity::dump_value::dump_object_json(snap, &path, pid, DumpSide::Target)
+            })
             .transpose();
         (b, t)
     })

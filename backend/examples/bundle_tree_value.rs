@@ -50,6 +50,7 @@ async fn main() -> Result<()> {
             BUNDLE_PATH,
             ARCHIVE_ENTRY,
             OBJECT_PATH_ID,
+            dump_value::DumpSide::None,
         )
     })
     .await??;
