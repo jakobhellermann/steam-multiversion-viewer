@@ -28,25 +28,44 @@ use super::{FileViewQuery, ManifestRef, Result};
 
 #[derive(Deserialize, ToSchema)]
 pub struct ManifestDiffRequest {
-    /// The manifest whose paths we report. A path is included if the file
-    /// under that path differs from *any* of the listed others (added,
-    /// removed, or content-changed).
+    /// The manifest whose paths we report. A path is included if it is
+    /// content-changed against any `other`, or absent from every
+    /// `other` (added in `base`).
     pub base: ManifestRef,
     pub others: Vec<ManifestRef>,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct ManifestDiffResponse {
-    /// Paths in `base` that differ from at least one `other`. Includes
-    /// paths missing in `base` but present in some `other` ("removed").
-    pub changed_paths: Vec<String>,
+    /// Entries are paths *in `base`* that are either content-different
+    /// from at least one `other` (`Changed`) or absent from every
+    /// `other` (`Added`). Paths only present in some `other` but
+    /// missing from `base` are deliberately not reported — the file
+    /// tree is rooted in `base` and has no row to attach them to.
+    pub entries: Vec<ManifestDiffEntry>,
 }
 
-/// Symmetric path-level diff between a base manifest and a set of others.
-/// Returns every path that, in at least one of the other manifests, is
-/// either missing or has a different content fingerprint. Identity is
-/// `(kind, size, sha, linktarget)`; absence on either side counts as a
-/// difference.
+#[derive(Serialize, ToSchema)]
+pub struct ManifestDiffEntry {
+    pub path: String,
+    pub status: ManifestDiffStatus,
+}
+
+#[derive(Serialize, ToSchema, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestDiffStatus {
+    /// In `base`, in *no* `other`.
+    Added,
+    /// In `base` and in at least one `other`, with a different content
+    /// fingerprint somewhere. Wins over `Added` when both apply across
+    /// multiple targets.
+    Changed,
+}
+
+/// Path-level diff between a base manifest and a set of others. Each
+/// reported entry is a path in `base` whose status is either `Changed`
+/// (content differs from some `other`) or `Added` (absent from every
+/// `other`). Identity is `(kind, size, sha, linktarget)`.
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/manifests/diff",
@@ -108,6 +127,15 @@ pub async fn manifest_diff(
         (f.kind, f.size, f.sha, f.linktarget.as_deref())
     }
 
+    // Two passes per `other`:
+    //  1. For each base path: is it absent here? → bump toward `Added`.
+    //  2. For each path the `other` *and* base share: do fingerprints
+    //     match? If not → mark `Changed`.
+    // `Changed` wins over `Added` across multiple `others` because it
+    // is the strictly more informative label: a path that is "added in
+    // base vs target A" but "changed vs target B" is, against the
+    // aggregate, still demonstrably different in *content* somewhere.
+    let mut absent_in_all: HashSet<&str> = base_by_path.keys().copied().collect();
     let mut changed: HashSet<String> = HashSet::new();
     while let Some(result) = fu.next().await {
         let snap = result?;
@@ -118,30 +146,38 @@ pub async fn manifest_diff(
                 continue;
             }
             other_paths.insert(f.path.as_str());
-            match base_by_path.get(f.path.as_str()) {
-                None => {
-                    // Present in `other`, absent in `base` — counts as a
-                    // change of `base`'s view (the file would "appear").
-                    changed.insert(f.path.clone());
-                }
-                Some(base_f) => {
-                    if fp(base_f) != fp(f) {
-                        changed.insert(f.path.clone());
-                    }
-                }
+            if let Some(base_f) = base_by_path.get(f.path.as_str())
+                && fp(base_f) != fp(f)
+            {
+                changed.insert(f.path.clone());
             }
         }
-        // Paths in `base` that this `other` does not have at all.
-        for path in base_by_path.keys() {
-            if !other_paths.contains(path) {
-                changed.insert((*path).to_owned());
-            }
-        }
+        // Any base path this `other` covers (matching or not) disqualifies
+        // it from being "absent in *all* others", which is our Added test.
+        absent_in_all.retain(|p| !other_paths.contains(p));
     }
 
-    let mut changed_paths: Vec<String> = changed.into_iter().collect();
-    changed_paths.sort();
-    Ok(Json(ManifestDiffResponse { changed_paths }))
+    let mut entries: Vec<ManifestDiffEntry> =
+        Vec::with_capacity(changed.len() + absent_in_all.len());
+    for path in &changed {
+        entries.push(ManifestDiffEntry {
+            path: path.clone(),
+            status: ManifestDiffStatus::Changed,
+        });
+    }
+    for path in &absent_in_all {
+        // Changed wins — skip if the same path also showed up as changed
+        // against some other target.
+        if changed.contains(*path) {
+            continue;
+        }
+        entries.push(ManifestDiffEntry {
+            path: (*path).to_owned(),
+            status: ManifestDiffStatus::Added,
+        });
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(Json(ManifestDiffResponse { entries }))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -564,6 +600,21 @@ pub async fn manifest_file_structured_diff(
                     message: e.to_string(),
                 })?
         }
+        Some(Transformer::UnityBundle) => {
+            let path = q.path.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::unity::bundle::build_diff(base, target, &path)
+            })
+            .await
+            .map_err(|e| ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!("structured-diff task panicked: {e}"),
+            })?
+            .map_err(|e| ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: e.to_string(),
+            })?
+        }
         Some(Transformer::Dll) => {
             let cfg = state.config.load();
             let store_root = cfg.store_root.clone();
@@ -627,6 +678,168 @@ async fn dll_side_bytes(
         })?;
     let bytes = snap.read_full(path).await?.to_vec();
     Ok((bytes, sha))
+}
+
+/// Per-node body for the UnityBundle structured-diff route. Bundle
+/// node ids carry an `archive:<entry>/` prefix; the inner part is
+/// either bare (`obj:<pid>` — matched both sides), or wrapped in the
+/// same `base:` / `target:` / `mod:` shapes that [`split_diff_id`]
+/// handles. We split that first, then strip `archive:<entry>/` from
+/// each per-side id to land back at a plain `obj:<pid>` we can dump
+/// with [`crate::unity::dump_value::dump_bundle_object_json`].
+///
+/// One-sided rows from a fully-Added or fully-Removed archive entry
+/// have no `base:`/`target:` wrapper (the prefix-id pass inside
+/// [`crate::unity::bundle::one_sided_entry`] doesn't add one) — there
+/// we fall back to attempting both sides and returning whichever has
+/// the object. The missing-side errors get swallowed silently rather
+/// than 500ing the request.
+#[cfg(feature = "unity")]
+async fn bundle_node_body(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    q: &StructuredDiffNodeQuery,
+) -> Result<(crate::http::ImmutableCache, Response)> {
+    /// Pull `(archive_entry, obj_pid)` out of a per-side inner id of
+    /// the shape `archive:<entry>/obj:<pid>`.
+    fn parse_bundle_inner(id: &str) -> Option<(String, i64)> {
+        let (entry, inner) = crate::unity::bundle::parse_archive_id(id)?;
+        let pid = crate::unity::tree::parse_object_node_id(inner)?;
+        Some((entry.to_string(), pid))
+    }
+
+    let (base_inner, target_inner) = split_diff_id(&q.node_id);
+    let base_target = base_inner.and_then(parse_bundle_inner);
+    let target_target = target_inner.and_then(parse_bundle_inner);
+
+    if base_target.is_none() && target_target.is_none() {
+        return Err(ApiError {
+            status: axum::http::StatusCode::BAD_REQUEST,
+            message: format!("bundle structured-diff/node: id has no body: {}", q.node_id),
+        });
+    }
+
+    // Two snapshots in parallel — skip whichever side isn't needed.
+    let base_snap = if base_target.is_some() {
+        Some(
+            state
+                .open_manifest(appid, depot_id, manifest_id, &q.branch)
+                .await?,
+        )
+    } else {
+        None
+    };
+    let target_snap = if target_target.is_some() {
+        Some(
+            state
+                .open_manifest(
+                    appid,
+                    q.target_depot_id,
+                    q.target_manifest_id,
+                    &q.target_branch,
+                )
+                .await?,
+        )
+    } else {
+        None
+    };
+
+    let base_ct = base_snap
+        .as_ref()
+        .map(|s| s.manifest().creation_time)
+        .unwrap_or(0);
+    let target_ct = target_snap
+        .as_ref()
+        .map(|s| s.manifest().creation_time)
+        .unwrap_or(0);
+    let base_arc = base_snap.map(Arc::new);
+    let target_arc = target_snap.map(Arc::new);
+    let bundle_path = q.path.clone();
+
+    let (base_text, target_text) = tokio::task::spawn_blocking(move || {
+        use crate::unity::dump_value::DumpSide;
+        let b = base_arc.zip(base_target).map(|(snap, (entry, pid))| {
+            crate::unity::dump_value::dump_bundle_object_json(
+                snap,
+                &bundle_path,
+                &entry,
+                pid,
+                DumpSide::Base,
+            )
+        });
+        let t = target_arc.zip(target_target).map(|(snap, (entry, pid))| {
+            crate::unity::dump_value::dump_bundle_object_json(
+                snap,
+                &bundle_path,
+                &entry,
+                pid,
+                DumpSide::Target,
+            )
+        });
+        (b, t)
+    })
+    .await
+    .map_err(|e| ApiError {
+        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        message: format!("structured-diff/node task panicked: {e}"),
+    })?;
+
+    // Per-side errors degrade to "no content for this side" rather
+    // than failing the whole request — a one-sided Added/Removed
+    // subtree row has no `base:`/`target:` wrapper, so we tried both
+    // sides speculatively above and one of them is expected to error
+    // with "entry not in bundle" or "object not in entry".
+    let base_text = base_text.and_then(|r| r.ok());
+    let target_text = target_text.and_then(|r| r.ok());
+
+    let body = match (base_text, target_text) {
+        (Some(b), Some(t)) => {
+            let base_label = diff_label(depot_id, manifest_id, base_ct);
+            let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
+            let text = crate::unity::dump_value::dump_object_json_unified_diff(
+                &b,
+                &t,
+                &base_label,
+                &target_label,
+            );
+            (
+                [(
+                    header::CONTENT_TYPE,
+                    "text/x-diff; charset=utf-8".to_string(),
+                )],
+                text,
+            )
+                .into_response()
+        }
+        (Some(b), None) => (
+            [(
+                header::CONTENT_TYPE,
+                "application/json; charset=utf-8".to_string(),
+            )],
+            b,
+        )
+            .into_response(),
+        (None, Some(t)) => (
+            [(
+                header::CONTENT_TYPE,
+                "application/json; charset=utf-8".to_string(),
+            )],
+            t,
+        )
+            .into_response(),
+        (None, None) => {
+            return Err(ApiError {
+                status: axum::http::StatusCode::BAD_REQUEST,
+                message: format!(
+                    "bundle structured-diff/node could not resolve any side: {}",
+                    q.node_id
+                ),
+            });
+        }
+    };
+    Ok((crate::http::ImmutableCache, body))
 }
 
 /// Per-node body for the Dll structured-diff route. `base_id` /
@@ -835,7 +1048,9 @@ pub async fn manifest_file_structured_diff_node(
 
     let kind = crate::transform::tools::transformer_for(&q.path);
     match kind {
-        Some(Transformer::UnitySerialized) | Some(Transformer::Dll) => {}
+        Some(Transformer::UnitySerialized)
+        | Some(Transformer::UnityBundle)
+        | Some(Transformer::Dll) => {}
         _ => {
             return Err(ApiError {
                 status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -846,6 +1061,10 @@ pub async fn manifest_file_structured_diff_node(
 
     if matches!(kind, Some(Transformer::Dll)) {
         return dll_node_body(&state, appid, depot_id, manifest_id, &q).await;
+    }
+
+    if matches!(kind, Some(Transformer::UnityBundle)) {
+        return bundle_node_body(&state, appid, depot_id, manifest_id, &q).await;
     }
 
     // Split the diff-tree id into per-side inner ids, then parse the

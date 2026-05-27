@@ -10,9 +10,6 @@
 ## View formats
 - Unity component-type-specific views (TextComponent, Texture2D, Shader)
 
-## Diff formats
-- bundle file structured diff
-
 ## Deployment
 - `rust-embed` the frontend
 

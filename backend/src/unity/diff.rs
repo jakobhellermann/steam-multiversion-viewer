@@ -136,13 +136,10 @@ pub fn build_diff<C: ChunkStore + 'static>(
 ) -> Result<StructuredTree> {
     let base = open_side(base_manifest, path).context("base side")?;
     let target = open_side(target_manifest, path).context("target side")?;
+    let base_file = load_file(&base)?;
+    let target_file = load_file(&target)?;
 
-    let class_stats = diff_class_stats(&base, &target);
-    let (hierarchy, covered) = diff_hierarchy(&base, &target)?;
-    let loose = diff_loose(&base, &target, &covered)?;
-
-    let children = vec![class_stats, hierarchy, loose];
-    let status = aggregate_status(&children);
+    let (children, status) = diff_sections(&base_file, &target_file)?;
     let root = Node {
         id: format!("file:{path}"),
         label: path.to_string(),
@@ -156,6 +153,27 @@ pub fn build_diff<C: ChunkStore + 'static>(
         kind: TREE_KIND.to_string(),
         root,
     })
+}
+
+/// Build the three section nodes (class-stats / hierarchy / loose) for
+/// a pair of pre-loaded SerializedFiles, plus the aggregated status of
+/// the trio. Used by `build_diff` (single SerializedFile) and the
+/// bundle-diff (one call per archive entry).
+///
+/// Returned node ids are bare (`section:…`, `obj:N`, …). Callers
+/// splicing the subtree into a larger tree (bundle: many entries) are
+/// expected to run `Node::prefix_ids` on the wrapper.
+pub(crate) fn diff_sections<R: EnvResolver, P: TypeTreeProvider>(
+    base_file: &SerializedFileHandle<'_, R, P>,
+    target_file: &SerializedFileHandle<'_, R, P>,
+) -> Result<(Vec<Node>, NodeStatus)> {
+    let class_stats = diff_class_stats(base_file, target_file);
+    let (hierarchy, covered) = diff_hierarchy(base_file, target_file)?;
+    let loose = diff_loose(base_file, target_file, &covered)?;
+
+    let children = vec![class_stats, hierarchy, loose];
+    let status = aggregate_status(&children);
+    Ok((children, status))
 }
 
 /// One side opened for diffing: the path's data dir prefix (so we can
@@ -188,19 +206,11 @@ fn open_side<C: ChunkStore + 'static>(
 /// the diff.
 #[tracing::instrument(skip_all)]
 fn diff_class_stats<R: EnvResolver, P: TypeTreeProvider>(
-    base: &OpenedSide<R, P>,
-    target: &OpenedSide<R, P>,
+    base_file: &SerializedFileHandle<'_, R, P>,
+    target_file: &SerializedFileHandle<'_, R, P>,
 ) -> Node {
-    let b = load_file(base);
-    let t = load_file(target);
-    let (base_counts, base_total) = match b {
-        Ok(ref f) => count_classes(f),
-        Err(_) => (BTreeMap::new(), 0),
-    };
-    let (target_counts, target_total) = match t {
-        Ok(ref f) => count_classes(f),
-        Err(_) => (BTreeMap::new(), 0),
-    };
+    let (base_counts, base_total) = count_classes(base_file);
+    let (target_counts, target_total) = count_classes(target_file);
 
     let mut all_classes: BTreeMap<ClassId, ()> = BTreeMap::new();
     for k in base_counts.keys().chain(target_counts.keys()) {
@@ -285,16 +295,14 @@ type Transforms = BTreeMap<PathId, (Transform, GameObject)>;
 /// what we already accounted for.
 #[tracing::instrument(skip_all)]
 fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
-    base: &OpenedSide<R, P>,
-    target: &OpenedSide<R, P>,
+    base_file: &SerializedFileHandle<'_, R, P>,
+    target_file: &SerializedFileHandle<'_, R, P>,
 ) -> Result<(Node, Covered)> {
-    let base_file = load_file(base)?;
-    let target_file = load_file(target)?;
-    let base_bodies = build_body_index(&base_file);
-    let target_bodies = build_body_index(&target_file);
+    let base_bodies = build_body_index(base_file);
+    let target_bodies = build_body_index(target_file);
 
-    let base_transforms = collect_transforms(&base_file)?;
-    let target_transforms = collect_transforms(&target_file)?;
+    let base_transforms = collect_transforms(base_file)?;
+    let target_transforms = collect_transforms(target_file)?;
 
     let mut covered = Covered::default();
 
@@ -313,8 +321,8 @@ fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
                 Some(ti) => {
                     let (t_id, t_t, t_go) = target_roots[ti];
                     children.push(walk_pair(
-                        &base_file,
-                        &target_file,
+                        base_file,
+                        target_file,
                         &base_bodies,
                         &target_bodies,
                         &base_transforms,
@@ -326,7 +334,7 @@ fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
                 }
                 None => {
                     children.push(subtree_one_side(
-                        &base_file,
+                        base_file,
                         &base_transforms,
                         b_id,
                         b_t,
@@ -341,7 +349,7 @@ fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
         for ti in unmatched_target {
             let (t_id, t_t, t_go) = target_roots[ti];
             children.push(subtree_one_side(
-                &target_file,
+                target_file,
                 &target_transforms,
                 t_id,
                 t_t,
@@ -791,17 +799,15 @@ fn component_label<R: EnvResolver, P: TypeTreeProvider>(
 /// instance per class, so the join still does the right thing).
 #[tracing::instrument(skip_all)]
 fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
-    base: &OpenedSide<R, P>,
-    target: &OpenedSide<R, P>,
+    base_file: &SerializedFileHandle<'_, R, P>,
+    target_file: &SerializedFileHandle<'_, R, P>,
     covered: &Covered,
 ) -> Result<Node> {
-    let base_file = load_file(base)?;
-    let target_file = load_file(target)?;
-    let base_bodies = build_body_index(&base_file);
-    let target_bodies = build_body_index(&target_file);
+    let base_bodies = build_body_index(base_file);
+    let target_bodies = build_body_index(target_file);
 
-    let base_raw = collect_loose(&base_file, &covered.base)?;
-    let target_raw = collect_loose(&target_file, &covered.target)?;
+    let base_raw = collect_loose(base_file, &covered.base)?;
+    let target_raw = collect_loose(target_file, &covered.target)?;
 
     // A class that occurs exactly once on each side is conventionally
     // a singleton (RenderSettings, NavMeshSettings, LightmapSettings,
