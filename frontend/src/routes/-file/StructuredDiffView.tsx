@@ -1,6 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useRouter } from "@tanstack/react-router";
+import { useCallback, useRef } from "react";
 
 import { fetchStructuredDiff, fetchStructuredDiffNode, type StructuredNode } from "../../api";
 import { HighlightedPre } from "./FilePreview";
@@ -189,5 +190,32 @@ function DiffNodeBody({
     base: baseLocator,
     target: targetLocator,
   });
-  return <HighlightedPre code={settled.text} lang={settled.lang} postProcess={postProcess} />;
+  return (
+    <DiffContentPane>
+      <HighlightedPre code={settled.text} lang={settled.lang} bare postProcess={postProcess} />
+    </DiffContentPane>
+  );
+}
+
+/// Wrapper that intercepts clicks on rendered pptr links so cross-file
+/// navigation stays SPA. Without this, the raw `<a href>` in the
+/// post-processed HTML falls back to a browser-level full reload — the
+/// non-diff `NodeContentPanel` has the same delegated handler.
+function DiffContentPane({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const onClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      const a = (e.target as HTMLElement | null)?.closest(
+        "a[data-pptr-file]",
+      ) as HTMLAnchorElement | null;
+      if (!a) return;
+      const href = a.getAttribute("href");
+      if (!href) return;
+      e.preventDefault();
+      router.history.push(href);
+    },
+    [router],
+  );
+  return <div onClick={onClick}>{children}</div>;
 }

@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { getRouteApi, useRouter } from "@tanstack/react-router";
+import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
@@ -14,8 +14,6 @@ import { langForMime } from "../../lib/syntax";
 import { HighlightedPre } from "./FilePreview";
 import { makePostProcess } from "./markers";
 import type { FileLocator } from "./types";
-
-const fileRoute = getRouteApi("/apps/$appid/depots/$depotId/manifests/$manifestId_/file");
 
 /// Render the backend-built structured tree for a file. Lazy: each
 /// node's content is fetched on click. The tree itself comes from one
@@ -169,8 +167,11 @@ export function Tree({
   const selectedNode = selectedId ? (nodeById.get(selectedId) ?? null) : null;
 
   // --- Search + facet filter -------------------------------------------------
-  const search = fileRoute.useSearch();
-  const navigate = fileRoute.useNavigate();
+  // `strict: false` lets us pull search params without binding to a
+  // specific route — same component is mounted from the file route
+  // and the (sibling) diff route.
+  const search = useSearch({ strict: false }) as Record<string, string | undefined>;
+  const navigate = useNavigate();
   const query = search.q ?? "";
   // Pull all `f.<key>` entries out of the URL search params into a
   // {key -> Set<value>} whitelist. Empty = no filter for that key.
@@ -182,10 +183,18 @@ export function Tree({
     }
     return out;
   }, [search]);
+  // Navigate without route binding — `to: "."` keeps us on whichever
+  // route the component is mounted under (file or diff). The search
+  // reducers' types collapse to `never` when the router can't pick a
+  // single concrete route, so we cast the closure shape per call.
   const setQuery = useCallback(
     (next: string) => {
       navigate({
-        search: (prev) => ({ ...prev, q: next.trim() === "" ? undefined : next }),
+        to: ".",
+        search: ((prev: Record<string, string | undefined>) => ({
+          ...prev,
+          q: next.trim() === "" ? undefined : next,
+        })) as never,
         replace: true,
       });
     },
@@ -195,10 +204,11 @@ export function Tree({
     (key: string, values: Set<string>) => {
       const param = `f.${key}` as const;
       navigate({
-        search: (prev) => ({
+        to: ".",
+        search: ((prev: Record<string, string | undefined>) => ({
           ...prev,
           [param]: values.size === 0 ? undefined : [...values].sort().join(","),
-        }),
+        })) as never,
         replace: true,
       });
     },
@@ -1034,7 +1044,14 @@ export function NodeContentPanel({
       // (so hover/middle-click work) but we can't dispatch on it alone.
       if (a.hasAttribute("data-pptr-file")) {
         const href = a.getAttribute("href");
-        if (href) router.navigate({ to: href });
+        if (href) {
+          // SPA navigation via the router's history primitive — the
+          // typed `navigate({to: rawPath})` path silently falls back
+          // to a full reload when called from a non-route-bound
+          // context (this component is mounted under both `/file`
+          // and `/diff`, so we can't bind it to a single route id).
+          router.history.push(href);
+        }
         return;
       }
       // Same-file ref: only navigate the hash if the target actually

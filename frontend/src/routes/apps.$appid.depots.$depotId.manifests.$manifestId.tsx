@@ -780,6 +780,12 @@ function FilesPanel({
         manifestId={manifestId}
         branch={branch}
         compareTo={diffTargets.size > 0 ? [...diffTargets].join(",") : undefined}
+        // When exactly one compare-to target is selected we promote
+        // file rows to direct diff links — single 1×1 diff is what
+        // the new dedicated route handles. Two+ targets fall back to
+        // the file-view (with `compare_to` kept), where the user
+        // picks which one to diff against from the inline list.
+        singleDiffTarget={diffRefs.length === 1 ? diffRefs[0] : undefined}
         onToggle={toggleDir}
       />
     </>
@@ -793,6 +799,7 @@ function TreeList({
   manifestId,
   branch,
   compareTo,
+  singleDiffTarget,
   onToggle,
 }: {
   rows: FlatRow[];
@@ -801,6 +808,7 @@ function TreeList({
   manifestId: string;
   branch: string;
   compareTo: string | undefined;
+  singleDiffTarget: ManifestRef | undefined;
   onToggle: (path: string, currentlyExpanded: boolean, anchor: HTMLElement | null) => void;
 }) {
   // Virtualize against the window — the manifest page scrolls at the
@@ -864,6 +872,7 @@ function TreeList({
                 manifestId={manifestId}
                 branch={branch}
                 compareTo={compareTo}
+                singleDiffTarget={singleDiffTarget}
                 onToggle={onToggle}
               />
             </div>
@@ -887,6 +896,7 @@ const TreeRow = memo(function TreeRow({
   manifestId,
   branch,
   compareTo,
+  singleDiffTarget,
   onToggle,
 }: {
   node: TreeNode;
@@ -897,6 +907,7 @@ const TreeRow = memo(function TreeRow({
   manifestId: string;
   branch: string;
   compareTo: string | undefined;
+  singleDiffTarget: ManifestRef | undefined;
   onToggle: (path: string, currentlyExpanded: boolean, anchor: HTMLElement | null) => void;
 }) {
   const isDir = node.file == null;
@@ -929,30 +940,52 @@ const TreeRow = memo(function TreeRow({
   // File row — clickable link. Add the chevron-slot width to indent so
   // file names line up with sibling dir names (which have a chevron).
   const file = node.file!;
-  return (
-    <div className="border-b border-slate-800 hover:bg-slate-800/40">
-      <Link
-        to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
-        params={{ appid, depotId, manifestId }}
-        search={{
-          branch: branch === "public" ? undefined : branch,
-          path: file.path,
-          compare_to: compareTo,
-        }}
-        className="flex items-baseline gap-1 py-1.5 pr-3 text-sky-400"
-        style={{ paddingLeft: indentPx + 16 }}
-      >
-        <span className="text-sm break-all">{node.name}</span>
-        {file.linktarget && (
-          <span className="font-mono text-xs text-slate-500"> → {file.linktarget}</span>
-        )}
-        <span className="ml-auto w-14" aria-hidden="true" />
-        <span className="w-20 text-right text-xs whitespace-nowrap text-slate-400 tabular-nums">
-          <Bytes value={file.size} />
-        </span>
-      </Link>
-    </div>
+  const fileLink = singleDiffTarget ? (
+    <Link
+      to="/apps/$appid/depots/$depotId/manifests/$manifestId/diff"
+      params={{ appid, depotId, manifestId }}
+      search={{
+        branch: branch === "public" ? undefined : branch,
+        path: file.path,
+        target_depot_id: singleDiffTarget.depot_id,
+        target_manifest_id: singleDiffTarget.manifest_id,
+        target_branch: singleDiffTarget.branch === "public" ? undefined : singleDiffTarget.branch,
+      }}
+      className="flex items-baseline gap-1 py-1.5 pr-3 text-sky-400"
+      style={{ paddingLeft: indentPx + 16 }}
+    >
+      <span className="text-sm break-all">{node.name}</span>
+      {file.linktarget && (
+        <span className="font-mono text-xs text-slate-500"> → {file.linktarget}</span>
+      )}
+      <span className="ml-auto w-14" aria-hidden="true" />
+      <span className="w-20 text-right text-xs whitespace-nowrap text-slate-400 tabular-nums">
+        <Bytes value={file.size} />
+      </span>
+    </Link>
+  ) : (
+    <Link
+      to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
+      params={{ appid, depotId, manifestId }}
+      search={{
+        branch: branch === "public" ? undefined : branch,
+        path: file.path,
+        compare_to: compareTo,
+      }}
+      className="flex items-baseline gap-1 py-1.5 pr-3 text-sky-400"
+      style={{ paddingLeft: indentPx + 16 }}
+    >
+      <span className="text-sm break-all">{node.name}</span>
+      {file.linktarget && (
+        <span className="font-mono text-xs text-slate-500"> → {file.linktarget}</span>
+      )}
+      <span className="ml-auto w-14" aria-hidden="true" />
+      <span className="w-20 text-right text-xs whitespace-nowrap text-slate-400 tabular-nums">
+        <Bytes value={file.size} />
+      </span>
+    </Link>
   );
+  return <div className="border-b border-slate-800 hover:bg-slate-800/40">{fileLink}</div>;
 });
 
 function ExtensionFilter({

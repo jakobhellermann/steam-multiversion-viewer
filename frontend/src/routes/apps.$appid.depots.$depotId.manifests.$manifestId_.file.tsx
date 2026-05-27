@@ -16,8 +16,7 @@ import {
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
 import { ErrorBox } from "../components/ErrorBox";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
-import { formatDate } from "../lib/format";
-import { DiffTargetBlock } from "./-file/DiffTarget";
+import { formatBytes, formatDate } from "../lib/format";
 import { FileMeta } from "./-file/FileMeta";
 import { FilePreview } from "./-file/FilePreview";
 
@@ -283,23 +282,39 @@ function FileViewPage() {
               const status = (statusQuery.data ?? []).find(
                 (s) => s.depot_id === ref.depot_id && s.manifest_id === ref.manifest_id,
               );
+              const targetView = targetViews[i];
+              const targetMissing =
+                !targetView.isPending && targetView.error == null && targetView.data === null;
+              const delta =
+                view.data != null && targetView.data != null
+                  ? targetView.data.size - view.data.size
+                  : 0;
+              const { summary, summaryClass } = summaryFor(targetView, targetMissing, delta);
               return (
-                <DiffTargetBlock
+                <Link
                   key={`${ref.depot_id}-${ref.manifest_id}`}
-                  base={view.data ?? null}
-                  baseLocator={{ appid, depotId, manifestId, branch, path }}
-                  ref_={ref}
-                  creationTime={status?.creation_time ?? 0}
-                  query={targetViews[i]}
-                  rawSrc={fileRawUrl(appid, ref.depot_id, ref.manifest_id, ref.branch, path)}
-                  locator={{
-                    appid,
-                    depotId: ref.depot_id,
-                    manifestId: ref.manifest_id,
-                    branch: ref.branch,
+                  to="/apps/$appid/depots/$depotId/manifests/$manifestId/diff"
+                  params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
+                  search={{
+                    branch: branch === "public" ? undefined : branch,
                     path,
+                    target_depot_id: ref.depot_id,
+                    target_manifest_id: ref.manifest_id,
+                    target_branch: ref.branch === "public" ? undefined : ref.branch,
                   }}
-                />
+                  className="flex items-baseline gap-2 rounded border border-slate-800 px-3 py-1.5 text-sm hover:border-slate-700 hover:bg-slate-800/40"
+                >
+                  <span className="font-medium text-slate-200">{ref.branch}</span>
+                  {(status?.creation_time ?? 0) > 0 && (
+                    <span className="text-xs text-slate-500 tabular-nums">
+                      {formatDate(status!.creation_time)}
+                    </span>
+                  )}
+                  <span className="font-mono text-xs text-slate-500 tabular-nums">
+                    depot {ref.depot_id} · {ref.manifest_id.slice(0, 12)}…
+                  </span>
+                  <span className={`ml-auto text-xs tabular-nums ${summaryClass}`}>{summary}</span>
+                </Link>
               );
             })}
           </div>
@@ -362,4 +377,31 @@ function manifestCrumbLabel(creationTime: number): string {
 function filenameOf(path: string): string {
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return slash >= 0 ? path.slice(slash + 1) : path;
+}
+
+type DiffSummary = { summary: string; summaryClass: string };
+
+function summaryFor(
+  query: { isPending: boolean; error: unknown },
+  targetMissing: boolean,
+  delta: number,
+): DiffSummary {
+  if (query.isPending) return { summary: "loading…", summaryClass: "text-slate-500" };
+  if (query.error != null) return { summary: "failed", summaryClass: "text-amber-300" };
+  if (targetMissing) {
+    return {
+      summary: "doesn't exist in this manifest version",
+      summaryClass: "text-amber-300",
+    };
+  }
+  return {
+    summary: signedDelta(delta),
+    summaryClass: delta === 0 ? "text-slate-500" : "text-amber-300",
+  };
+}
+
+function signedDelta(delta: number): string {
+  if (delta === 0) return "±0 B";
+  const sign = delta > 0 ? "+" : "−";
+  return `${sign}${formatBytes(Math.abs(delta))}`;
 }

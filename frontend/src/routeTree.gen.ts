@@ -15,6 +15,7 @@ import { Route as AppsAppidRouteImport } from './routes/apps.$appid'
 import { Route as AppsAppidIndexRouteImport } from './routes/apps.$appid.index'
 import { Route as AppsAppidDepotsDepotIdManifestsManifestIdRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId'
 import { Route as AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId_.file'
+import { Route as AppsAppidDepotsDepotIdManifestsManifestIdDiffRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId_.diff'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -48,6 +49,12 @@ const AppsAppidDepotsDepotIdManifestsManifestIdFileRoute =
     path: '/depots/$depotId/manifests/$manifestId/file',
     getParentRoute: () => AppsAppidRoute,
   } as any)
+const AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute =
+  AppsAppidDepotsDepotIdManifestsManifestIdDiffRouteImport.update({
+    id: '/depots/$depotId/manifests/$manifestId_/diff',
+    path: '/depots/$depotId/manifests/$manifestId/diff',
+    getParentRoute: () => AppsAppidRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -55,6 +62,7 @@ export interface FileRoutesByFullPath {
   '/apps/$appid': typeof AppsAppidRouteWithChildren
   '/apps/$appid/': typeof AppsAppidIndexRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId': typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
+  '/apps/$appid/depots/$depotId/manifests/$manifestId/diff': typeof AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId/file': typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute
 }
 export interface FileRoutesByTo {
@@ -62,6 +70,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/apps/$appid': typeof AppsAppidIndexRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId': typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
+  '/apps/$appid/depots/$depotId/manifests/$manifestId/diff': typeof AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId/file': typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute
 }
 export interface FileRoutesById {
@@ -71,6 +80,7 @@ export interface FileRoutesById {
   '/apps/$appid': typeof AppsAppidRouteWithChildren
   '/apps/$appid/': typeof AppsAppidIndexRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId': typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
+  '/apps/$appid/depots/$depotId/manifests/$manifestId_/diff': typeof AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId_/file': typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute
 }
 export interface FileRouteTypes {
@@ -81,6 +91,7 @@ export interface FileRouteTypes {
     | '/apps/$appid'
     | '/apps/$appid/'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId'
+    | '/apps/$appid/depots/$depotId/manifests/$manifestId/diff'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId/file'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -88,6 +99,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/apps/$appid'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId'
+    | '/apps/$appid/depots/$depotId/manifests/$manifestId/diff'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId/file'
   id:
     | '__root__'
@@ -96,6 +108,7 @@ export interface FileRouteTypes {
     | '/apps/$appid'
     | '/apps/$appid/'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId'
+    | '/apps/$appid/depots/$depotId/manifests/$manifestId_/diff'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId_/file'
   fileRoutesById: FileRoutesById
 }
@@ -149,12 +162,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport
       parentRoute: typeof AppsAppidRoute
     }
+    '/apps/$appid/depots/$depotId/manifests/$manifestId_/diff': {
+      id: '/apps/$appid/depots/$depotId/manifests/$manifestId_/diff'
+      path: '/depots/$depotId/manifests/$manifestId/diff'
+      fullPath: '/apps/$appid/depots/$depotId/manifests/$manifestId/diff'
+      preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdDiffRouteImport
+      parentRoute: typeof AppsAppidRoute
+    }
   }
 }
 
 interface AppsAppidRouteChildren {
   AppsAppidIndexRoute: typeof AppsAppidIndexRoute
   AppsAppidDepotsDepotIdManifestsManifestIdRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
+  AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute
   AppsAppidDepotsDepotIdManifestsManifestIdFileRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRoute
 }
 
@@ -162,6 +183,8 @@ const AppsAppidRouteChildren: AppsAppidRouteChildren = {
   AppsAppidIndexRoute: AppsAppidIndexRoute,
   AppsAppidDepotsDepotIdManifestsManifestIdRoute:
     AppsAppidDepotsDepotIdManifestsManifestIdRoute,
+  AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute:
+    AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute,
   AppsAppidDepotsDepotIdManifestsManifestIdFileRoute:
     AppsAppidDepotsDepotIdManifestsManifestIdFileRoute,
 }
