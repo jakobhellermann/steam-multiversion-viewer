@@ -21,3 +21,10 @@
 
 ## Perf
 - check for unnecessary requests, caching, profile website and backend
+
+## TrackedChunkStore (WIP commit `yp`)
+- enqueue + tracker double-count the same sha (over-count, compressed vs
+  uncompressed unit mismatch in bytes counters).
+- two concurrent rabex-env calls for the same sha also double-count.
+- cancel mid-tracked-fetch: tracker's completion runs after stats reset
+  → completed > total in drawer.

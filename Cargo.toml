@@ -17,3 +17,11 @@ opt-level = 2
 # every span entry. The patched fork switches them all to `skip_all`.
 [patch.crates-io]
 dotnetdll = { path = "../../dotnet/dotnetdll" }
+
+# Local patch of steam-depot-vfs while iterating on the chunk-store
+# tracking wrapper. Both `steam-depot-vfs` and `steam-depot-mount`
+# live in the same workspace, point them at the local checkout so
+# changes are picked up without push/bump.
+[patch."https://github.com/jakobhellermann/steam-depot-vfs"]
+steam-depot-vfs = { path = "../steam-depot-vfs/crates/steam-depot-vfs" }
+steam-depot-mount = { path = "../steam-depot-vfs/crates/steam-depot-mount" }

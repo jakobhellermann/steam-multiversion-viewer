@@ -325,21 +325,27 @@ fn register_one_with_branch(
 ) {
     let steam = Arc::clone(steam);
     let store = Arc::clone(store);
-    let res = mount.add_lazy(app_id.0, depot_id.0, manifest_id.0, move || {
-        let steam = Arc::clone(&steam);
-        let store = Arc::clone(&store);
-        let branch = branch.clone();
-        async move {
-            tracing::info!(
-                %app_id, %depot_id, %manifest_id, branch,
-                "opening manifest on first FUSE access",
-            );
-            store
-                .open_depot_manifest(steam, app_id.0, depot_id.0, manifest_id.0, &branch)
-                .await
-                .map_err(|e| std::io::Error::other(e.to_string()))
-        }
-    });
+    let res = mount.add_lazy(
+        app_id.0,
+        depot_id.0,
+        manifest_id.0,
+        move || {
+            let steam = Arc::clone(&steam);
+            let store = Arc::clone(&store);
+            let branch = branch.clone();
+            async move {
+                tracing::info!(
+                    %app_id, %depot_id, %manifest_id, branch,
+                    "opening manifest on first FUSE access",
+                );
+                store
+                    .open_depot_manifest(steam, app_id.0, depot_id.0, manifest_id.0, &branch)
+                    .await
+                    .map_err(|e| std::io::Error::other(e.to_string()))
+            }
+        },
+        None,
+    );
     if let Err(e) = res {
         tracing::warn!(%app_id, %depot_id, %manifest_id, %e, "mount add_lazy failed");
     }

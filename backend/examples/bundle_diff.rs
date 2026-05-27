@@ -1,4 +1,25 @@
 // TODO(ai-review): review for style and correctness
+//! Time the three phases of a bundle structured-diff request end-to-end.
+//!
+//! Each phase is printed on its own line so the cost of a fresh
+//! request (login, depot key fetch, globalgamemanagers read) is split
+//! from the steady-state per-request work (build_diff itself).
+//!
+//! To reproduce the cold-path numbers from a backend daemon's first
+//! request after a restart, force the relevant caches to miss:
+//!
+//! - **CDN discover / connection**: kill the process; this cache is
+//!   per-process only (`LazyCachedAuth::inner: OnceCell`).
+//! - **Depot key**: same — per-process cache (`LazyDepotKey`).
+//! - **`globalgamemanagers` chunk**: delete the chunk file. The path
+//!   is `<store_root>/chunks/<sha>` and you can find the sha by
+//!   running this example once warm and grepping the timetree output
+//!   for `cdn.get` under the `unity_version` span.
+//!
+//! Setting `RUST_LOG=info,steam_depot_vfs=info,steam_vent=info` shows
+//! the underlying steam-depot-vfs log lines (`establishing
+//! connection`, `discovering cdn servers`, `fetching depot key`)
+//! interleaved with the timetree breakdown.
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -24,14 +45,22 @@ const PATH: &str = "Hollow Knight Silksong_Data/StreamingAssets/aa/StandaloneWin
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        "info,steam_multiversion_viewer=debug,rabex_env=info,steam_depot_vfs=warn,rabex_env=warn"
-            .into()
+        // `steam_depot_vfs=info` so the "establishing connection /
+        // discovering cdn servers / fetching depot key" lines show
+        // up — those are the lines that explain the cold-path
+        // seconds the timetree alone wouldn't account for.
+        "info,steam_multiversion_viewer=debug,steam_depot_vfs=info,rabex_env=info".into()
     });
     tracing_subscriber::registry()
         .with(filter)
         .with(tracing_timetree::layer().with_min(Duration::from_micros(500)))
         .init();
 
+    // Phase 1: Steam login + CDN discover. Pays the "first contact"
+    // cost. LazyCachedAuth caches the refresh token on disk so a
+    // recent prior run can short-circuit the login itself; the CDN
+    // discover is per-process.
+    let started_auth = Instant::now();
     let auth = LazyCachedAuth::prepare(
         LazyCachedAuth::default_refresh_token_cache(),
         std::env::var("STEAM_USERNAME").expect("missing STEAM_USERNAME"),
@@ -39,15 +68,26 @@ async fn main() -> Result<()> {
     )
     .await?;
     let auth = Arc::new(auth);
+    println!(
+        "\n[phase] auth.prepare (login + CDN discover): {:?}",
+        started_auth.elapsed()
+    );
 
+    // Allow overriding the store root via env var so cold-cache
+    // runs can be reproduced without nuking the real cache. Defaults
+    // to the config's normal store_root.
     let config = Config::load_or_default()?;
-    let store = DepotStore::new(config.store_root.as_std_path().to_path_buf());
+    let store_root = match std::env::var("STORE_ROOT") {
+        Ok(p) => std::path::PathBuf::from(p),
+        Err(_) => config.store_root.as_std_path().to_path_buf(),
+    };
+    println!("[cfg] store_root = {}", store_root.display());
+    let store = DepotStore::new(store_root);
 
-    // Mirror what the HTTP `manifest_file_structured_diff` endpoint
-    // does: both snapshots opened in parallel via try_join (cheap when
-    // cached, parallel CDN fetches otherwise), then the diff builder
-    // dispatched into spawn_blocking. Anything we measure here is
-    // close to what the request actually pays.
+    // Phase 2: open both manifests in parallel. First time for an
+    // (app, depot) combo this also fetches the depot key from Steam
+    // (cached per-process inside `LazyDepotKey`). Mirrors
+    // `prepare_structured_side` from the HTTP endpoint.
     let started_open = Instant::now();
     let (base_snap, target_snap) = {
         let auth_b = auth.clone();
@@ -77,16 +117,22 @@ async fn main() -> Result<()> {
         )?
     };
     println!(
-        "\nopen_manifest (both, parallel): {:?}",
+        "[phase] open_depot_manifest (both, parallel, incl depot key fetch on cold (app,depot)): {:?}",
         started_open.elapsed()
     );
 
-    let started = Instant::now();
+    // Phase 3: build_diff. Inside this `unity_version` is its own
+    // info_span (see bundle::open_bundle) — cold path reads
+    // globalgamemanagers from the depot, warm path is sub-µs. Look
+    // for the timetree span called `unity_version` in the stderr
+    // output below for the breakdown.
+    let started_diff = Instant::now();
     let tree = tokio::task::spawn_blocking(move || {
         bundle::build_diff(Arc::new(base_snap), Arc::new(target_snap), PATH)
     })
     .await??;
-    let elapsed = started.elapsed();
+    let elapsed = started_diff.elapsed();
+    println!("[phase] build_diff (spawn_blocking): {:?}", elapsed);
 
     let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
     walk(&tree.root, &mut counts);

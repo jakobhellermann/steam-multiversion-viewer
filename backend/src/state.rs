@@ -8,13 +8,13 @@ use steam_depot_vfs::fs::DepotManifestStore;
 use steam_depot_vfs::{DepotStore, VfsError};
 
 use crate::config::Config;
-use crate::downloads::DownloadManager;
+use crate::downloads::{DownloadManager, TrackedChunkStore};
 use crate::extra_manifests::ExtraManifestsStore;
 use crate::mount::MountManager;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient, auth};
 use crate::store_index::StoreIndex;
 
-pub type Snapshot = DepotManifestStore<FsCacheStore<CdnChunkStore<SteamClient>>>;
+pub type Snapshot = DepotManifestStore<FsCacheStore<TrackedChunkStore<CdnChunkStore<SteamClient>>>>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -86,14 +86,16 @@ impl AppState {
         branch: &str,
     ) -> Result<Snapshot, VfsError> {
         let started = Instant::now();
+        let downloads = self.downloads.clone();
         let snap = self
             .store
-            .open_depot_manifest(
+            .open_depot_manifest_with_chunks(
                 self.steam.clone(),
                 app_id.0,
                 depot_id.0,
                 manifest_id.0,
                 branch,
+                move |cdn| TrackedChunkStore::new(cdn, downloads),
             )
             .await?;
         let fresh = self

@@ -15,6 +15,9 @@ unity = ["transform/unity", "dep:rabex-env", "dep:rabex-env-steam-depot-vfs"]
 [dependencies]
 anyhow = "1.0"
 arc-swap = "1.9"
+# Re-exported by steam-depot-vfs's ChunkStore trait (`get -> Bytes`);
+# pinned here so our local TrackedChunkStore wrapper can name the type.
+bytes = "1"
 axum = { version = "0.8", default-features = false, features = ["tracing", "http1", "json", "macros", "matched-path", "tokio", "query"] }
 camino = { version = "1.2.2", features = ["serde1"] }
 directories = "5"
