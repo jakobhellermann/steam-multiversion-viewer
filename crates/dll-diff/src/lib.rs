@@ -134,7 +134,10 @@ pub fn type_signatures(res: &Resolution<'_>) -> HashMap<String, u64> {
 
 /// Fully-qualified name of a type, walking the encloser chain so
 /// nested types render as `Outer.Inner` (matching `ilspycmd -l` and
-/// the existing dll-tree builder).
+/// the existing dll-tree builder). Empty-string namespaces are
+/// treated the same as `None` — metadata occasionally stores top-
+/// level types with `Some("")` instead of `None`, and a leading
+/// `.TypeName` would break the tree builder.
 fn type_fqn(idx: TypeIndex, res: &Resolution<'_>) -> String {
     let td = &res[idx];
     match td.encloser {
@@ -143,5 +146,36 @@ fn type_fqn(idx: TypeIndex, res: &Resolution<'_>) -> String {
             Some(ns) if !ns.is_empty() => format!("{}.{}", ns, td.name),
             _ => td.name.to_string(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dotnetdll::prelude::*;
+    use dotnetdll::resolved::module::Module;
+
+    /// `dotnetdll` doesn't normalise empty-string namespaces to
+    /// `None`, so the guard inside `type_fqn` has to drop them too —
+    /// without that, top-level types would render as `.TypeName`.
+    #[test]
+    fn type_fqn_empty_namespace_is_bare_name() {
+        let mut res = Resolution::new(Module::new("test"));
+        let idx = res.push_type_definition(TypeDefinition::new(Some("".into()), "TopLevel"));
+        assert_eq!(super::type_fqn(idx, &res), "TopLevel");
+    }
+
+    #[test]
+    fn type_fqn_none_namespace_is_bare_name() {
+        let mut res = Resolution::new(Module::new("test"));
+        let idx = res.push_type_definition(TypeDefinition::new(None, "TopLevel"));
+        assert_eq!(super::type_fqn(idx, &res), "TopLevel");
+    }
+
+    #[test]
+    fn type_fqn_with_namespace_joins_with_dot() {
+        let mut res = Resolution::new(Module::new("test"));
+        let idx =
+            res.push_type_definition(TypeDefinition::new(Some("Outer.Ns".into()), "TypeName"));
+        assert_eq!(super::type_fqn(idx, &res), "Outer.Ns.TypeName");
     }
 }
