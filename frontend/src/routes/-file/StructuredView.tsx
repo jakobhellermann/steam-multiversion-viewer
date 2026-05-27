@@ -159,7 +159,7 @@ export function Tree({
   const [focusedId, setFocusedId] = useState<string>(root.id);
   const selectedId: string | null = focusedId;
   // Flat lookup so `renderContent` gets the whole node object —
-  // diff-mode reads `target_id` / `status` off it, the non-diff
+  // diff-mode reads `status` and `has_content` off it, the non-diff
   // renderer just needs the id.
   const nodeById = useMemo(() => {
     const map = new Map<string, StructuredNode>();

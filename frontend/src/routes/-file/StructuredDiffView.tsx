@@ -9,7 +9,7 @@ import type { FileLocator } from "./types";
 
 /// Tree-based diff view for files with structured representations.
 /// Reuses the same `Tree` component as the non-diff view — the diff
-/// signal travels on `StructuredNode.status` / `target_id`, so the
+/// signal travels on `StructuredNode.status` and the id-prefix, so the
 /// only thing diff-specific here is the content-pane renderer that
 /// pairs both sides through `/file/structured-diff/node`.
 export function StructuredDiffView({
@@ -97,14 +97,10 @@ function DiffNodeBody({
   path: string;
   node: StructuredNode;
 }) {
-  // Same-id matched diffs come with `target_id` unset — both sides
-  // share the node id. Added-/removed-only nodes carry their single
-  // side as `id`; the missing side is sent as null. `has_content`
-  // gates the fetch so we don't probe section / class-stat rows.
-  const baseId = node.status === "removed" ? null : node.id;
-  const targetId =
-    node.status === "added" ? null : node.target_id != null ? node.target_id : node.id;
-  const enabled = !!node.has_content && (baseId != null || targetId != null);
+  // Backend reads which side(s) to dump out of the id's prefix — the
+  // frontend just hands the raw tree id over. `has_content` gates the
+  // fetch so we don't probe section / class-stat rows.
+  const enabled = !!node.has_content;
   const content = useQuery({
     queryKey: [
       "structured-diff-node",
@@ -116,8 +112,7 @@ function DiffNodeBody({
       target.manifestId,
       target.branch,
       path,
-      baseId,
-      targetId,
+      node.id,
     ],
     queryFn: () =>
       fetchStructuredDiffNode(
@@ -127,8 +122,7 @@ function DiffNodeBody({
         base.branch,
         { depot_id: target.depotId, manifest_id: target.manifestId, branch: target.branch },
         path,
-        baseId,
-        targetId,
+        node.id,
       ),
     enabled,
     staleTime: Infinity,

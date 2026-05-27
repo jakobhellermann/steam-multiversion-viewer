@@ -287,13 +287,6 @@ export type StructuredNode = {
   /// Set on diff-tree nodes; absent for plain (non-diff) structured
   /// trees. The renderer colours the row when present.
   status?: NodeStatus;
-  /// Set in diff trees when the matched node has a different id on
-  /// the target side (e.g. Unity renumbered path-ids across the
-  /// patch). Same opaque-string shape as [`id`]; the diff content
-  /// endpoint takes `id` (base) and `target_id` to dump both sides.
-  /// `undefined` either means "non-diff tree" or "diff matched both
-  /// sides with the same id".
-  target_id?: string;
   /// When true, the content endpoint serves a per-node body for this
   /// row (a JSON dump, a decompiled type, …). Absent on rows that
   /// only group or summarise — frontend skips the content fetch and
@@ -352,9 +345,9 @@ export type StructuredDiffNodeContent = {
 };
 
 /// Fetch the per-node body for a structured diff entry. Backend runs
-/// the JSON dump on each side and the text-diff in one shot. `baseId`
-/// / `targetId` are tree-node ids (same opaque-string shape as
-/// `StructuredNode.id`); omit one of them for added/removed nodes.
+/// the JSON dump on each side and the text-diff in one shot. `nodeId`
+/// is the raw tree-row id — the backend parses out which side(s) to
+/// dump from its prefix (`base:`, `target:`, `mod:`, or no prefix).
 export async function fetchStructuredDiffNode(
   appid: AppId,
   baseDepotId: number,
@@ -362,8 +355,7 @@ export async function fetchStructuredDiffNode(
   baseBranch: string,
   target: { depot_id: number; manifest_id: string; branch: string },
   path: string,
-  baseId: string | null,
-  targetId: string | null,
+  nodeId: string,
 ): Promise<StructuredDiffNodeContent> {
   const qs = new URLSearchParams({
     path,
@@ -371,9 +363,8 @@ export async function fetchStructuredDiffNode(
     target_depot_id: String(target.depot_id),
     target_manifest_id: target.manifest_id,
     target_branch: target.branch,
+    node_id: nodeId,
   });
-  if (baseId != null) qs.set("base_id", baseId);
-  if (targetId != null) qs.set("target_id", targetId);
   const r = await fetch(
     `/api/apps/${appid}/depots/${baseDepotId}/manifests/${baseManifestId}/file/structured-diff/node?${qs}`,
   );

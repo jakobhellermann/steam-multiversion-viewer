@@ -83,13 +83,46 @@ fn make_node(
     }
 }
 
-/// For matched object pairs: build a node id from the base path-id
-/// and, when the target path-id differs, the target_id to thread
-/// through to the per-side content lookup.
-fn obj_id_pair(base: PathId, target: PathId) -> (String, Option<String>) {
-    let base_id = format!("obj:{base}");
-    let target_id = (base != target).then(|| format!("obj:{target}"));
-    (base_id, target_id)
+/// Which manifest a one-sided diff row lives on. `base` is what the
+/// URL's `manifest_id` resolves to (the page the user is currently
+/// looking at); `target` is the manifest passed in via the `Compare to`
+/// query.
+#[derive(Clone, Copy, Debug)]
+enum Side {
+    Base,
+    Target,
+}
+
+impl Side {
+    fn prefix(self) -> &'static str {
+        match self {
+            Side::Base => "base",
+            Side::Target => "target",
+        }
+    }
+}
+
+/// Build the node id for a matched object pair. If the two sides
+/// agree on the inner id we use it bare; otherwise we wrap them in
+/// the `mod:<base>,<target>` shape so the content endpoint can dump
+/// the right per-side path-ids.
+///
+/// One-sided nodes (added/removed) carry [`one_sided_id`] instead.
+fn matched_pair_id(base: PathId, target: PathId) -> String {
+    if base == target {
+        format!("obj:{base}")
+    } else {
+        format!("mod:obj:{base},obj:{target}")
+    }
+}
+
+/// Build the node id for an added-only (`Side::Base`) or removed-only
+/// (`Side::Target`) row. The side prefix lets the content endpoint
+/// pick which manifest to dump and disambiguates against a matched
+/// row that happens to share the inner id (the bug behind two
+/// `obj:15` rows colliding).
+fn one_sided_id(side: Side, path_id: PathId) -> String {
+    format!("{}:obj:{path_id}", side.prefix())
 }
 
 /// Build the structured diff for `path` between the two manifests.
@@ -299,6 +332,7 @@ fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
                         b_t,
                         b_go,
                         NodeStatus::Added,
+                        Side::Base,
                         &mut covered.base,
                     )?);
                 }
@@ -313,6 +347,7 @@ fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
                 t_t,
                 t_go,
                 NodeStatus::Removed,
+                Side::Target,
                 &mut covered.target,
             )?);
         }
@@ -507,6 +542,7 @@ fn walk_pair<R: EnvResolver, P: TypeTreeProvider>(
                     b_child_t,
                     b_child_go,
                     NodeStatus::Added,
+                    Side::Base,
                     &mut covered.base,
                 )?);
             }
@@ -521,6 +557,7 @@ fn walk_pair<R: EnvResolver, P: TypeTreeProvider>(
             t_child_t,
             t_child_go,
             NodeStatus::Removed,
+            Side::Target,
             &mut covered.target,
         )?);
     }
@@ -528,10 +565,9 @@ fn walk_pair<R: EnvResolver, P: TypeTreeProvider>(
     let pruned = prune_unchanged(children);
     let status = aggregate_status(&pruned);
 
-    let (id, target_id) = obj_id_pair(b_t.m_GameObject.m_PathID, t_t.m_GameObject.m_PathID);
+    let id = matched_pair_id(b_t.m_GameObject.m_PathID, t_t.m_GameObject.m_PathID);
     Ok(Node {
         children: pruned,
-        target_id,
         ..make_node(id, go_label(b_go), "gameobject", status)
     })
 }
@@ -546,6 +582,7 @@ fn subtree_one_side<R: EnvResolver, P: TypeTreeProvider>(
     transform: &Transform,
     go: &GameObject,
     status: NodeStatus,
+    side: Side,
     covered: &mut HashSet<PathId>,
 ) -> Result<Node> {
     covered.insert(transform_path_id);
@@ -562,7 +599,7 @@ fn subtree_one_side<R: EnvResolver, P: TypeTreeProvider>(
                 .into_iter()
                 .collect(),
             ..make_node(
-                format!("obj:{}", comp.path_id),
+                one_sided_id(side, comp.path_id),
                 component_label(file, key, comp)?,
                 "component",
                 status,
@@ -579,6 +616,7 @@ fn subtree_one_side<R: EnvResolver, P: TypeTreeProvider>(
                 child_t,
                 child_go,
                 status,
+                side,
                 covered,
             )?);
         }
@@ -586,7 +624,7 @@ fn subtree_one_side<R: EnvResolver, P: TypeTreeProvider>(
     Ok(Node {
         children,
         ..make_node(
-            format!("obj:{}", transform.m_GameObject.m_PathID),
+            one_sided_id(side, transform.m_GameObject.m_PathID),
             go_label(go),
             "gameobject",
             status,
@@ -695,7 +733,7 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
                 (Some(bb), Some(tb)) if bb == tb => NodeStatus::Unchanged,
                 _ => NodeStatus::Changed,
             };
-            let (id, target_id) = obj_id_pair(b.path_id, t.path_id);
+            let id = matched_pair_id(b.path_id, t.path_id);
             Ok(Node {
                 badge: if b.path_id == t.path_id {
                     Some(format!("[{}]", b.path_id))
@@ -705,7 +743,6 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
                 facets: [("class".to_string(), key.to_string())]
                     .into_iter()
                     .collect(),
-                target_id,
                 ..make_node(id, component_label(base_file, key, b)?, "component", status)
             })
         }
@@ -715,7 +752,7 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
                 .into_iter()
                 .collect(),
             ..make_node(
-                format!("obj:{}", b.path_id),
+                one_sided_id(Side::Base, b.path_id),
                 component_label(base_file, key, b)?,
                 "component",
                 NodeStatus::Added,
@@ -727,7 +764,7 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
                 .into_iter()
                 .collect(),
             ..make_node(
-                format!("obj:{}", t.path_id),
+                one_sided_id(Side::Target, t.path_id),
                 component_label(target_file, key, t)?,
                 "component",
                 NodeStatus::Removed,
@@ -816,7 +853,7 @@ fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
                     (Some(bb), Some(tb)) if bb == tb => NodeStatus::Unchanged,
                     _ => NodeStatus::Changed,
                 };
-                let (id, target_id) = obj_id_pair(b.path_id, t.path_id);
+                let id = matched_pair_id(b.path_id, t.path_id);
                 Node {
                     badge: if b.path_id == t.path_id {
                         Some(format!("[{}]", b.path_id))
@@ -826,7 +863,6 @@ fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
                     facets: [("class".to_string(), key.label.clone())]
                         .into_iter()
                         .collect(),
-                    target_id,
                     ..make_node(id, loose_label(&key, &b), "component", status)
                 }
             }
@@ -836,7 +872,7 @@ fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
                     .into_iter()
                     .collect(),
                 ..make_node(
-                    format!("obj:{}", b.path_id),
+                    one_sided_id(Side::Base, b.path_id),
                     loose_label(&key, &b),
                     "component",
                     NodeStatus::Added,
@@ -848,7 +884,7 @@ fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
                     .into_iter()
                     .collect(),
                 ..make_node(
-                    format!("obj:{}", t.path_id),
+                    one_sided_id(Side::Target, t.path_id),
                     loose_label(&key, &t),
                     "component",
                     NodeStatus::Removed,

@@ -645,12 +645,13 @@ async fn dll_node_body(
     fn parse_type_id(id: &str) -> Option<&str> {
         id.strip_prefix("type:")
     }
-    let base_type = q.base_id.as_deref().and_then(parse_type_id);
-    let target_type = q.target_id.as_deref().and_then(parse_type_id);
+    let (base_inner, target_inner) = split_diff_id(&q.node_id);
+    let base_type = base_inner.and_then(parse_type_id);
+    let target_type = target_inner.and_then(parse_type_id);
     if base_type.is_none() && target_type.is_none() {
         return Err(ApiError {
             status: axum::http::StatusCode::BAD_REQUEST,
-            message: "structured-diff/node needs at least one of base_id / target_id".to_string(),
+            message: format!("structured-diff/node: id has no body: {}", q.node_id),
         });
     }
 
@@ -754,10 +755,9 @@ async fn dll_node_body(
 }
 
 /// Query string for the per-node structured-diff content endpoint.
-/// Identifies which sides to dump and from where. `base_id` / `target_id`
-/// are opaque tree-node ids — same shape as the `id` field on
-/// [`crate::structured::Node`], parsed by the format-specific dump
-/// helper. Omitting one of them marks the node as added/removed.
+/// Frontend passes the raw tree-row id; the endpoint parses out which
+/// sides to dump and from where based on the id's prefix shape (see
+/// [`split_diff_id`]).
 #[derive(Deserialize, utoipa::IntoParams)]
 pub struct StructuredDiffNodeQuery {
     pub path: String,
@@ -767,13 +767,32 @@ pub struct StructuredDiffNodeQuery {
     pub target_manifest_id: ManifestId,
     #[serde(default = "default_branch")]
     pub target_branch: String,
-    /// Tree-node id on the base side. Omit when the node is `removed`.
-    pub base_id: Option<String>,
-    /// Tree-node id on the target side. Omit when the node is `added`.
-    /// When the diff matched both sides under the same id, the frontend
-    /// only sends `base_id` and lets the backend dump that id on both
-    /// sides.
-    pub target_id: Option<String>,
+    /// Tree-row id from the diff tree. One of:
+    /// - `<inner>` — matched, same id on both sides → dump both with
+    ///   `<inner>` on each.
+    /// - `mod:<base-inner>,<target-inner>` — matched but renumbered.
+    /// - `base:<inner>` — added (only on base).
+    /// - `target:<inner>` — removed (only on target).
+    pub node_id: String,
+}
+
+/// Resolves a diff-tree id into the per-side inner ids the format
+/// dump helpers want. Returns `(base, target)` — either side `None`
+/// means "don't dump this side".
+fn split_diff_id(node_id: &str) -> (Option<&str>, Option<&str>) {
+    if let Some(rest) = node_id.strip_prefix("base:") {
+        return (Some(rest), None);
+    }
+    if let Some(rest) = node_id.strip_prefix("target:") {
+        return (None, Some(rest));
+    }
+    if let Some(rest) = node_id.strip_prefix("mod:")
+        && let Some((b, t)) = rest.split_once(',')
+    {
+        return (Some(b), Some(t));
+    }
+    // No prefix — matched node with same id on both sides.
+    (Some(node_id), Some(node_id))
 }
 
 /// Per-node body for a structured diff entry. Dumps both sides as
@@ -811,22 +830,16 @@ pub async fn manifest_file_structured_diff_node(
         return dll_node_body(&state, appid, depot_id, manifest_id, &q).await;
     }
 
-    // Parse node-ids into path-ids on each side. Today's only node id
-    // shape with a body is `obj:<pathid>`; other shapes (section
-    // headers, class-stats rows) have no per-object content and we
-    // reject them here.
+    // Split the diff-tree id into per-side inner ids, then parse the
+    // unity-specific `obj:<pathid>` shape. Other inner shapes (section
+    // headers, class-stats rows) have no per-object content and bail
+    // out with `None` here.
     fn parse_obj_id(node_id: &str) -> Option<i64> {
         crate::unity::tree::parse_object_node_id(node_id)
     }
-
-    let base_pid = q.base_id.as_deref().and_then(parse_obj_id);
-    let target_pid = q.target_id.as_deref().and_then(parse_obj_id);
-    if q.base_id.is_none() && q.target_id.is_none() {
-        return Err(ApiError {
-            status: axum::http::StatusCode::BAD_REQUEST,
-            message: "structured-diff/node needs at least one of base_id / target_id".to_string(),
-        });
-    }
+    let (base_inner, target_inner) = split_diff_id(&q.node_id);
+    let base_pid = base_inner.and_then(parse_obj_id);
+    let target_pid = target_inner.and_then(parse_obj_id);
 
     // Two snapshots in parallel (skip whichever side has no id).
     let base_snap = if base_pid.is_some() {

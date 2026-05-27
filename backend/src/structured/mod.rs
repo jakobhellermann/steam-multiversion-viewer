@@ -63,14 +63,6 @@ pub struct Node {
     /// on plain (non-diff) structured trees.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<NodeStatus>,
-    /// Set in diff trees when the matched node has a different id on
-    /// the target side (e.g. Unity renumbered path-ids across the
-    /// patch). The non-diff content endpoint takes [`id`] as-is; the
-    /// diff content endpoint takes both `id` (base) and `target_id`
-    /// to dump both sides. `None` either means "non-diff tree" or
-    /// "diff matched both sides with the same id".
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_id: Option<String>,
     /// When `true`, the content endpoint will return a body for this
     /// node (e.g. a JSON dump, a decompiled type). False / absent on
     /// rows that exist only to group or summarise (sections,
@@ -111,7 +103,6 @@ impl Node {
             include_descendants_on_match: false,
             facets: BTreeMap::new(),
             status: None,
-            target_id: None,
             has_content: false,
             children: Vec::new(),
         }
