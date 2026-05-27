@@ -5,6 +5,7 @@
 //! `dll_diff::type_signatures` map at the type level plus a smaller
 //! per-member breakdown so we can see which sub-piece differs.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -21,7 +22,7 @@ const TO_MANIFEST: u64 = 708613018541602983;
 const BRANCH: &str = "public";
 const DLL_PATH: &str = "hollow_knight_Data/Managed/Assembly-CSharp.dll";
 
-const FQN: &str = "Demo.User";
+const FQN: &str = "BossDoorChallengeUIBindingButton";
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
@@ -127,20 +128,43 @@ fn compare(from_res: &Resolution<'_>, to_res: &Resolution<'_>) {
             from_methods.len(),
             to_methods.len()
         );
+        let from_names: BTreeSet<_> = from_methods.iter().map(|m| m.name.as_ref()).collect();
+        let to_names: BTreeSet<_> = to_methods.iter().map(|m| m.name.as_ref()).collect();
+        for only_from in from_names.difference(&to_names) {
+            println!("    only in from: {only_from}");
+        }
+        for only_to in to_names.difference(&from_names) {
+            println!("    only in to:   {only_to}");
+        }
     }
     for (ma, mb) in from_methods.iter().zip(to_methods.iter()) {
         let ha = method_hash(ma, from_res);
         let hb = method_hash(mb, to_res);
-        let marker = if ha == hb { "  " } else { "≠≠" };
-        println!(
-            "  {marker} {}({}) ⇄ {}({})  {:016x} vs {:016x}",
-            ma.name,
-            ma.signature.parameters.len(),
-            mb.name,
-            mb.signature.parameters.len(),
-            ha,
-            hb
-        );
+        if ha != hb {
+            println!(
+                "  ≠≠ {}({}) ⇄ {}({})  {ha:016x} vs {hb:016x}",
+                ma.name,
+                ma.signature.parameters.len(),
+                mb.name,
+                mb.signature.parameters.len()
+            );
+            if let (Some(ba), Some(bb)) = (&ma.body, &mb.body) {
+                println!(
+                    "      from-il: {} instructions, to-il: {} instructions",
+                    ba.instructions.len(),
+                    bb.instructions.len()
+                );
+                let d = similar::TextDiff::from_lines(
+                    &format!("{:#?}", ba.instructions),
+                    &format!("{:#?}", bb.instructions),
+                )
+                .unified_diff()
+                .context_radius(3)
+                .header("from-il", "to-il")
+                .to_string();
+                println!("{}", d);
+            }
+        }
     }
 }
 
