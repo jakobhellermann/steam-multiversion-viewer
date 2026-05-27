@@ -131,3 +131,14 @@ fn cascading_indices_unchanged() {
 fn external_type_ref_unchanged() {
     assert_diff("external_type_ref", &[("Demo.User", Status::Unchanged)]);
 }
+
+/// `from.cs` writes an explicit empty `static Foo()`; the compiler
+/// emits a `.cctor` with just `Return`. `to.cs` drops the explicit
+/// ctor and the metadata loses the `.cctor` entirely. dll-diff
+/// filters empty `.cctor`s from the hash so the asymmetry doesn't
+/// flip the type to Changed — matches the HK pattern where a newer
+/// compiler elides empty static constructors.
+#[test]
+fn empty_cctor_unchanged() {
+    assert_diff("empty_cctor", &[("Demo.Foo", Status::Unchanged)]);
+}

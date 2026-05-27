@@ -16,7 +16,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use dll_diff::dotnetdll::prelude::*;
 use dll_diff::dotnetdll::resolved::types::TypeDefinition;
-use dll_diff::sig::{field_hash, method_hash};
+use dll_diff::sig::{field_hash, is_empty_cctor, method_hash};
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
@@ -127,8 +127,11 @@ fn classify(from_res: &Resolution<'_>, to_res: &Resolution<'_>, fqns: &BTreeSet<
 
         let mut differing_methods_len = 0;
         let mut differing_methods_content = 0;
-        let mut from_methods: Vec<_> = from.methods.iter().collect();
-        let mut to_methods: Vec<_> = to.methods.iter().collect();
+        // Mirror sig.rs: empty `.cctor` is filtered before hashing,
+        // so the classifier has to do the same or its buckets won't
+        // line up with what `dll-diff` actually reports.
+        let mut from_methods: Vec<_> = from.methods.iter().filter(|m| !is_empty_cctor(m)).collect();
+        let mut to_methods: Vec<_> = to.methods.iter().filter(|m| !is_empty_cctor(m)).collect();
         from_methods.sort_by(|a, b| {
             a.name.cmp(&b.name).then_with(|| {
                 a.signature

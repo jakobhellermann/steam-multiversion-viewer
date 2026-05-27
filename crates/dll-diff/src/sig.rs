@@ -26,6 +26,21 @@ use dotnetdll::resolved::types::{
     TypeDefinition, TypeSource,
 };
 
+/// Returns true for a static constructor whose body is just `Return`.
+/// The compiler emits one whenever a class has any static field
+/// initializer; newer toolchains elide it when the initializer
+/// constant-folds to nothing. The walker drops such methods so that
+/// purely-optimisation-driven flip doesn't register as Changed. Also
+/// useful for diagnostic tools that want the same filtered view as
+/// the production hash sees.
+pub fn is_empty_cctor(m: &Method<'_>) -> bool {
+    if m.name != ".cctor" {
+        return false;
+    }
+    let Some(body) = &m.body else { return false };
+    matches!(body.instructions.as_slice(), [Instruction::Return])
+}
+
 /// Hash of `td` that's stable across DLL parses where unrelated
 /// types have shifted metadata-table positions.
 pub fn hash_type(td: &TypeDefinition<'_>, res: &Resolution<'_>) -> u64 {
@@ -54,7 +69,14 @@ pub fn method_hash(m: &Method<'_>, res: &Resolution<'_>) -> u64 {
 fn hash_type_inline<H: Hasher>(td: &TypeDefinition<'_>, res: &Resolution<'_>, h: &mut H) {
     td.name.hash(h);
     td.namespace.hash(h);
-    td.flags.hash(h);
+    // `before_field_init` is a compiler-set optimisation hint that
+    // flips together with an empty `.cctor` being elided — same
+    // family of purely-optimisation-driven changes the empty-cctor
+    // filter absorbs. Normalise to a fixed value so we don't punish
+    // its asymmetry.
+    let mut flags = td.flags;
+    flags.before_field_init = false;
+    flags.hash(h);
     if let Some(enc) = td.encloser {
         h.write_u8(1);
         hash_type_def_identity(enc, res, h);
@@ -97,7 +119,12 @@ fn hash_type_inline<H: Hasher>(td: &TypeDefinition<'_>, res: &Resolution<'_>, h:
         hash_event(e, res, h);
     }
 
-    let mut methods: Vec<&Method> = td.methods.iter().collect();
+    // Skip empty static constructors (`.cctor` with just `Return`).
+    // The compiler emits one whenever a class has any static field
+    // initializer; newer C# toolchains elide it when the initializer
+    // constant-folds to nothing, and we don't want that purely-
+    // optimisation-driven flip to register as Changed.
+    let mut methods: Vec<&Method> = td.methods.iter().filter(|m| !is_empty_cctor(m)).collect();
     methods.sort_by(|a, b| {
         a.name.cmp(&b.name).then_with(|| {
             a.signature

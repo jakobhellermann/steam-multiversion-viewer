@@ -22,7 +22,7 @@ const TO_MANIFEST: u64 = 708613018541602983;
 const BRANCH: &str = "public";
 const DLL_PATH: &str = "hollow_knight_Data/Managed/Assembly-CSharp.dll";
 
-const FQN: &str = "BossDoorChallengeUIBindingButton";
+const FQN: &str = "DreamPlantOrb";
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
@@ -104,8 +104,10 @@ fn compare(from_res: &Resolution<'_>, to_res: &Resolution<'_>) {
     }
 
     println!("\nmethods:");
-    let mut from_methods: Vec<_> = from.methods.iter().collect();
-    let mut to_methods: Vec<_> = to.methods.iter().collect();
+    // Drop empty `.cctor`s for the same reason sig.rs does — so the
+    // zip alignment matches what the production hash sees.
+    let mut from_methods: Vec<_> = from.methods.iter().filter(|m| !is_empty_cctor(m)).collect();
+    let mut to_methods: Vec<_> = to.methods.iter().filter(|m| !is_empty_cctor(m)).collect();
     from_methods.sort_by(|a, b| {
         a.name.cmp(&b.name).then_with(|| {
             a.signature
@@ -131,10 +133,24 @@ fn compare(from_res: &Resolution<'_>, to_res: &Resolution<'_>) {
         let from_names: BTreeSet<_> = from_methods.iter().map(|m| m.name.as_ref()).collect();
         let to_names: BTreeSet<_> = to_methods.iter().map(|m| m.name.as_ref()).collect();
         for only_from in from_names.difference(&to_names) {
-            println!("    only in from: {only_from}");
+            let m = from_methods
+                .iter()
+                .find(|m| m.name.as_ref() == *only_from)
+                .unwrap();
+            println!(
+                "    only in from: {only_from}  body={:?}",
+                m.body.as_ref().map(|b| &b.instructions)
+            );
         }
         for only_to in to_names.difference(&from_names) {
-            println!("    only in to:   {only_to}");
+            let m = to_methods
+                .iter()
+                .find(|m| m.name.as_ref() == *only_to)
+                .unwrap();
+            println!(
+                "    only in to:   {only_to}  body={:?}",
+                m.body.as_ref().map(|b| &b.instructions)
+            );
         }
     }
     for (ma, mb) in from_methods.iter().zip(to_methods.iter()) {
@@ -169,7 +185,7 @@ fn compare(from_res: &Resolution<'_>, to_res: &Resolution<'_>) {
 }
 
 use dll_diff::dotnetdll::resolved::types::{BaseType, MemberType, TypeSource};
-use dll_diff::sig::{field_hash, method_hash};
+use dll_diff::sig::{field_hash, is_empty_cctor, method_hash};
 
 fn describe_field_type(
     f: &dll_diff::dotnetdll::prelude::Field<'_>,
