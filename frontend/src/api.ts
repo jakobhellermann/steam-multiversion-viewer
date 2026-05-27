@@ -284,6 +284,21 @@ export type StructuredNode = {
   /// surfaces as a dropdown (multi-select whitelist). Format-specific;
   /// the renderer doesn't interpret keys.
   facets?: Record<string, string>;
+  /// Set on diff-tree nodes; absent for plain (non-diff) structured
+  /// trees. The renderer colours the row when present.
+  status?: NodeStatus;
+  /// Set in diff trees when the matched node has a different id on
+  /// the target side (e.g. Unity renumbered path-ids across the
+  /// patch). Same opaque-string shape as [`id`]; the diff content
+  /// endpoint takes `id` (base) and `target_id` to dump both sides.
+  /// `undefined` either means "non-diff tree" or "diff matched both
+  /// sides with the same id".
+  target_id?: string;
+  /// When true, the content endpoint serves a per-node body for this
+  /// row (a JSON dump, a decompiled type, …). Absent on rows that
+  /// only group or summarise — frontend skips the content fetch and
+  /// shows a placeholder.
+  has_content?: boolean;
   children: StructuredNode[];
 };
 
@@ -296,6 +311,74 @@ export type NodeContent = {
   mime: string;
   text: string;
 };
+
+export type NodeStatus = "unchanged" | "changed" | "added" | "removed";
+
+/// Fetch the structured diff for a file between two manifests.
+/// Returns the same shape as `fetchFileStructured`, with `status` and
+/// optional `object_ref` set on nodes the diff touched. Returns null
+/// on HTTP 415 (caller should fall back to the textual diff).
+export async function fetchStructuredDiff(
+  appid: AppId,
+  baseDepotId: number,
+  baseManifestId: string,
+  baseBranch: string,
+  target: { depot_id: number; manifest_id: string; branch: string },
+  path: string,
+): Promise<StructuredTree | null> {
+  const qs = new URLSearchParams({
+    path,
+    branch: baseBranch,
+    target_depot_id: String(target.depot_id),
+    target_manifest_id: target.manifest_id,
+    target_branch: target.branch,
+  });
+  const r = await fetch(
+    `/api/apps/${appid}/depots/${baseDepotId}/manifests/${baseManifestId}/file/structured-diff?${qs}`,
+  );
+  if (r.status === 415) return null;
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
+export type StructuredDiffNodeContent = {
+  /// `"diff"` when both sides resolved (unified diff text), `"json"`
+  /// for one-sided nodes (the available side's JSON dump).
+  kind: "diff" | "json";
+  text: string;
+};
+
+/// Fetch the per-node body for a structured diff entry. Backend runs
+/// the JSON dump on each side and the text-diff in one shot. `baseId`
+/// / `targetId` are tree-node ids (same opaque-string shape as
+/// `StructuredNode.id`); omit one of them for added/removed nodes.
+export async function fetchStructuredDiffNode(
+  appid: AppId,
+  baseDepotId: number,
+  baseManifestId: string,
+  baseBranch: string,
+  target: { depot_id: number; manifest_id: string; branch: string },
+  path: string,
+  baseId: string | null,
+  targetId: string | null,
+): Promise<StructuredDiffNodeContent> {
+  const qs = new URLSearchParams({
+    path,
+    branch: baseBranch,
+    target_depot_id: String(target.depot_id),
+    target_manifest_id: target.manifest_id,
+    target_branch: target.branch,
+  });
+  if (baseId != null) qs.set("base_id", baseId);
+  if (targetId != null) qs.set("target_id", targetId);
+  const r = await fetch(
+    `/api/apps/${appid}/depots/${baseDepotId}/manifests/${baseManifestId}/file/structured-diff/node?${qs}`,
+  );
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  const ct = r.headers.get("content-type") ?? "";
+  const text = await r.text();
+  return { kind: ct.startsWith("text/x-diff") ? "diff" : "json", text };
+}
 
 /// Fetch the structured tree for a file. The path/branch identify the
 /// file; backend dispatches based on the file's type.

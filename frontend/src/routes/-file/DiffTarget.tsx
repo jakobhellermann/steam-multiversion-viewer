@@ -5,6 +5,7 @@ import type { FileView, ManifestRef } from "../../api";
 import { formatBytes, formatDate } from "../../lib/format";
 import { DiffView } from "./DiffView";
 import { FilePreview } from "./FilePreview";
+import { StructuredDiffView } from "./StructuredDiffView";
 import type { FileLocator } from "./types";
 
 /// Collapsible "diff against another manifest" row. Header summarises
@@ -89,21 +90,15 @@ export function DiffTargetBlock({
               link target: {base.linktarget ?? "—"} → {target.linktarget ?? "—"}
             </p>
           )}
-          {target &&
-            (canDiffText(base) && canDiffText(target) ? (
-              <DiffView
-                appid={baseLocator.appid}
-                base={{
-                  depotId: baseLocator.depotId,
-                  manifestId: baseLocator.manifestId,
-                  branch: baseLocator.branch,
-                }}
-                target={locator}
-                path={baseLocator.path}
-              />
-            ) : (
-              <FilePreview view={target} rawSrc={rawSrc} locator={locator} showHeader={false} />
-            ))}
+          {target && (
+            <DiffBody
+              base={base}
+              target={target}
+              baseLocator={baseLocator}
+              locator={locator}
+              rawSrc={rawSrc}
+            />
+          )}
         </div>
       )}
     </div>
@@ -145,4 +140,52 @@ function signedDelta(delta: number): string {
   if (delta === 0) return "±0 B";
   const sign = delta > 0 ? "+" : "−";
   return `${sign}${formatBytes(Math.abs(delta))}`;
+}
+
+/// Pick the diff renderer based on what the backend says is available
+/// for both sides: structured (tree) when both sides advertise a
+/// `structured` info, text otherwise. Bytes-only files with no
+/// transformer fall through to the target's preview pane.
+function DiffBody({
+  base,
+  target,
+  baseLocator,
+  locator,
+  rawSrc,
+}: {
+  base: FileView | null;
+  target: FileView;
+  baseLocator: FileLocator;
+  locator: FileLocator;
+  rawSrc: string;
+}) {
+  if (base?.structured && target.structured) {
+    return (
+      <StructuredDiffView
+        appid={baseLocator.appid}
+        base={{
+          depotId: baseLocator.depotId,
+          manifestId: baseLocator.manifestId,
+          branch: baseLocator.branch,
+        }}
+        target={locator}
+        path={baseLocator.path}
+      />
+    );
+  }
+  if (canDiffText(base) && canDiffText(target)) {
+    return (
+      <DiffView
+        appid={baseLocator.appid}
+        base={{
+          depotId: baseLocator.depotId,
+          manifestId: baseLocator.manifestId,
+          branch: baseLocator.branch,
+        }}
+        target={locator}
+        path={baseLocator.path}
+      />
+    );
+  }
+  return <FilePreview view={target} rawSrc={rawSrc} locator={locator} showHeader={false} />;
 }

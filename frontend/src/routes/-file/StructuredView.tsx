@@ -4,7 +4,12 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { getRouteApi, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
-import { fetchFileStructured, fetchStructuredNodeContent, type StructuredNode } from "../../api";
+import {
+  fetchFileStructured,
+  fetchStructuredNodeContent,
+  type NodeStatus,
+  type StructuredNode,
+} from "../../api";
 import { langForMime } from "../../lib/syntax";
 import { HighlightedPre } from "./FilePreview";
 import { makePostProcess } from "./markers";
@@ -64,7 +69,20 @@ export function StructuredView({
   // Otherwise tanstack-router happily keeps the previous file's state
   // around when only the `?path=` search param changes.
   return (
-    <Tree key={locator.path} root={tree.data.root} locator={locator} showHeader={showHeader} />
+    <Tree
+      key={locator.path}
+      root={tree.data.root}
+      showHeader={showHeader}
+      mountKey={locator.path}
+      renderContent={({ node, isInTree, onHashTarget }) => (
+        <NodeContentPanel
+          locator={locator}
+          nodeId={node.id}
+          isInTree={isInTree}
+          onHashTarget={onHashTarget}
+        />
+      )}
+    />
   );
 }
 
@@ -75,14 +93,36 @@ function rowDomId(treeUid: string, nodeId: string) {
   return `${treeUid}-${nodeId}`;
 }
 
-function Tree({
+/// Args passed to the `renderContent` prop. The tree component owns
+/// selection state and threads it through so the content pane stays
+/// in lockstep with what's focused in the tree, without the tree
+/// itself knowing how the content is fetched / rendered.
+export type TreeContentRenderArgs = {
+  node: StructuredNode;
+  isInTree: (id: string) => boolean;
+  /// Called by the content pane when it wants to deep-link to another
+  /// row (e.g. a pptr click). Mirrors what the hashchange listener
+  /// does — expand ancestors + focus the target.
+  onHashTarget: (id: string) => void;
+};
+
+export function Tree({
   root,
-  locator,
   showHeader,
+  renderContent,
+  mountKey,
 }: {
   root: StructuredNode;
-  locator: FileLocator;
   showHeader: boolean;
+  /// Renders the right-hand content pane for the currently-selected
+  /// row. Default `StructuredView` wires this up to
+  /// `NodeContentPanel` (locator-based fetch); the diff variant uses
+  /// its own renderer that pairs both sides.
+  renderContent: (args: TreeContentRenderArgs) => React.ReactNode;
+  /// Identifier that changes whenever the file under the tree
+  /// changes. Used to re-focus the tree container — `Tree` itself
+  /// has no notion of "the current file", just a root.
+  mountKey: string;
 }) {
   // IMPORTANT: this component must stay format-agnostic. Don't add
   // logic that branches on a node's `kind` or `id` value — anything
@@ -118,6 +158,15 @@ function Tree({
   // through the tree previews each row's content as you go.
   const [focusedId, setFocusedId] = useState<string>(root.id);
   const selectedId: string | null = focusedId;
+  // Flat lookup so `renderContent` gets the whole node object —
+  // diff-mode reads `target_id` / `status` off it, the non-diff
+  // renderer just needs the id.
+  const nodeById = useMemo(() => {
+    const map = new Map<string, StructuredNode>();
+    walk(root, (n) => map.set(n.id, n));
+    return map;
+  }, [root]);
+  const selectedNode = selectedId ? (nodeById.get(selectedId) ?? null) : null;
 
   // --- Search + facet filter -------------------------------------------------
   const search = fileRoute.useSearch();
@@ -331,7 +380,7 @@ function Tree({
   // arrow keys drive navigation instead of scrolling the page.
   useEffect(() => {
     treeRef.current?.focus({ preventScroll: true });
-  }, [locator.path]);
+  }, [mountKey]);
 
   // Snap focus + expansion onto a `#obj:<path-id>` deep-link target.
   // Used both by the hashchange listener (browser-initiated nav, e.g.
@@ -585,13 +634,12 @@ function Tree({
           </div>
         </div>
         <div className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-3">
-          {selectedId ? (
-            <NodeContentPanel
-              locator={locator}
-              nodeId={selectedId}
-              isInTree={isInTree}
-              onHashTarget={jumpToHashTarget}
-            />
+          {selectedNode ? (
+            renderContent({
+              node: selectedNode,
+              isInTree,
+              onHashTarget: jumpToHashTarget,
+            })
           ) : (
             <p className="text-sm text-slate-500">Pick a node to inspect.</p>
           )}
@@ -739,6 +787,17 @@ function TreeRow({
   onActivate: (id: string) => void;
 }) {
   const { node, depth, hasVisibleChildren: hasChildren } = row;
+  // Status colouring is only set in diff trees — `node.status` stays
+  // undefined elsewhere. Colour the label (not the row background)
+  // so selection / focus rings stay readable on top.
+  const statusLabelClass =
+    node.status === "added"
+      ? "text-emerald-300"
+      : node.status === "removed"
+        ? "text-rose-300"
+        : node.status === "changed"
+          ? "text-amber-200"
+          : "";
   return (
     <div
       id={domId}
@@ -765,11 +824,34 @@ function TreeRow({
       >
         {hasChildren ? (expanded ? "▼︎" : "▶︎") : "·"}
       </span>
-      <span className="flex-1 truncate">
+      <DiffStatusGlyph status={node.status} />
+      <span className={`flex-1 truncate ${statusLabelClass}`}>
         <span>{node.label}</span>
         {node.badge && <span className="ml-2 text-slate-500">{node.badge}</span>}
       </span>
     </div>
+  );
+}
+
+/// Inline `+` / `−` / `~` glyph in diff trees — fixed-width container
+/// so labels line up across rows. Returns null for non-diff trees so
+/// the row layout is unchanged.
+function DiffStatusGlyph({ status }: { status: NodeStatus | undefined }) {
+  if (!status) return null;
+  const glyph =
+    status === "added" ? "+" : status === "removed" ? "−" : status === "changed" ? "~" : " ";
+  const cls =
+    status === "added"
+      ? "text-emerald-400"
+      : status === "removed"
+        ? "text-rose-400"
+        : status === "changed"
+          ? "text-amber-300"
+          : "text-slate-600";
+  return (
+    <span aria-hidden="true" className={`inline-block w-3 text-center ${cls}`}>
+      {glyph}
+    </span>
   );
 }
 
@@ -884,7 +966,7 @@ function FacetDropdown({
   );
 }
 
-function NodeContentPanel({
+export function NodeContentPanel({
   locator,
   nodeId,
   isInTree,
