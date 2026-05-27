@@ -86,13 +86,20 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
 
 /// Unified diff between two object dumps in the exact wire format the
 /// `/file/structured-diff/node` route returns: `target` on the `-`
-/// side, `base` on the `+` side, three lines of context.
+/// side, `base` on the `+` side, three lines of context. Callers
+/// pass human-readable labels (depot/manifest + creation date) that
+/// land in the `--- …` / `+++ …` header — same shape as `/file/diff`.
 #[tracing::instrument(skip_all)]
-pub fn dump_object_json_unified_diff(base: &str, target: &str) -> String {
+pub fn dump_object_json_unified_diff(
+    base: &str,
+    target: &str,
+    base_label: &str,
+    target_label: &str,
+) -> String {
     similar::TextDiff::from_lines(target, base)
         .unified_diff()
         .context_radius(3)
-        .header("target", "base")
+        .header(target_label, base_label)
         .to_string()
 }
 

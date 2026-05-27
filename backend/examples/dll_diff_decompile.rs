@@ -245,7 +245,7 @@ async fn decompile_and_write(
         // empty diff body so it's countable; the file size makes it
         // obvious.
     }
-    let diff = dump_object_json_unified_diff(&to_text, &from_text);
+    let diff = dump_object_json_unified_diff(&to_text, &from_text, "to", "from");
     let path = out_dir.join(format!("{}.diff", sanitize_fqn(fqn)));
     std::fs::write(&path, diff).with_context(|| format!("writing {}", path.display()))?;
     Ok(())

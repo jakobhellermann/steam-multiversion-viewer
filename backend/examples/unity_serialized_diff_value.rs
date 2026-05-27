@@ -69,7 +69,8 @@ async fn main() -> Result<()> {
     let dump_elapsed = started.elapsed();
 
     let diff_started = Instant::now();
-    let diff = dump_value::dump_object_json_unified_diff(&base_text, &target_text);
+    let diff =
+        dump_value::dump_object_json_unified_diff(&base_text, &target_text, "base", "target");
     let diff_elapsed = diff_started.elapsed();
 
     println!(

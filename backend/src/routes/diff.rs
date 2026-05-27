@@ -659,7 +659,8 @@ async fn dll_node_body(
     let store_root = cfg.store_root.clone();
 
     // Open + read whichever side(s) we actually need. Both sides are
-    // independent — try_join.
+    // independent — try_join. Also stash creation_time so the diff
+    // header can carry the human-readable date.
     let want_base = base_type.is_some();
     let want_target = target_type.is_some();
     let base_fut = async {
@@ -669,7 +670,8 @@ async fn dll_node_body(
                     .open_manifest(appid, depot_id, manifest_id, &q.branch)
                     .await?,
             );
-            Ok::<_, ApiError>(Some(dll_side_bytes(&snap, &q.path).await?))
+            let ct = snap.manifest().creation_time;
+            Ok::<_, ApiError>(Some((dll_side_bytes(&snap, &q.path).await?, ct)))
         } else {
             Ok(None)
         }
@@ -686,7 +688,8 @@ async fn dll_node_body(
                     )
                     .await?,
             );
-            Ok::<_, ApiError>(Some(dll_side_bytes(&snap, &q.path).await?))
+            let ct = snap.manifest().creation_time;
+            Ok::<_, ApiError>(Some((dll_side_bytes(&snap, &q.path).await?, ct)))
         } else {
             Ok(None)
         }
@@ -694,7 +697,7 @@ async fn dll_node_body(
     let (base_side, target_side) = tokio::try_join!(base_fut, target_fut)?;
 
     let base_text = match (base_type, base_side.as_ref()) {
-        (Some(t), Some((bytes, sha))) => Some(
+        (Some(t), Some(((bytes, sha), _ct))) => Some(
             crate::dll::decompile_type(&store_root, sha, bytes, t)
                 .await
                 .map_err(|e| ApiError {
@@ -705,7 +708,7 @@ async fn dll_node_body(
         _ => None,
     };
     let target_text = match (target_type, target_side.as_ref()) {
-        (Some(t), Some((bytes, sha))) => Some(
+        (Some(t), Some(((bytes, sha), _ct))) => Some(
             crate::dll::decompile_type(&store_root, sha, bytes, t)
                 .await
                 .map_err(|e| ApiError {
@@ -718,7 +721,22 @@ async fn dll_node_body(
 
     let body = match (base_text, target_text) {
         (Some(b), Some(t)) => {
-            let text = crate::unity::dump_value::dump_object_json_unified_diff(&b, &t);
+            let base_label = diff_label(
+                depot_id,
+                manifest_id,
+                base_side.as_ref().map(|((_, _), ct)| *ct).unwrap_or(0),
+            );
+            let target_label = diff_label(
+                q.target_depot_id,
+                q.target_manifest_id,
+                target_side.as_ref().map(|((_, _), ct)| *ct).unwrap_or(0),
+            );
+            let text = crate::unity::dump_value::dump_object_json_unified_diff(
+                &b,
+                &t,
+                &base_label,
+                &target_label,
+            );
             (
                 [(
                     header::CONTENT_TYPE,
@@ -867,6 +885,16 @@ pub async fn manifest_file_structured_diff_node(
     };
 
     let path = q.path.clone();
+    // Stash creation_time before moving the snapshots into the
+    // blocking task — used to label the diff header.
+    let base_ct = base_snap
+        .as_ref()
+        .map(|s| s.manifest().creation_time)
+        .unwrap_or(0);
+    let target_ct = target_snap
+        .as_ref()
+        .map(|s| s.manifest().creation_time)
+        .unwrap_or(0);
     let base_arc = base_snap.map(Arc::new);
     let target_arc = target_snap.map(Arc::new);
 
@@ -905,7 +933,14 @@ pub async fn manifest_file_structured_diff_node(
     // → unified diff so the frontend can highlight with `lang="diff"`.
     let body = match (base_text, target_text) {
         (Some(b), Some(t)) => {
-            let text = crate::unity::dump_value::dump_object_json_unified_diff(&b, &t);
+            let base_label = diff_label(depot_id, manifest_id, base_ct);
+            let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
+            let text = crate::unity::dump_value::dump_object_json_unified_diff(
+                &b,
+                &t,
+                &base_label,
+                &target_label,
+            );
             (
                 [(
                     header::CONTENT_TYPE,
