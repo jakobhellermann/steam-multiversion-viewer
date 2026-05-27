@@ -703,12 +703,7 @@ pub async fn manifest_file_structured_diff_node(
     // → unified diff so the frontend can highlight with `lang="diff"`.
     let body = match (base_text, target_text) {
         (Some(b), Some(t)) => {
-            let diff = similar::TextDiff::from_lines(&t, &b);
-            let text = diff
-                .unified_diff()
-                .context_radius(3)
-                .header("target", "base")
-                .to_string();
+            let text = crate::unity::dump_value::dump_object_json_unified_diff(&b, &t);
             (
                 [(
                     header::CONTENT_TYPE,

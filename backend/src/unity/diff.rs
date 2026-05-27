@@ -49,6 +49,7 @@ use super::tree::TREE_KIND;
 /// the object list per lookup.
 type BodyIndex<'a> = HashMap<PathId, &'a [u8]>;
 
+#[tracing::instrument(skip_all)]
 fn build_body_index<'a, R: EnvResolver, P>(file: &SerializedFileHandle<'a, R, P>) -> BodyIndex<'a> {
     file.file
         .objects()
@@ -94,6 +95,7 @@ fn obj_id_pair(base: PathId, target: PathId) -> (String, Option<String>) {
 /// Build the structured diff for `path` between the two manifests.
 /// Synchronous; callers from async context must wrap in
 /// `tokio::task::spawn_blocking`.
+#[tracing::instrument(skip_all, fields(path))]
 pub fn build_diff<C: ChunkStore + 'static>(
     base_manifest: Arc<DepotManifestStore<C>>,
     target_manifest: Arc<DepotManifestStore<C>>,
@@ -151,6 +153,7 @@ fn open_side<C: ChunkStore + 'static>(
 /// Per-class object counts. Class identity is stable across patches —
 /// when a class appears on one side only or its count changes, that's
 /// the diff.
+#[tracing::instrument(skip_all)]
 fn diff_class_stats<R: EnvResolver, P: TypeTreeProvider>(
     base: &OpenedSide<R, P>,
     target: &OpenedSide<R, P>,
@@ -242,6 +245,7 @@ type Transforms = BTreeMap<PathId, (Transform, GameObject)>;
 /// is structurally identical. Returns the section node plus the set
 /// of path-ids "covered" on each side so the loose section can skip
 /// what we already accounted for.
+#[tracing::instrument(skip_all)]
 fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
     base: &OpenedSide<R, P>,
     target: &OpenedSide<R, P>,
@@ -262,49 +266,53 @@ fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
     let (matches, unmatched_target) =
         pair_by_key(&base_roots, &target_roots, |(_, _, go)| go.m_Name.clone());
 
-    let mut children: Vec<Node> = Vec::new();
-    for (bi, ti) in matches {
-        let (b_id, b_t, b_go) = base_roots[bi];
-        match ti {
-            Some(ti) => {
-                let (t_id, t_t, t_go) = target_roots[ti];
-                children.push(walk_pair(
-                    &base_file,
-                    &target_file,
-                    &base_bodies,
-                    &target_bodies,
-                    &base_transforms,
-                    &target_transforms,
-                    (b_id, b_t, b_go),
-                    (t_id, t_t, t_go),
-                    &mut covered,
-                )?);
-            }
-            None => {
-                children.push(subtree_one_side(
-                    &base_file,
-                    &base_transforms,
-                    b_id,
-                    b_t,
-                    b_go,
-                    NodeStatus::Added,
-                    &mut covered.base,
-                )?);
+    let children = {
+        let _span = tracing::info_span!("walk_roots", roots = matches.len()).entered();
+        let mut children: Vec<Node> = Vec::new();
+        for (bi, ti) in matches {
+            let (b_id, b_t, b_go) = base_roots[bi];
+            match ti {
+                Some(ti) => {
+                    let (t_id, t_t, t_go) = target_roots[ti];
+                    children.push(walk_pair(
+                        &base_file,
+                        &target_file,
+                        &base_bodies,
+                        &target_bodies,
+                        &base_transforms,
+                        &target_transforms,
+                        (b_id, b_t, b_go),
+                        (t_id, t_t, t_go),
+                        &mut covered,
+                    )?);
+                }
+                None => {
+                    children.push(subtree_one_side(
+                        &base_file,
+                        &base_transforms,
+                        b_id,
+                        b_t,
+                        b_go,
+                        NodeStatus::Added,
+                        &mut covered.base,
+                    )?);
+                }
             }
         }
-    }
-    for ti in unmatched_target {
-        let (t_id, t_t, t_go) = target_roots[ti];
-        children.push(subtree_one_side(
-            &target_file,
-            &target_transforms,
-            t_id,
-            t_t,
-            t_go,
-            NodeStatus::Removed,
-            &mut covered.target,
-        )?);
-    }
+        for ti in unmatched_target {
+            let (t_id, t_t, t_go) = target_roots[ti];
+            children.push(subtree_one_side(
+                &target_file,
+                &target_transforms,
+                t_id,
+                t_t,
+                t_go,
+                NodeStatus::Removed,
+                &mut covered.target,
+            )?);
+        }
+        children
+    };
 
     let base_root_count = base_roots.len();
     let target_root_count = target_roots.len();
@@ -342,6 +350,7 @@ struct Covered {
     target: HashSet<PathId>,
 }
 
+#[tracing::instrument(skip_all)]
 fn collect_transforms<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
 ) -> Result<Transforms> {
@@ -738,6 +747,7 @@ fn component_label<R: EnvResolver, P: TypeTreeProvider>(
 /// material that gained one byte but kept its name shows up as
 /// `changed`; unnamed objects fall back to path-id (often a single
 /// instance per class, so the join still does the right thing).
+#[tracing::instrument(skip_all)]
 fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
     base: &OpenedSide<R, P>,
     target: &OpenedSide<R, P>,
@@ -840,6 +850,7 @@ struct LooseItem {
     path_id: PathId,
 }
 
+#[tracing::instrument(skip_all)]
 fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     covered: &HashSet<PathId>,
@@ -852,6 +863,7 @@ fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
             continue;
         }
         let class_id = obj.m_ClassID;
+        let _obj_span = tracing::info_span!("loose_object", ?class_id, path_id).entered();
         // Try to read `m_Name` for the typical asset shape. Failure
         // is OK — we fall back to a per-pid synthetic name.
         let name = file

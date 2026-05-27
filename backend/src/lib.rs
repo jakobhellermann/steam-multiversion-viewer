@@ -7,6 +7,7 @@
 //! purpose — anything route-shaped (axum handlers, AppState, etc)
 //! stays bin-only.
 
+pub mod config;
 pub mod structured;
 
 #[cfg(feature = "unity")]

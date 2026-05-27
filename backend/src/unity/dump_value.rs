@@ -63,6 +63,18 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     Ok(serde_json::to_string_pretty(&value)?)
 }
 
+/// Unified diff between two object dumps in the exact wire format the
+/// `/file/structured-diff/node` route returns: `target` on the `-`
+/// side, `base` on the `+` side, three lines of context.
+#[tracing::instrument(skip_all)]
+pub fn dump_object_json_unified_diff(base: &str, target: &str) -> String {
+    similar::TextDiff::from_lines(target, base)
+        .unified_diff()
+        .context_radius(3)
+        .header("target", "base")
+        .to_string()
+}
+
 /// Bundle equivalent of [`dump_object_json`]: load the SerializedFile
 /// at `archive_entry` inside the bundle at `bundle_path`, then dump
 /// `path_id` from it. Builds its own [`Environment`] because the env
