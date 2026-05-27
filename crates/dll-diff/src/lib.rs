@@ -24,7 +24,8 @@ use tracing::info_span;
 
 pub use dotnetdll;
 
-mod sig;
+#[doc(hidden)]
+pub mod sig;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

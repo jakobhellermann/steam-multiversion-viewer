@@ -22,8 +22,8 @@ use dotnetdll::resolved::members::{
 };
 use dotnetdll::resolved::signature::{Parameter, ParameterType, ReturnType};
 use dotnetdll::resolved::types::{
-    BaseType, CustomTypeModifier, ExternalTypeReference, LocalVariable, MemberType, MethodType,
-    ResolutionScope, TypeDefinition, TypeSource,
+    BaseType, CustomTypeModifier, LocalVariable, MemberType, MethodType, ResolutionScope,
+    TypeDefinition, TypeSource,
 };
 
 /// Hash of `td` that's stable across DLL parses where unrelated
@@ -31,6 +31,23 @@ use dotnetdll::resolved::types::{
 pub fn hash_type(td: &TypeDefinition<'_>, res: &Resolution<'_>) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     hash_type_inline(td, res, &mut h);
+    h.finish()
+}
+
+/// Diagnostic: hash of a single field's contribution, in the same
+/// shape `hash_type` would use. Exposed for bisecting which sub-piece
+/// of a `Changed` type is actually different.
+pub fn field_hash(f: &Field<'_>, res: &Resolution<'_>) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    hash_field(f, res, &mut h);
+    h.finish()
+}
+
+/// Diagnostic: hash of a single method's contribution. See
+/// [`field_hash`].
+pub fn method_hash(m: &Method<'_>, res: &Resolution<'_>) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    hash_method(m, res, &mut h);
     h.finish()
 }
 
@@ -118,44 +135,42 @@ fn hash_type_def_identity<H: Hasher>(idx: TypeIndex, res: &Resolution<'_>, h: &m
     }
 }
 
-fn hash_type_ref_identity<H: Hasher>(idx: TypeRefIndex, res: &Resolution<'_>, h: &mut H) {
-    hash_external_type_ref(&res[idx], res, h);
-}
-
-fn hash_external_type_ref<H: Hasher>(
-    tr: &ExternalTypeReference<'_>,
-    res: &Resolution<'_>,
-    h: &mut H,
-) {
-    tr.namespace.hash(h);
-    tr.name.hash(h);
-    match tr.scope {
-        ResolutionScope::Nested(enc) => {
-            h.write_u8(0);
-            hash_type_ref_identity(enc, res, h);
-        }
-        ResolutionScope::ExternalModule(m) => {
-            h.write_u8(1);
-            res[m].name.hash(h);
-        }
-        ResolutionScope::CurrentModule => h.write_u8(2),
-        ResolutionScope::Assembly(a) => {
-            h.write_u8(3);
-            res[a].name.hash(h);
-        }
-        ResolutionScope::Exported => h.write_u8(4),
-    }
-}
-
+/// Hash a `UserType` as a C#-level identity: `namespace + name +
+/// encloser-chain`, ignoring whether the type happens to be a
+/// `TypeDefinition` in the current DLL or a `TypeReference` to an
+/// external assembly. The same C# code renders identically for both,
+/// and a type literally moving between assemblies (without changing
+/// any source) shouldn't flip the hash. Encloser-chain is kept so
+/// nested types with the same leaf name in different outer types
+/// still hash distinctly.
 fn hash_user_type<H: Hasher>(u: &UserType, res: &Resolution<'_>, h: &mut H) {
     match u {
         UserType::Definition(idx) => {
-            h.write_u8(0);
-            hash_type_def_identity(*idx, res, h);
+            let td = &res[*idx];
+            td.namespace.hash(h);
+            td.name.hash(h);
+            if let Some(outer) = td.encloser {
+                h.write_u8(1);
+                hash_type_def_identity(outer, res, h);
+            } else {
+                h.write_u8(0);
+            }
         }
         UserType::Reference(idx) => {
-            h.write_u8(1);
-            hash_type_ref_identity(*idx, res, h);
+            let tr = &res[*idx];
+            tr.namespace.hash(h);
+            tr.name.hash(h);
+            // Reference's nested encloser is another TypeRef; treat
+            // its outer the same way for symmetry with Definition.
+            match tr.scope {
+                ResolutionScope::Nested(enc) => {
+                    h.write_u8(1);
+                    let outer = &res[enc];
+                    outer.namespace.hash(h);
+                    outer.name.hash(h);
+                }
+                _ => h.write_u8(0),
+            }
         }
     }
 }
