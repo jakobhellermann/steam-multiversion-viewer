@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["backend"]
+members = ["backend", "crates/dll-diff"]
 
 [profile.dev.package."*"]
 opt-level = 2
@@ -10,3 +10,10 @@ opt-level = 2
 # local checkout so cargo treats them as one.
 # [patch."https://github.com/jakobhellermann/rabex-env"]
 # rabex-env = { path = "../../../../unity/rabex-env" }
+
+# Local patch of dotnetdll: the upstream `#[tracing::instrument]` attrs
+# in `src/convert/{read,write}.rs` capture `ctx: &Context` as a span
+# field, which `Debug`-prints the whole metadata-table snapshot on
+# every span entry. The patched fork switches them all to `skip_all`.
+[patch.crates-io]
+dotnetdll = { path = "../../dotnet/dotnetdll" }
