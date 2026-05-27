@@ -251,6 +251,18 @@ pub fn warm_full_decompile(store_root: &Utf8Path, dll_sha: [u8; 20], dll_bytes: 
     });
 }
 
+/// Blocking equivalent of [`warm_full_decompile`]: runs the warmer
+/// in the caller's task and returns the number of types cached.
+/// Useful when a script wants to pre-fill the cache before its own
+/// per-type pass instead of racing against a background tokio task.
+pub async fn run_full_decompile(
+    store_root: &Utf8Path,
+    dll_sha: &[u8; 20],
+    dll_bytes: &[u8],
+) -> Result<usize, TransformError> {
+    run_warmer(store_root, dll_sha, dll_bytes).await
+}
+
 async fn run_warmer(
     store_root: &Utf8Path,
     dll_sha: &[u8; 20],

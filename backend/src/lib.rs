@@ -8,7 +8,9 @@
 //! stays bin-only.
 
 pub mod config;
+pub mod dll;
 pub mod structured;
+pub mod transform;
 
 #[cfg(feature = "unity")]
 pub mod unity;
