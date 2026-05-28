@@ -141,16 +141,30 @@ function DiffPage() {
         <h1 className="font-mono text-sm break-all">{path}</h1>
         <p className="mt-1 text-xs text-slate-500 tabular-nums">
           {/* Reads left → right as the unified diff does: `target` (old) on -, `base` (new) on +. */}
-          <span className="font-mono text-rose-300">
+          <Link
+            to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
+            params={{
+              appid: appidParam,
+              depotId: String(targetDepotId),
+              manifestId: targetManifestId,
+            }}
+            search={{ branch: targetBranch === "public" ? undefined : targetBranch, path }}
+            className="font-mono text-rose-300 hover:underline"
+          >
             {targetDepotId}/{targetManifestId}
-          </span>
+          </Link>
           {targetCreation > 0 && (
             <span className="ml-1 text-rose-300/70">({formatDate(targetCreation)})</span>
           )}
           <span className="mx-2 text-slate-600">→</span>
-          <span className="font-mono text-emerald-300">
+          <Link
+            to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
+            params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
+            search={{ branch: branch === "public" ? undefined : branch, path }}
+            className="font-mono text-emerald-300 hover:underline"
+          >
             {depotId}/{manifestId}
-          </span>
+          </Link>
           {baseCreation > 0 && (
             <span className="ml-1 text-emerald-300/70">({formatDate(baseCreation)})</span>
           )}
