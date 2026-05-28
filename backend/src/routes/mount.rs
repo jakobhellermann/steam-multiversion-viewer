@@ -4,9 +4,9 @@
 use axum::Json;
 use axum::extract::State;
 
-use crate::error::ApiError;
-use crate::mount::{MountControlError, MountStatus};
+use crate::http::ApiError;
 use crate::state::AppState;
+use crate::state::mount::{MountControlError, MountStatus};
 
 /// Start FUSE mount
 #[utoipa::path(

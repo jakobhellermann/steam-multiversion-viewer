@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod chunk_store;
 mod client;
 mod types;
 

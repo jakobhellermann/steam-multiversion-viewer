@@ -3,7 +3,7 @@
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::error::ApiError;
+use crate::http::ApiError;
 use crate::state::AppState;
 
 pub mod config;

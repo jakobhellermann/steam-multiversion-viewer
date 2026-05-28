@@ -27,7 +27,7 @@ use serde_json::json;
 use steam_depot_vfs::DepotStore;
 use tokio::runtime::Handle;
 
-use crate::extra_manifests::ExtraManifestsStore;
+use super::extra_manifests::ExtraManifestsStore;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient};
 
 #[cfg(target_os = "linux")]

@@ -18,9 +18,9 @@ use steam_depot_vfs::ChunkHash;
 use tokio_stream::wrappers::BroadcastStream;
 use utoipa::ToSchema;
 
-use crate::downloads::{DownloadEvent, DownloadStats, EnqueueSummary};
-use crate::error::ApiError;
+use crate::http::ApiError;
 use crate::state::AppState;
+use crate::state::downloads::{DownloadEvent, DownloadStats, EnqueueSummary};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::{Result, default_branch};

@@ -10,8 +10,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
 
-use crate::error::ApiError;
-use crate::http::ImmutableCache;
+use crate::http::{ApiError, ImmutableCache};
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 use ::transform::Transformer;

@@ -13,8 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::error::ApiError;
-use crate::http::ImmutableCache;
+use crate::http::{ApiError, ImmutableCache};
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 

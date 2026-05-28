@@ -26,8 +26,8 @@ pub struct ExtraManifestEntryDto {
     pub branch: Option<String>,
 }
 
-impl From<crate::extra_manifests::ExtraManifestEntry> for ExtraManifestEntryDto {
-    fn from(e: crate::extra_manifests::ExtraManifestEntry) -> Self {
+impl From<crate::state::extra_manifests::ExtraManifestEntry> for ExtraManifestEntryDto {
+    fn from(e: crate::state::extra_manifests::ExtraManifestEntry) -> Self {
         Self {
             depot_id: e.depot_id,
             manifest_id: e.manifest_id,
@@ -41,7 +41,7 @@ pub struct ExtraManifestsRequest {
     pub entries: Vec<ExtraManifestEntryDto>,
 }
 
-impl From<ExtraManifestEntryDto> for crate::extra_manifests::ExtraManifestEntry {
+impl From<ExtraManifestEntryDto> for crate::state::extra_manifests::ExtraManifestEntry {
     fn from(e: ExtraManifestEntryDto) -> Self {
         Self {
             depot_id: e.depot_id,

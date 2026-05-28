@@ -19,9 +19,9 @@ use steam_depot_vfs::chunk_store::ChunkStore;
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 use utoipa::ToSchema;
 
-use crate::state::Snapshot;
+use super::Snapshot;
+use super::store_index::StoreIndex;
 use crate::steam::{DepotId, ManifestId};
-use crate::store_index::StoreIndex;
 
 /// Coalesce window for the per-file `chunks` SSE events. Multiple chunk
 /// landings inside this window collapse into one event per affected
@@ -302,7 +302,7 @@ impl DownloadManager {
 
     /// Record the start of a CDN-tracked chunk fetch driven by an
     /// out-of-band reader (e.g. rabex-env's bundle/typetree loads via
-    /// [`crate::downloads::TrackedChunkStore`]). Bumps the queued
+    /// [`crate::steam::chunk_store::TrackedChunkStore`]). Bumps the queued
     /// counter so the drawer surfaces in-flight reads that didn't go
     /// through [`enqueue`](Self::enqueue). The size is unknown at this
     /// point — we update `bytes_total` only on completion when we have
@@ -502,70 +502,4 @@ impl DownloadManager {
             }
         }
     }
-}
-
-/// `ChunkStore` wrapper that pipes every fetch through the
-/// [`DownloadManager`] so out-of-band reads — anything that doesn't
-/// go through [`DownloadManager::enqueue`], typically rabex-env's
-/// implicit bundle/typetree loads — still surface in the downloads
-/// drawer with live byte counters and ETA.
-///
-/// Placed between [`CdnChunkStore`](steam_depot_vfs::chunk_store::CdnChunkStore)
-/// and [`FsCacheStore`](steam_depot_vfs::chunk_store::FsCacheStore) so
-/// that disk-cache hits stay invisible (and don't pollute the speed
-/// average with zero-duration "fetches"). Construction is done in
-/// [`crate::state::AppState::open_manifest`] via
-/// `DepotStore::open_depot_manifest_with_chunks`.
-///
-/// Errors and the returned bytes propagate untouched — this is purely
-/// observational.
-pub struct TrackedChunkStore<Inner: steam_depot_vfs::chunk_store::ChunkStore> {
-    inner: Inner,
-    downloads: Arc<DownloadManager>,
-}
-
-impl<Inner: steam_depot_vfs::chunk_store::ChunkStore> TrackedChunkStore<Inner> {
-    pub fn new(inner: Inner, downloads: Arc<DownloadManager>) -> Self {
-        Self { inner, downloads }
-    }
-}
-
-impl<Inner: steam_depot_vfs::chunk_store::ChunkStore> steam_depot_vfs::chunk_store::ChunkStore
-    for TrackedChunkStore<Inner>
-{
-    async fn get(
-        &self,
-        sha: ChunkHash,
-    ) -> std::result::Result<bytes::Bytes, steam_depot_vfs::VfsError> {
-        self.downloads.track_fetch_started(sha);
-        let res = self.inner.get(sha).await;
-        let (report, size) = match &res {
-            Ok(b) => (Ok(()), b.len() as u64),
-            Err(e) => (Err(clone_vfs_error(e)), 0),
-        };
-        self.downloads.track_fetch_completed(sha, size, report);
-        res
-    }
-
-    async fn ensure(&self, sha: ChunkHash) -> std::result::Result<(), steam_depot_vfs::VfsError> {
-        self.downloads.track_fetch_started(sha);
-        let res = self.inner.ensure(sha).await;
-        // ensure() doesn't return the bytes; we don't know the size.
-        // Report 0 so chunks_completed still ticks but bytes_completed
-        // is honest about not having a number.
-        let report = match &res {
-            Ok(()) => Ok(()),
-            Err(e) => Err(clone_vfs_error(e)),
-        };
-        self.downloads.track_fetch_completed(sha, 0, report);
-        res
-    }
-}
-
-/// `VfsError` doesn't implement `Clone`, but the `track_fetch_completed`
-/// signature wants an owned value alongside the original being
-/// propagated. Stringifying preserves the message which is all the
-/// stats path uses (`s.last_error = Some(err.to_string())`).
-fn clone_vfs_error(err: &steam_depot_vfs::VfsError) -> steam_depot_vfs::VfsError {
-    steam_depot_vfs::VfsError::Other(err.to_string().into())
 }

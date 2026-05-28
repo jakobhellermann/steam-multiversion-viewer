@@ -1,13 +1,8 @@
 mod config;
-mod downloads;
-mod error;
-mod extra_manifests;
 mod http;
-mod mount;
 mod routes;
 mod state;
 mod steam;
-mod store_index;
 
 use std::path::{Path, PathBuf};
 
@@ -39,7 +34,7 @@ manifests, and (optionally) expose the depot as a FUSE mount.",
 struct ApiDoc;
 
 async fn scalar_html() -> Html<&'static str> {
-    Html(include_str!("static/scalar.html"))
+    Html(include_str!("../static/scalar.html"))
 }
 
 #[tokio::main]

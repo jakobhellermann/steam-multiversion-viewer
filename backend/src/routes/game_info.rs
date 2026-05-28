@@ -10,8 +10,7 @@ use axum::extract::{Path, Query, State};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::error::ApiError;
-use crate::http::ImmutableCache;
+use crate::http::{ApiError, ImmutableCache};
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 

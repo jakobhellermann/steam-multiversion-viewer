@@ -22,7 +22,7 @@ use steam_vent_depot::{DepotFile, FileKind};
 use tokio::sync::Semaphore;
 use utoipa::ToSchema;
 
-use crate::error::ApiError;
+use crate::http::ApiError;
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 

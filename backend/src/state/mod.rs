@@ -1,3 +1,8 @@
+pub mod downloads;
+pub mod extra_manifests;
+pub mod mount;
+pub mod store_index;
+
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
@@ -7,12 +12,13 @@ use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
 use steam_depot_vfs::fs::DepotManifestStore;
 use steam_depot_vfs::{DepotStore, VfsError};
 
+use self::downloads::DownloadManager;
+use self::extra_manifests::ExtraManifestsStore;
+use self::mount::MountManager;
+use self::store_index::StoreIndex;
 use crate::config::Config;
-use crate::downloads::{DownloadManager, TrackedChunkStore};
-use crate::extra_manifests::ExtraManifestsStore;
-use crate::mount::MountManager;
+use crate::steam::chunk_store::TrackedChunkStore;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient, auth};
-use crate::store_index::StoreIndex;
 
 pub type Snapshot = DepotManifestStore<FsCacheStore<TrackedChunkStore<CdnChunkStore<SteamClient>>>>;
 
