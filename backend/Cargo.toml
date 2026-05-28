@@ -10,7 +10,7 @@ default = ["unity"]
 # the `levelN`/`*.assets`/`globalgamemanagers` transformer dispatch, and
 # anything else in `crate::unity`. Disable to build a viewer with zero
 # unity-specific code.
-unity = ["dep:rabex-env", "dep:rabex-env-steam-depot-vfs"]
+unity = ["transform/unity", "dep:rabex-env", "dep:rabex-env-steam-depot-vfs"]
 
 [dependencies]
 anyhow = "1.0"
@@ -28,6 +28,7 @@ serde_json = "1"
 serde-value = "0.7"
 steam-depot-vfs = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
 dll-diff = { path = "../crates/dll-diff" }
+transform = { path = "../crates/transform", default-features = false }
 steam-vent = "0.5"
 steam-vent-depot = { git = "https://github.com/jakobhellermann/steam-vent-depot" }
 steam-vent-proto = "0.5"

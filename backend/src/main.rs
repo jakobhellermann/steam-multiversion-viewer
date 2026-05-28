@@ -1,5 +1,4 @@
 mod config;
-mod dll;
 mod downloads;
 mod error;
 mod extra_manifests;
@@ -9,10 +8,6 @@ mod routes;
 mod state;
 mod steam;
 mod store_index;
-mod structured;
-mod transform;
-#[cfg(feature = "unity")]
-mod unity;
 
 use std::path::{Path, PathBuf};
 

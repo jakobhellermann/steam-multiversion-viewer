@@ -541,7 +541,7 @@ pub struct FileView {
     /// endpoint will yield text for this file" rather than guessing
     /// from the extension themselves.
     pub transformer: Option<TransformerInfo>,
-    /// Set when the backend can build a [`crate::structured::StructuredTree`]
+    /// Set when the backend can build a [`::transform::structured::StructuredTree`]
     /// for this file. The frontend uses it to decide whether to render
     /// the tree view instead of (or alongside) the plain preview.
     pub structured: Option<StructuredInfo>,
@@ -682,10 +682,9 @@ pub async fn manifest_file(
         chunk_shas.iter().filter(|sha| index.has_chunk(sha)).count() as u32
     };
 
-    let transformer =
-        crate::transform::tools::transformer_for(&file_path).map(|t| TransformerInfo {
-            mime: t.output_mime().to_string(),
-        });
+    let transformer = ::transform::tools::transformer_for(&file_path).map(|t| TransformerInfo {
+        mime: t.output_mime().to_string(),
+    });
     let structured = structured_info_for(&file_path);
 
     Ok(Json(FileView {
@@ -707,14 +706,14 @@ pub async fn manifest_file(
 /// Probe whether the backend has a structured-tree builder for this
 /// file. Keeps the route layer out of feature-cfg territory.
 fn structured_info_for(path: &str) -> Option<StructuredInfo> {
-    use crate::transform::Transformer;
-    match crate::transform::tools::transformer_for(path) {
+    use ::transform::Transformer;
+    match ::transform::tools::transformer_for(path) {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized | Transformer::UnityBundle) => Some(StructuredInfo {
-            kind: crate::unity::serializedfile::tree::TREE_KIND.to_string(),
+            kind: ::transform::unity::serializedfile::tree::TREE_KIND.to_string(),
         }),
         Some(Transformer::Dll) => Some(StructuredInfo {
-            kind: crate::dll::tree::TREE_KIND.to_string(),
+            kind: ::transform::dll::tree::TREE_KIND.to_string(),
         }),
         _ => None,
     }
@@ -833,17 +832,16 @@ pub async fn manifest_file_transformed(
         )
     };
 
-    let transformer =
-        crate::transform::tools::transformer_for(&file_path).ok_or_else(|| ApiError {
-            status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            message: format!("no transformer for {file_path}"),
-        })?;
+    let transformer = ::transform::tools::transformer_for(&file_path).ok_or_else(|| ApiError {
+        status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        message: format!("no transformer for {file_path}"),
+    })?;
 
     let content_type = format!("{}; charset=utf-8", transformer.output_mime());
 
     let cfg = state.config.load();
     // Cache hit short-circuits the (potentially expensive) tool run.
-    if let Some(cached) = crate::transform::read_cached(&cfg.store_root, &file_sha)? {
+    if let Some(cached) = ::transform::read_cached(&cfg.store_root, &file_sha)? {
         return Ok((
             ImmutableCache,
             [(header::CONTENT_TYPE, content_type.clone())],
@@ -857,9 +855,9 @@ pub async fn manifest_file_transformed(
         .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
         .await;
     let text = match transformer {
-        crate::transform::Transformer::Cli(tool) => {
+        ::transform::Transformer::Cli(tool) => {
             let bytes = snapshot.read_full(&file_path).await?;
-            crate::transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
+            ::transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
                 .await
                 .map_err(|e| ApiError {
                     status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -867,10 +865,10 @@ pub async fn manifest_file_transformed(
                 })?
         }
         #[cfg(feature = "unity")]
-        crate::transform::Transformer::UnitySerialized => {
+        ::transform::Transformer::UnitySerialized => {
             run_unity_dump(snapshot.clone(), file_path.clone()).await?
         }
-        crate::transform::Transformer::Dll => {
+        ::transform::Transformer::Dll => {
             return Err(ApiError {
                 status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 message:
@@ -879,7 +877,7 @@ pub async fn manifest_file_transformed(
             });
         }
         #[cfg(feature = "unity")]
-        crate::transform::Transformer::UnityBundle => {
+        ::transform::Transformer::UnityBundle => {
             return Err(ApiError {
                 status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 message: "Unity bundles are served through /file/structured, not /file/transformed"
@@ -899,7 +897,7 @@ async fn run_unity_dump(
     snapshot: Arc<crate::state::Snapshot>,
     path: String,
 ) -> Result<String, ApiError> {
-    tokio::task::spawn_blocking(move || crate::unity::dump_unity_serialized(snapshot, &path))
+    tokio::task::spawn_blocking(move || ::transform::unity::dump_unity_serialized(snapshot, &path))
         .await
         .map_err(|e| ApiError {
             status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,

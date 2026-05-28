@@ -17,8 +17,8 @@ use camino::Utf8Path;
 use super::EntityEntry;
 #[cfg(test)]
 use super::EntityKind;
+use crate::TransformError;
 use crate::structured::{Node, NodeStatus, StructuredTree};
-use crate::transform::TransformError;
 
 /// Tree-`kind` identifier used in [`StructuredTree::kind`]. Same
 /// renderer as the non-diff dll tree; the frontend keys behaviour on

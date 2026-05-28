@@ -1,16 +1,11 @@
 // TODO(ai-review): review for style and correctness
-//! Library face of the viewer. The HTTP server lives in `main.rs`; the
-//! lib re-exports the modules that examples + future external callers
-//! need to drive the same logic standalone (no axum, no state).
+//! Library face of the viewer. The HTTP server lives in `main.rs`;
+//! the `transform` crate houses the format builders + dumpers and is
+//! consumed both here and by the standalone examples.
 //!
-//! Only the format builders + content dumpers are public here on
-//! purpose — anything route-shaped (axum handlers, AppState, etc)
-//! stays bin-only.
+//! Only the configuration façade is public here — anything
+//! route-shaped (axum handlers, AppState, etc.) stays bin-only, and
+//! format-handling lives in the `transform` crate which examples can
+//! depend on directly.
 
 pub mod config;
-pub mod dll;
-pub mod structured;
-pub mod transform;
-
-#[cfg(feature = "unity")]
-pub mod unity;

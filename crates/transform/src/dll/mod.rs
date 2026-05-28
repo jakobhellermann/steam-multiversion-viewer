@@ -26,7 +26,7 @@ use std::sync::Mutex;
 use camino::Utf8Path;
 use tokio::process::Command;
 
-use crate::transform::{TempInput, TransformError, tempfile_for};
+use crate::{TempInput, TransformError, tempfile_for};
 
 pub mod diff;
 pub mod tree;
@@ -98,13 +98,11 @@ pub async fn list_entities(
     dll_sha: &[u8; 20],
     dll_bytes: &[u8],
 ) -> Result<Vec<EntityEntry>, TransformError> {
-    let raw = if let Some(cached) =
-        crate::transform::read_cached_artifact(store_root, dll_sha, "list")?
-    {
+    let raw = if let Some(cached) = crate::read_cached_artifact(store_root, dll_sha, "list")? {
         cached
     } else {
         let raw = run_ilspy(dll_bytes, &["-l", "c i s d e"]).await?;
-        crate::transform::write_cached_artifact(store_root, dll_sha, "list", &raw)?;
+        crate::write_cached_artifact(store_root, dll_sha, "list", &raw)?;
         raw
     };
     Ok(parse_entity_list(&raw))
@@ -165,11 +163,11 @@ pub async fn decompile_type(
 ) -> Result<String, TransformError> {
     let resolved = resolve_outer(store_root, dll_sha, dll_bytes, type_name).await?;
     let artifact = type_artifact_name(&resolved);
-    if let Some(cached) = crate::transform::read_cached_artifact(store_root, dll_sha, &artifact)? {
+    if let Some(cached) = crate::read_cached_artifact(store_root, dll_sha, &artifact)? {
         return Ok(cached);
     }
     let text = run_ilspy(dll_bytes, &["-t", &resolved]).await?;
-    crate::transform::write_cached_artifact(store_root, dll_sha, &artifact, &text)?;
+    crate::write_cached_artifact(store_root, dll_sha, &artifact, &text)?;
     Ok(text)
 }
 
@@ -351,7 +349,7 @@ async fn run_warmer(
             // compress/write roundtrip when both passes happened to
             // touch the same type.
             let artifact = type_artifact_name(&fqn);
-            if crate::transform::read_cached_artifact(store_root, dll_sha, &artifact)
+            if crate::read_cached_artifact(store_root, dll_sha, &artifact)
                 .ok()
                 .flatten()
                 .is_some()
@@ -362,9 +360,7 @@ async fn run_warmer(
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            if crate::transform::write_cached_artifact(store_root, dll_sha, &artifact, &text)
-                .is_ok()
-            {
+            if crate::write_cached_artifact(store_root, dll_sha, &artifact, &text).is_ok() {
                 count += 1;
             }
         }

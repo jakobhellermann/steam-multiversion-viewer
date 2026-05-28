@@ -3,7 +3,7 @@
 //! between the two depot manifests we use as ground-truth, then for
 //! every type dll-diff reports as `Changed` invoke `ilspycmd -t` on
 //! both sides (via the production
-//! [`steam_multiversion_viewer::dll::decompile_type`] path, so the
+//! [`transform::dll::decompile_type`] path, so the
 //! same on-disk cache the viewer uses gets populated) and write the
 //! unified diff to a per-type file under `OUT_DIR`. Browsing the
 //! `OUT_DIR` afterwards lets us eyeball what dll-diff flags as
@@ -27,11 +27,11 @@ use dll_diff::Status;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
-use steam_multiversion_viewer::dll;
-use steam_multiversion_viewer::unity::serializedfile::dump_value::dump_object_json_unified_diff;
 use tokio::sync::Semaphore;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use transform::dll;
+use transform::unity::serializedfile::dump_value::dump_object_json_unified_diff;
 
 const APP_ID: u32 = 367520;
 const DEPOT_ID: u32 = 367523;

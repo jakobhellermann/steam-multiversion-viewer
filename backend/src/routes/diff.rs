@@ -440,9 +440,9 @@ async fn resolve_diff_text(
         )
     };
 
-    if let Some(transformer) = crate::transform::tools::transformer_for(&file_path) {
+    if let Some(transformer) = ::transform::tools::transformer_for(&file_path) {
         let cfg = state.config.load();
-        if let Some(cached) = crate::transform::read_cached(&cfg.store_root, &file_sha)? {
+        if let Some(cached) = ::transform::read_cached(&cfg.store_root, &file_sha)? {
             return Ok(DiffSide {
                 text: cached,
                 creation_time,
@@ -453,9 +453,9 @@ async fn resolve_diff_text(
             .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
             .await;
         let text = match transformer {
-            crate::transform::Transformer::Cli(tool) => {
+            ::transform::Transformer::Cli(tool) => {
                 let bytes = snapshot.read_full(&file_path).await?;
-                crate::transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
+                ::transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
                     .await
                     .map_err(|e| ApiError {
                         status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -463,11 +463,11 @@ async fn resolve_diff_text(
                     })?
             }
             #[cfg(feature = "unity")]
-            crate::transform::Transformer::UnitySerialized => {
+            ::transform::Transformer::UnitySerialized => {
                 let snapshot = snapshot.clone();
                 let file_path = file_path.clone();
                 tokio::task::spawn_blocking(move || {
-                    crate::unity::dump_unity_serialized(snapshot, &file_path)
+                    ::transform::unity::dump_unity_serialized(snapshot, &file_path)
                 })
                 .await
                 .map_err(|e| ApiError {
@@ -479,7 +479,7 @@ async fn resolve_diff_text(
                     message: e.to_string(),
                 })?
             }
-            crate::transform::Transformer::Dll => {
+            ::transform::Transformer::Dll => {
                 // .NET assemblies don't have a single text dump to
                 // diff — they're inherently per-type. A future
                 // structured-diff endpoint can cover this; for now
@@ -490,7 +490,7 @@ async fn resolve_diff_text(
                 });
             }
             #[cfg(feature = "unity")]
-            crate::transform::Transformer::UnityBundle => {
+            ::transform::Transformer::UnityBundle => {
                 // Bundles contain multiple SerializedFiles; a single
                 // text dump for diff is awkward and the structured
                 // tree carries the actual signal. Punt for now.
@@ -565,11 +565,11 @@ pub async fn manifest_file_structured_diff(
     Query(q): Query<StructuredDiffQuery>,
 ) -> Result<(
     crate::http::ImmutableCache,
-    Json<crate::structured::StructuredTree>,
+    Json<::transform::structured::StructuredTree>,
 )> {
-    use crate::transform::Transformer;
+    use ::transform::Transformer;
 
-    let kind = crate::transform::tools::transformer_for(&q.path);
+    let kind = ::transform::tools::transformer_for(&q.path);
 
     // Open both manifests + pre-download the file's chunks on each
     // side in parallel — both passes are needed before we can hand the
@@ -590,7 +590,7 @@ pub async fn manifest_file_structured_diff(
         Some(Transformer::UnitySerialized) => {
             let path = q.path.clone();
             tokio::task::spawn_blocking(move || {
-                crate::unity::serializedfile::diff::build_diff(base, target, &path)
+                ::transform::unity::serializedfile::diff::build_diff(base, target, &path)
             })
             .await
             .map_err(|e| ApiError {
@@ -605,7 +605,7 @@ pub async fn manifest_file_structured_diff(
         Some(Transformer::UnityBundle) => {
             let path = q.path.clone();
             tokio::task::spawn_blocking(move || {
-                crate::unity::bundle::build_diff(base, target, &path)
+                ::transform::unity::bundle::build_diff(base, target, &path)
             })
             .await
             .map_err(|e| ApiError {
@@ -628,7 +628,7 @@ pub async fn manifest_file_structured_diff(
             // `from = target` and `to = base`.
             let (to_bytes, to_sha) = dll_side_bytes(&base, &q.path).await?;
             let (from_bytes, from_sha) = dll_side_bytes(&target, &q.path).await?;
-            let tree = crate::dll::diff::build_tree(
+            let tree = ::transform::dll::diff::build_tree(
                 &store_root,
                 &from_sha,
                 &from_bytes,
@@ -645,8 +645,8 @@ pub async fn manifest_file_structured_diff(
             // Per-type lazy decompile calls from the node endpoint then
             // hit the cache instead of spawning a fresh `ilspycmd -t`.
             // Idempotent: skipped if already warming this sha.
-            crate::dll::warm_full_decompile(&store_root, from_sha, from_bytes);
-            crate::dll::warm_full_decompile(&store_root, to_sha, to_bytes);
+            ::transform::dll::warm_full_decompile(&store_root, from_sha, from_bytes);
+            ::transform::dll::warm_full_decompile(&store_root, to_sha, to_bytes);
             tree
         }
         _ => {
@@ -688,11 +688,11 @@ async fn dll_side_bytes(
 /// same `base:` / `target:` / `mod:` shapes that [`split_diff_id`]
 /// handles. We split that first, then strip `archive:<entry>/` from
 /// each per-side id to land back at a plain `obj:<pid>` we can dump
-/// with [`crate::unity::serializedfile::dump_value::dump_bundle_object_json`].
+/// with [`::transform::unity::serializedfile::dump_value::dump_bundle_object_json`].
 ///
 /// One-sided rows from a fully-Added or fully-Removed archive entry
 /// have no `base:`/`target:` wrapper (the prefix-id pass inside
-/// [`crate::unity::bundle::one_sided_entry`] doesn't add one) — there
+/// [`::transform::unity::bundle::one_sided_entry`] doesn't add one) — there
 /// we fall back to attempting both sides and returning whichever has
 /// the object. The missing-side errors get swallowed silently rather
 /// than 500ing the request.
@@ -707,8 +707,8 @@ async fn bundle_node_body(
     /// Pull `(archive_entry, obj_pid)` out of a per-side inner id of
     /// the shape `archive:<entry>/obj:<pid>`.
     fn parse_bundle_inner(id: &str) -> Option<(String, i64)> {
-        let (entry, inner) = crate::unity::bundle::parse_archive_id(id)?;
-        let pid = crate::unity::serializedfile::tree::parse_object_node_id(inner)?;
+        let (entry, inner) = ::transform::unity::bundle::parse_archive_id(id)?;
+        let pid = ::transform::unity::serializedfile::tree::parse_object_node_id(inner)?;
         Some((entry.to_string(), pid))
     }
 
@@ -761,9 +761,9 @@ async fn bundle_node_body(
     let bundle_path = q.path.clone();
 
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
-        use crate::unity::serializedfile::dump_value::DumpSide;
+        use ::transform::unity::serializedfile::dump_value::DumpSide;
         let b = base_arc.zip(base_target).map(|(snap, (entry, pid))| {
-            crate::unity::serializedfile::dump_value::dump_bundle_object_json(
+            ::transform::unity::serializedfile::dump_value::dump_bundle_object_json(
                 snap,
                 &bundle_path,
                 &entry,
@@ -772,7 +772,7 @@ async fn bundle_node_body(
             )
         });
         let t = target_arc.zip(target_target).map(|(snap, (entry, pid))| {
-            crate::unity::serializedfile::dump_value::dump_bundle_object_json(
+            ::transform::unity::serializedfile::dump_value::dump_bundle_object_json(
                 snap,
                 &bundle_path,
                 &entry,
@@ -800,12 +800,13 @@ async fn bundle_node_body(
         (Some(b), Some(t)) => {
             let base_label = diff_label(depot_id, manifest_id, base_ct);
             let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
-            let text = crate::unity::serializedfile::dump_value::dump_object_json_unified_diff(
-                &b,
-                &t,
-                &base_label,
-                &target_label,
-            );
+            let text =
+                ::transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
+                    &b,
+                    &t,
+                    &base_label,
+                    &target_label,
+                );
             (
                 [(
                     header::CONTENT_TYPE,
@@ -846,7 +847,7 @@ async fn bundle_node_body(
 
 /// Per-node body for the Dll structured-diff route. `base_id` /
 /// `target_id` are `type:<FQN>` ids from
-/// [`crate::dll::diff::build_tree`]; we decompile the type via
+/// [`::transform::dll::diff::build_tree`]; we decompile the type via
 /// `ilspycmd -t` on each side (cached) and return either a unified
 /// diff of the two C# texts (both-sided) or the available text
 /// verbatim (added/removed).
@@ -913,7 +914,7 @@ async fn dll_node_body(
 
     let base_text = match (base_type, base_side.as_ref()) {
         (Some(t), Some(((bytes, sha), _ct))) => Some(
-            crate::dll::decompile_type(&store_root, sha, bytes, t)
+            ::transform::dll::decompile_type(&store_root, sha, bytes, t)
                 .await
                 .map_err(|e| ApiError {
                     status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -924,7 +925,7 @@ async fn dll_node_body(
     };
     let target_text = match (target_type, target_side.as_ref()) {
         (Some(t), Some(((bytes, sha), _ct))) => Some(
-            crate::dll::decompile_type(&store_root, sha, bytes, t)
+            ::transform::dll::decompile_type(&store_root, sha, bytes, t)
                 .await
                 .map_err(|e| ApiError {
                     status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -946,12 +947,13 @@ async fn dll_node_body(
                 q.target_manifest_id,
                 target_side.as_ref().map(|((_, _), ct)| *ct).unwrap_or(0),
             );
-            let text = crate::unity::serializedfile::dump_value::dump_object_json_unified_diff(
-                &b,
-                &t,
-                &base_label,
-                &target_label,
-            );
+            let text =
+                ::transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
+                    &b,
+                    &t,
+                    &base_label,
+                    &target_label,
+                );
             (
                 [(
                     header::CONTENT_TYPE,
@@ -1046,9 +1048,9 @@ pub async fn manifest_file_structured_diff_node(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<StructuredDiffNodeQuery>,
 ) -> Result<(crate::http::ImmutableCache, Response)> {
-    use crate::transform::Transformer;
+    use ::transform::Transformer;
 
-    let kind = crate::transform::tools::transformer_for(&q.path);
+    let kind = ::transform::tools::transformer_for(&q.path);
     match kind {
         Some(Transformer::UnitySerialized)
         | Some(Transformer::UnityBundle)
@@ -1074,7 +1076,7 @@ pub async fn manifest_file_structured_diff_node(
     // headers, class-stats rows) have no per-object content and bail
     // out with `None` here.
     fn parse_obj_id(node_id: &str) -> Option<i64> {
-        crate::unity::serializedfile::tree::parse_object_node_id(node_id)
+        ::transform::unity::serializedfile::tree::parse_object_node_id(node_id)
     }
     let (base_inner, target_inner) = split_diff_id(&q.node_id);
     let base_pid = base_inner.and_then(parse_obj_id);
@@ -1120,11 +1122,11 @@ pub async fn manifest_file_structured_diff_node(
     let target_arc = target_snap.map(Arc::new);
 
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
-        use crate::unity::serializedfile::dump_value::DumpSide;
+        use ::transform::unity::serializedfile::dump_value::DumpSide;
         let b = base_arc
             .zip(base_pid)
             .map(|(snap, pid)| {
-                crate::unity::serializedfile::dump_value::dump_object_json(
+                ::transform::unity::serializedfile::dump_value::dump_object_json(
                     snap,
                     &path,
                     pid,
@@ -1135,7 +1137,7 @@ pub async fn manifest_file_structured_diff_node(
         let t = target_arc
             .zip(target_pid)
             .map(|(snap, pid)| {
-                crate::unity::serializedfile::dump_value::dump_object_json(
+                ::transform::unity::serializedfile::dump_value::dump_object_json(
                     snap,
                     &path,
                     pid,
@@ -1166,12 +1168,13 @@ pub async fn manifest_file_structured_diff_node(
         (Some(b), Some(t)) => {
             let base_label = diff_label(depot_id, manifest_id, base_ct);
             let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
-            let text = crate::unity::serializedfile::dump_value::dump_object_json_unified_diff(
-                &b,
-                &t,
-                &base_label,
-                &target_label,
-            );
+            let text =
+                ::transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
+                    &b,
+                    &t,
+                    &base_label,
+                    &target_label,
+                );
             (
                 [(
                     header::CONTENT_TYPE,

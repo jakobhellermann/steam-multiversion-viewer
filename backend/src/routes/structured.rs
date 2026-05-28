@@ -14,8 +14,8 @@ use crate::error::ApiError;
 use crate::http::ImmutableCache;
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
-use crate::structured::{NodeContent, StructuredTree};
-use crate::transform::Transformer;
+use ::transform::Transformer;
+use ::transform::structured::{NodeContent, StructuredTree};
 
 use super::{FileViewQuery, Result};
 
@@ -72,12 +72,12 @@ pub async fn manifest_file_structured(
         .await;
 
     let path = q.path.clone();
-    match crate::transform::tools::transformer_for(&path) {
+    match ::transform::tools::transformer_for(&path) {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
             let snapshot_for_blocking = snapshot.clone();
             let tree = tokio::task::spawn_blocking(move || {
-                crate::unity::serializedfile::tree::build_tree(snapshot_for_blocking, &path)
+                ::transform::unity::serializedfile::tree::build_tree(snapshot_for_blocking, &path)
             })
             .await
             .map_err(|e| ApiError {
@@ -94,7 +94,7 @@ pub async fn manifest_file_structured(
         Some(Transformer::UnityBundle) => {
             let snapshot_for_blocking = snapshot.clone();
             let tree = tokio::task::spawn_blocking(move || {
-                crate::unity::bundle::build_tree(snapshot_for_blocking, &path)
+                ::transform::unity::bundle::build_tree(snapshot_for_blocking, &path)
             })
             .await
             .map_err(|e| ApiError {
@@ -110,16 +110,17 @@ pub async fn manifest_file_structured(
         Some(Transformer::Dll) => {
             let cfg = state.config.load();
             let bytes = snapshot.read_full(&path).await?;
-            let tree = crate::dll::tree::build_tree(&cfg.store_root, &file_sha, &bytes, &path)
-                .await
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: e.to_string(),
-                })?;
+            let tree =
+                ::transform::dll::tree::build_tree(&cfg.store_root, &file_sha, &bytes, &path)
+                    .await
+                    .map_err(|e| ApiError {
+                        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        message: e.to_string(),
+                    })?;
             // Kick off the bulk `-p` decompile in the background so
             // follow-up type clicks become cache hits. Dedups per-sha
             // inside the warmer.
-            crate::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
+            ::transform::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
             Ok((ImmutableCache, Json(tree)))
         }
         _ => Err(ApiError {
@@ -165,14 +166,14 @@ pub async fn manifest_file_structured_node(
             message: format!("file not in manifest: {}", q.path),
         })?;
 
-    match crate::transform::tools::transformer_for(&q.path) {
+    match ::transform::tools::transformer_for(&q.path) {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
             // Resolve the node id to a path-id; non-object ids
             // (section headers, class-stats rows) get an empty body so
             // the frontend hides the panel.
             let Some(path_id) =
-                crate::unity::serializedfile::tree::parse_object_node_id(&q.node_id)
+                ::transform::unity::serializedfile::tree::parse_object_node_id(&q.node_id)
             else {
                 return Ok((
                     ImmutableCache,
@@ -184,11 +185,11 @@ pub async fn manifest_file_structured_node(
             };
             let path = q.path.clone();
             let text = tokio::task::spawn_blocking(move || {
-                crate::unity::serializedfile::dump_value::dump_object_json(
+                ::transform::unity::serializedfile::dump_value::dump_object_json(
                     snapshot,
                     &path,
                     path_id,
-                    crate::unity::serializedfile::dump_value::DumpSide::None,
+                    ::transform::unity::serializedfile::dump_value::DumpSide::None,
                 )
             })
             .await
@@ -214,7 +215,8 @@ pub async fn manifest_file_structured_node(
             // (`archive:<entry>/obj:<pid>`) so the dump can find the
             // right SerializedFile inside the container. Non-object ids
             // (archive headers, sections, raw blobs) get an empty body.
-            let Some((archive_entry, inner)) = crate::unity::bundle::parse_archive_id(&q.node_id)
+            let Some((archive_entry, inner)) =
+                ::transform::unity::bundle::parse_archive_id(&q.node_id)
             else {
                 return Ok((
                     ImmutableCache,
@@ -224,7 +226,8 @@ pub async fn manifest_file_structured_node(
                     }),
                 ));
             };
-            let Some(path_id) = crate::unity::serializedfile::tree::parse_object_node_id(inner)
+            let Some(path_id) =
+                ::transform::unity::serializedfile::tree::parse_object_node_id(inner)
             else {
                 return Ok((
                     ImmutableCache,
@@ -237,12 +240,12 @@ pub async fn manifest_file_structured_node(
             let bundle_path = q.path.clone();
             let archive_entry = archive_entry.to_string();
             let text = tokio::task::spawn_blocking(move || {
-                crate::unity::serializedfile::dump_value::dump_bundle_object_json(
+                ::transform::unity::serializedfile::dump_value::dump_bundle_object_json(
                     snapshot,
                     &bundle_path,
                     &archive_entry,
                     path_id,
-                    crate::unity::serializedfile::dump_value::DumpSide::None,
+                    ::transform::unity::serializedfile::dump_value::DumpSide::None,
                 )
             })
             .await
@@ -276,12 +279,13 @@ pub async fn manifest_file_structured_node(
             };
             let cfg = state.config.load();
             let bytes = snapshot.read_full(&q.path).await?;
-            let text = crate::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
-                .await
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: e.to_string(),
-                })?;
+            let text =
+                ::transform::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
+                    .await
+                    .map_err(|e| ApiError {
+                        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        message: e.to_string(),
+                    })?;
             Ok((
                 ImmutableCache,
                 Json(NodeContent {

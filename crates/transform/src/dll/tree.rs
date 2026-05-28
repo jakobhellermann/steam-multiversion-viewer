@@ -27,8 +27,8 @@ use camino::Utf8Path;
 use super::EntityEntry;
 #[cfg(test)]
 use super::EntityKind;
+use crate::TransformError;
 use crate::structured::{Node, StructuredTree};
-use crate::transform::TransformError;
 
 /// Tree-`kind` identifier used in [`StructuredTree::kind`]. The
 /// frontend keys off this to pick renderer behaviour.

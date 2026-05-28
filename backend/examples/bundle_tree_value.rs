@@ -6,9 +6,9 @@ use anyhow::Result;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
-use steam_multiversion_viewer::unity::serializedfile::dump_value;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use transform::unity::serializedfile::dump_value;
 
 const APP_ID: u32 = 1030300;
 const DEPOT_ID: u32 = 1030303;

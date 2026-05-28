@@ -5,7 +5,7 @@
 //! tempfiles, and process spawn lives in `mod.rs` — this module only
 //! declares "which tool runs on what extension".
 
-use crate::transform::{CliTool, Transformer};
+use crate::{CliTool, Transformer};
 
 /// Resolve a file path to the transformer that should produce its text
 /// rendering. Returns `None` when no transformer is registered.

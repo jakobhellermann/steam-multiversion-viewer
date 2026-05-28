@@ -16,8 +16,6 @@ use std::process::Stdio;
 use camino::Utf8Path;
 use tokio::process::Command;
 
-pub mod tools;
-
 /// A CLI tool that takes a file path as its last positional argument
 /// and writes the text rendering to stdout. Lives as a `const` in
 /// `tools.rs`.
@@ -209,10 +207,10 @@ async fn run(tool: &CliTool, input_bytes: &[u8]) -> Result<String, TransformErro
 }
 
 /// Hold the temp file in scope so it's removed when we're done with it.
-pub(crate) struct TempInput(std::path::PathBuf);
+pub struct TempInput(std::path::PathBuf);
 
 impl TempInput {
-    pub(crate) fn path(&self) -> &std::path::Path {
+    pub fn path(&self) -> &std::path::Path {
         &self.0
     }
 }
@@ -223,7 +221,7 @@ impl Drop for TempInput {
     }
 }
 
-pub(crate) fn tempfile_for(bytes: &[u8]) -> Result<TempInput, std::io::Error> {
+pub fn tempfile_for(bytes: &[u8]) -> Result<TempInput, std::io::Error> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["backend", "crates/dll-diff"]
+members = ["backend", "crates/dll-diff", "crates/transform"]
 
 [profile.dev.package."*"]
 opt-level = 2
