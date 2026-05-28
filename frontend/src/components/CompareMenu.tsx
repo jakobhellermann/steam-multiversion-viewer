@@ -1,10 +1,12 @@
 // TODO(ai-review): review for style and correctness
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchFileDiffTargets,
+  fetchGameInfo,
   type AppInfo,
   type ExtraManifestEntry,
+  type GameInfo,
   type ManifestRef,
   type ManifestStatusEntry,
 } from "../api";
@@ -247,6 +249,30 @@ export function CompareMenu({
     }
   }, [open, visibleGroups, activeDepotId]);
 
+  // Game version per candidate. Read from the same `/game_info` query
+  // key shape that AppDetail and ManifestDetail use, so cache hits
+  // make the lookup free here. Only enabled while the menu is open so
+  // a passive file-detail page doesn't kick off N requests at mount.
+  const candidates = useMemo(() => visibleGroups.flatMap((g) => g.candidates), [visibleGroups]);
+  const gameInfoQueries = useQueries({
+    queries: candidates.map((c) => ({
+      queryKey: ["game-info", appInfo.appid, c.depotId, c.manifestId, c.branch],
+      queryFn: () => fetchGameInfo(appInfo.appid, c.depotId, c.manifestId, c.branch),
+      enabled: open,
+      staleTime: Infinity,
+      gcTime: 30 * 60 * 1000,
+    })),
+  });
+  const bundleVersionByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    candidates.forEach((c, i) => {
+      const data = gameInfoQueries[i]?.data as GameInfo | undefined;
+      const v = data?.engine?.engine === "unity" ? data.engine.data.bundle_version : undefined;
+      if (v) map.set(c.key, v);
+    });
+    return map;
+  }, [candidates, gameInfoQueries]);
+
   const activeGroup = visibleGroups.find((g) => g.depotId === activeDepotId) ?? visibleGroups[0];
   const toggle = (key: string) => {
     const next = new Set(selected);
@@ -397,11 +423,12 @@ export function CompareMenu({
                           </span>
                         </span>
                         <span
-                          className={`font-mono text-xs tabular-nums ${
+                          className={`text-xs tabular-nums ${
                             checked ? "text-sky-400/70" : "text-slate-500"
-                          }`}
+                          } ${bundleVersionByKey.has(c.key) ? "" : "font-mono"}`}
+                          title={bundleVersionByKey.has(c.key) ? c.manifestId : undefined}
                         >
-                          {c.manifestId.slice(0, 8)}…
+                          {bundleVersionByKey.get(c.key) ?? `${c.manifestId.slice(0, 8)}…`}
                         </span>
                       </a>
                     </li>
