@@ -99,7 +99,7 @@ impl AppState {
         branch: &str,
     ) -> Result<Snapshot, VfsError> {
         let started = Instant::now();
-        let downloads = self.downloads.clone();
+        let downloads = Arc::clone(&self.downloads);
         let snap = self
             .store
             .open_depot_manifest_with_chunks(

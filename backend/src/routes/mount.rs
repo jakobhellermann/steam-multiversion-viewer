@@ -1,6 +1,8 @@
 // TODO(ai-review): review for style and correctness
 //! `/api/mount/*` — toggle the FUSE filesystem and report its state.
 
+use std::sync::Arc;
+
 use axum::Json;
 use axum::extract::State;
 
@@ -32,8 +34,8 @@ pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, A
         .start_with(
             mountpoint,
             tokio::runtime::Handle::current(),
-            state.steam.clone(),
-            state.store.clone(),
+            Arc::clone(&state.steam),
+            Arc::clone(&state.store),
             index_snapshot.into_iter(),
             &state.extra_manifests,
         )
@@ -73,9 +75,6 @@ fn mount_err(e: MountControlError) -> ApiError {
         MountControlError::Unsupported => StatusCode::NOT_IMPLEMENTED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
-    // The catch-all `impl From<E> for ApiError` would log, but we go
-    // through `ApiError::new` so we can pick a specific status — emit
-    // the same trace by hand so failures aren't silent.
     tracing::error!(error = %e, source = ?source_chain(&e), "mount control failed");
     ApiError::new(status, e.to_string())
 }

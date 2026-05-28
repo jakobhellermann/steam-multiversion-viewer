@@ -162,10 +162,7 @@ pub async fn manifest_file(
             .files
             .iter()
             .find(|f| f.path == q.path)
-            .ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::NOT_FOUND,
-                message: format!("file not in manifest: {}", q.path),
-            })?;
+            .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
         (
             file.path.clone(),
             file.size,
@@ -300,10 +297,7 @@ pub async fn manifest_file_raw(
             .files
             .iter()
             .find(|f| f.path == q.path)
-            .ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::NOT_FOUND,
-                message: format!("file not in manifest: {}", q.path),
-            })?;
+            .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
         (
             file.path.clone(),
             ManifestFileKind::from(file.kind),
@@ -315,10 +309,7 @@ pub async fn manifest_file_raw(
     };
 
     if !matches!(file_kind, ManifestFileKind::File) {
-        return Err(ApiError {
-            status: axum::http::StatusCode::BAD_REQUEST,
-            message: format!("not a file: {file_path}"),
-        });
+        return Err(ApiError::bad_request(format!("not a file: {file_path}")));
     }
 
     state
@@ -374,14 +365,10 @@ pub async fn manifest_file_transformed(
             .files
             .iter()
             .find(|f| f.path == q.path)
-            .ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::NOT_FOUND,
-                message: format!("file not in manifest: {}", q.path),
-            })?;
-        let sha = file.sha.ok_or_else(|| ApiError {
-            status: axum::http::StatusCode::BAD_REQUEST,
-            message: format!("file has no content sha: {}", q.path),
-        })?;
+            .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
+        let sha = file
+            .sha
+            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {}", q.path)))?;
         (
             file.path.clone(),
             sha,
@@ -392,9 +379,8 @@ pub async fn manifest_file_transformed(
         )
     };
 
-    let transformer = transform::tools::transformer_for(&file_path).ok_or_else(|| ApiError {
-        status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        message: format!("no transformer for {file_path}"),
+    let transformer = transform::tools::transformer_for(&file_path).ok_or_else(|| {
+        ApiError::unsupported_media_type(format!("no transformer for {file_path}"))
     })?;
 
     let content_type = format!("{}; charset=utf-8", transformer.output_mime());
@@ -419,10 +405,7 @@ pub async fn manifest_file_transformed(
             let bytes = snapshot.read_full(&file_path).await?;
             transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
                 .await
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: e.to_string(),
-                })?
+                .map_err(|e| ApiError::internal(e.to_string()))?
         }
         #[cfg(feature = "unity")]
         transform::Transformer::UnitySerialized => {
@@ -438,20 +421,15 @@ pub async fn manifest_file_transformed(
             .await?
         }
         transform::Transformer::Dll => {
-            return Err(ApiError {
-                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message:
-                    ".NET assemblies are served through /file/structured, not /file/transformed"
-                        .to_string(),
-            });
+            return Err(ApiError::unsupported_media_type(
+                ".NET assemblies are served through /file/structured, not /file/transformed",
+            ));
         }
         #[cfg(feature = "unity")]
         transform::Transformer::UnityBundle => {
-            return Err(ApiError {
-                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message: "Unity bundles are served through /file/structured, not /file/transformed"
-                    .to_string(),
-            });
+            return Err(ApiError::unsupported_media_type(
+                "Unity bundles are served through /file/structured, not /file/transformed",
+            ));
         }
     };
 
@@ -474,22 +452,15 @@ async fn run_unity_dump(
     let scratch = state
         .manifest_cache
         .scratch(appid, depot_id, manifest_id, branch);
-    let unity = scratch.unity(snapshot).ok_or_else(|| ApiError {
-        status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        message: "manifest is not a unity game".into(),
-    })?;
+    let unity = scratch
+        .unity(snapshot)
+        .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
     let env = unity.env.clone();
     let data_dir = unity.data_dir();
     tokio::task::spawn_blocking(move || {
         transform::unity::dump_unity_serialized(&env, &data_dir, &path)
     })
     .await
-    .map_err(|e| ApiError {
-        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        message: format!("unity dump task panicked: {e}"),
-    })?
-    .map_err(|e| ApiError {
-        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        message: e.to_string(),
-    })
+    .map_err(|e| ApiError::internal(format!("unity dump task panicked: {e}")))?
+    .map_err(|e| ApiError::internal(e.to_string()))
 }

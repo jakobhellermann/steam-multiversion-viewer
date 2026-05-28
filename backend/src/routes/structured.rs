@@ -54,14 +54,10 @@ pub async fn manifest_file_structured(
             .files
             .iter()
             .find(|f| f.path == q.path)
-            .ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::NOT_FOUND,
-                message: format!("file not in manifest: {}", q.path),
-            })?;
-        let sha = file.sha.ok_or_else(|| ApiError {
-            status: axum::http::StatusCode::BAD_REQUEST,
-            message: format!("file has no content sha: {}", q.path),
-        })?;
+            .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
+        let sha = file
+            .sha
+            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {}", q.path)))?;
         (
             sha,
             file.chunks
@@ -82,24 +78,17 @@ pub async fn manifest_file_structured(
             let scratch = state
                 .manifest_cache
                 .scratch(appid, depot_id, manifest_id, &q.branch);
-            let unity = scratch.unity(snapshot.clone()).ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message: "manifest is not a unity game".into(),
-            })?;
+            let unity = scratch
+                .unity(snapshot.clone())
+                .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
             let env = unity.env.clone();
             let data_dir = unity.data_dir();
             let tree = tokio::task::spawn_blocking(move || {
                 transform::unity::serializedfile::tree::build_tree(&env, &data_dir, &path)
             })
             .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: format!("structured-tree task panicked: {e}"),
-            })?
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::internal(format!("structured-tree task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
             Ok((ImmutableCache, Json(tree)))
         }
         #[cfg(feature = "unity")]
@@ -107,10 +96,9 @@ pub async fn manifest_file_structured(
             let scratch = state
                 .manifest_cache
                 .scratch(appid, depot_id, manifest_id, &q.branch);
-            let unity = scratch.unity(snapshot.clone()).ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message: "manifest is not a unity game".into(),
-            })?;
+            let unity = scratch
+                .unity(snapshot.clone())
+                .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
             let env = unity.env.clone();
             let data_dir = unity.data_dir();
             let tree = tokio::task::spawn_blocking(move || {
@@ -119,14 +107,8 @@ pub async fn manifest_file_structured(
                 transform::unity::bundle::build_tree(&env, bundle_bytes, &path)
             })
             .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: format!("structured-tree task panicked: {e}"),
-            })?
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::internal(format!("structured-tree task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
             Ok((ImmutableCache, Json(tree)))
         }
         Some(Transformer::Dll) => {
@@ -134,20 +116,16 @@ pub async fn manifest_file_structured(
             let bytes = snapshot.read_full(&path).await?;
             let tree = transform::dll::tree::build_tree(&cfg.store_root, &file_sha, &bytes, &path)
                 .await
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: e.to_string(),
-                })?;
+                .map_err(|e| ApiError::internal(e.to_string()))?;
             // Kick off the bulk `-p` decompile in the background so
             // follow-up type clicks become cache hits. Dedups per-sha
             // inside the warmer.
             transform::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
             Ok((ImmutableCache, Json(tree)))
         }
-        _ => Err(ApiError {
-            status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            message: format!("no structured view for {path}"),
-        }),
+        _ => Err(ApiError::unsupported_media_type(format!(
+            "no structured view for {path}"
+        ))),
     }
 }
 
@@ -188,10 +166,7 @@ pub async fn manifest_file_structured_node(
         .iter()
         .find(|f| f.path == q.path)
         .and_then(|f| f.sha)
-        .ok_or_else(|| ApiError {
-            status: axum::http::StatusCode::NOT_FOUND,
-            message: format!("file not in manifest: {}", q.path),
-        })?;
+        .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
 
     match transform::tools::transformer_for(&q.path) {
         #[cfg(feature = "unity")]
@@ -214,10 +189,9 @@ pub async fn manifest_file_structured_node(
             let scratch = state
                 .manifest_cache
                 .scratch(appid, depot_id, manifest_id, &q.branch);
-            let unity = scratch.unity(snapshot.clone()).ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message: "manifest is not a unity game".into(),
-            })?;
+            let unity = scratch
+                .unity(snapshot.clone())
+                .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
             let env = unity.env.clone();
             let data_dir = unity.data_dir();
             let text = tokio::task::spawn_blocking(move || {
@@ -230,14 +204,8 @@ pub async fn manifest_file_structured_node(
                 )
             })
             .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: format!("structured-node task panicked: {e}"),
-            })?
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::internal(format!("structured-node task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
             Ok((
                 ImmutableCache,
                 Json(NodeContent {
@@ -278,10 +246,9 @@ pub async fn manifest_file_structured_node(
             let scratch = state
                 .manifest_cache
                 .scratch(appid, depot_id, manifest_id, &q.branch);
-            let unity = scratch.unity(snapshot.clone()).ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message: "manifest is not a unity game".into(),
-            })?;
+            let unity = scratch
+                .unity(snapshot.clone())
+                .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
             let env = unity.env.clone();
             let data_dir = unity.data_dir();
             let text = tokio::task::spawn_blocking(move || {
@@ -299,14 +266,8 @@ pub async fn manifest_file_structured_node(
                 )
             })
             .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: format!("structured-node task panicked: {e}"),
-            })?
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::internal(format!("structured-node task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
             Ok((
                 ImmutableCache,
                 Json(NodeContent {
@@ -332,10 +293,7 @@ pub async fn manifest_file_structured_node(
             let text =
                 transform::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
                     .await
-                    .map_err(|e| ApiError {
-                        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        message: e.to_string(),
-                    })?;
+                    .map_err(|e| ApiError::internal(e.to_string()))?;
             Ok((
                 ImmutableCache,
                 Json(NodeContent {
@@ -344,9 +302,8 @@ pub async fn manifest_file_structured_node(
                 }),
             ))
         }
-        _ => Err(ApiError {
-            status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            message: "no structured view for this file".to_string(),
-        }),
+        _ => Err(ApiError::unsupported_media_type(
+            "no structured view for this file",
+        )),
     }
 }

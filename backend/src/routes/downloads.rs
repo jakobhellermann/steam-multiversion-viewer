@@ -76,10 +76,9 @@ pub async fn manifest_download(
             .copied()
             .collect();
         if !unknown.is_empty() {
-            return Err(ApiError {
-                status: axum::http::StatusCode::BAD_REQUEST,
-                message: format!("unknown paths in manifest: {unknown:?}"),
-            });
+            return Err(ApiError::bad_request(format!(
+                "unknown paths in manifest: {unknown:?}"
+            )));
         }
     } else {
         for f in &manifest.files {

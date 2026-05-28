@@ -16,6 +16,22 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, message)
+    }
+
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, message)
+    }
+
+    pub fn unsupported_media_type(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::UNSUPPORTED_MEDIA_TYPE, message)
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
+    }
 }
 
 #[derive(Serialize)]
@@ -25,10 +41,6 @@ struct ErrorBody {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        // 5xx are bugs / surprises — log the message so the per-request
-        // `request route=… status=500` line in the access log has a
-        // companion entry telling you *why* it failed. 4xx are routine
-        // (404 for missing files etc) so we stay quiet there.
         if self.status.is_server_error() {
             tracing::error!(
                 status = self.status.as_u16(),

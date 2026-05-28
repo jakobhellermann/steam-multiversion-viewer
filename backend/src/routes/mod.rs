@@ -1,5 +1,3 @@
-// TODO(ai-review): review for style and correctness
-
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 

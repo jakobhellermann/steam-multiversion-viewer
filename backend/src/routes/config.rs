@@ -58,6 +58,7 @@ fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
     responses((status = 200, body = ConfigDto))
 )]
 pub async fn get_config(State(state): State<AppState>) -> Result<Json<ConfigDto>> {
+    // TODO: why not read from state?
     let saved = Config::load_or_default()?;
     Ok(Json(build_config_dto(&state, saved)))
 }

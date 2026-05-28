@@ -451,14 +451,14 @@ async fn resolve_diff_text(
             .files
             .iter()
             .find(|f| f.path == path)
-            .ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::NOT_FOUND,
-                message: format!("file not in manifest {depot_id}/{manifest_id}: {path}"),
+            .ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "file not in manifest {depot_id}/{manifest_id}: {path}"
+                ))
             })?;
-        let sha = file.sha.ok_or_else(|| ApiError {
-            status: axum::http::StatusCode::BAD_REQUEST,
-            message: format!("file has no content sha: {path}"),
-        })?;
+        let sha = file
+            .sha
+            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {path}")))?;
         (
             file.path.clone(),
             sha,
@@ -486,10 +486,7 @@ async fn resolve_diff_text(
                 let bytes = snapshot.read_full(&file_path).await?;
                 transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
                     .await
-                    .map_err(|e| ApiError {
-                        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        message: e.to_string(),
-                    })?
+                    .map_err(|e| ApiError::internal(e.to_string()))?
             }
             #[cfg(feature = "unity")]
             transform::Transformer::UnitySerialized => {
@@ -506,34 +503,26 @@ async fn resolve_diff_text(
                     transform::unity::dump_unity_serialized(&env, &data_dir, &file_path)
                 })
                 .await
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: format!("unity dump task panicked: {e}"),
-                })?
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: e.to_string(),
-                })?
+                .map_err(|e| ApiError::internal(format!("unity dump task panicked: {e}")))?
+                .map_err(|e| ApiError::internal(e.to_string()))?
             }
             transform::Transformer::Dll => {
                 // .NET assemblies don't have a single text dump to
                 // diff — they're inherently per-type. A future
                 // structured-diff endpoint can cover this; for now
                 // the file falls through to the byte-equality view.
-                return Err(ApiError {
-                    status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                    message: ".NET assemblies have no text-diff representation yet".to_string(),
-                });
+                return Err(ApiError::unsupported_media_type(
+                    ".NET assemblies have no text-diff representation yet",
+                ));
             }
             #[cfg(feature = "unity")]
             transform::Transformer::UnityBundle => {
                 // Bundles contain multiple SerializedFiles; a single
                 // text dump for diff is awkward and the structured
                 // tree carries the actual signal. Punt for now.
-                return Err(ApiError {
-                    status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                    message: "Unity bundles have no text-diff representation yet".to_string(),
-                });
+                return Err(ApiError::unsupported_media_type(
+                    "Unity bundles have no text-diff representation yet",
+                ));
             }
         };
         return Ok(DiffSide {
@@ -548,9 +537,10 @@ async fn resolve_diff_text(
         .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
         .await;
     let bytes = snapshot.read_full(&file_path).await?;
-    let text = String::from_utf8(bytes.to_vec()).map_err(|_| ApiError {
-        status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        message: format!("file is binary and has no registered transformer: {file_path}"),
+    let text = String::from_utf8(bytes.to_vec()).map_err(|_| {
+        ApiError::unsupported_media_type(format!(
+            "file is binary and has no registered transformer: {file_path}"
+        ))
     })?;
     Ok(DiffSide {
         text,
@@ -656,14 +646,8 @@ pub async fn manifest_file_structured_diff(
                 )
             })
             .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: format!("structured-diff task panicked: {e}"),
-            })?
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })?
+            .map_err(|e| ApiError::internal(format!("structured-diff task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?
         }
         #[cfg(feature = "unity")]
         Some(Transformer::UnityBundle) => {
@@ -707,14 +691,8 @@ pub async fn manifest_file_structured_diff(
                 )
             })
             .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: format!("structured-diff task panicked: {e}"),
-            })?
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })?
+            .map_err(|e| ApiError::internal(format!("structured-diff task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?
         }
         Some(Transformer::Dll) => {
             let cfg = state.config.load();
@@ -736,10 +714,7 @@ pub async fn manifest_file_structured_diff(
                 &q.path,
             )
             .await
-            .map_err(|e| ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::internal(e.to_string()))?;
             // Kick `ilspycmd -p` for both DLLs in the background.
             // Per-type lazy decompile calls from the node endpoint then
             // hit the cache instead of spawning a fresh `ilspycmd -t`.
@@ -749,10 +724,10 @@ pub async fn manifest_file_structured_diff(
             tree
         }
         _ => {
-            return Err(ApiError {
-                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message: format!("structured diff not supported for: {}", q.path),
-            });
+            return Err(ApiError::unsupported_media_type(format!(
+                "structured diff not supported for: {}",
+                q.path
+            )));
         }
     };
 
@@ -773,10 +748,7 @@ async fn dll_side_bytes(
         .iter()
         .find(|f| f.path == path)
         .and_then(|f| f.sha)
-        .ok_or_else(|| ApiError {
-            status: axum::http::StatusCode::BAD_REQUEST,
-            message: format!("file has no content sha: {path}"),
-        })?;
+        .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {path}")))?;
     let bytes = snap.read_full(path).await?.to_vec();
     Ok((bytes, sha))
 }
@@ -816,10 +788,10 @@ async fn bundle_node_body(
     let target_target = target_inner.and_then(parse_bundle_inner);
 
     if base_target.is_none() && target_target.is_none() {
-        return Err(ApiError {
-            status: axum::http::StatusCode::BAD_REQUEST,
-            message: format!("bundle structured-diff/node: id has no body: {}", q.node_id),
-        });
+        return Err(ApiError::bad_request(format!(
+            "bundle structured-diff/node: id has no body: {}",
+            q.node_id
+        )));
     }
 
     // Two snapshots in parallel — skip whichever side isn't needed.
@@ -915,10 +887,7 @@ async fn bundle_node_body(
         (b, t)
     })
     .await
-    .map_err(|e| ApiError {
-        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        message: format!("structured-diff/node task panicked: {e}"),
-    })?;
+    .map_err(|e| ApiError::internal(format!("structured-diff/node task panicked: {e}")))?;
 
     // Per-side errors degrade to "no content for this side" rather
     // than failing the whole request — a one-sided Added/Removed
@@ -959,13 +928,10 @@ async fn bundle_node_body(
         )
             .into_response(),
         (None, None) => {
-            return Err(ApiError {
-                status: axum::http::StatusCode::BAD_REQUEST,
-                message: format!(
-                    "bundle structured-diff/node could not resolve any side: {}",
-                    q.node_id
-                ),
-            });
+            return Err(ApiError::bad_request(format!(
+                "bundle structured-diff/node could not resolve any side: {}",
+                q.node_id
+            )));
         }
     };
     Ok((crate::http::ImmutableCache, body))
@@ -991,10 +957,10 @@ async fn dll_node_body(
     let base_type = base_inner.and_then(parse_type_id);
     let target_type = target_inner.and_then(parse_type_id);
     if base_type.is_none() && target_type.is_none() {
-        return Err(ApiError {
-            status: axum::http::StatusCode::BAD_REQUEST,
-            message: format!("structured-diff/node: id has no body: {}", q.node_id),
-        });
+        return Err(ApiError::bad_request(format!(
+            "structured-diff/node: id has no body: {}",
+            q.node_id
+        )));
     }
 
     let cfg = state.config.load();
@@ -1042,10 +1008,7 @@ async fn dll_node_body(
         (Some(t), Some(((bytes, sha), _ct))) => Some(
             transform::dll::decompile_type(&store_root, sha, bytes, t)
                 .await
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: e.to_string(),
-                })?,
+                .map_err(|e| ApiError::internal(e.to_string()))?,
         ),
         _ => None,
     };
@@ -1053,10 +1016,7 @@ async fn dll_node_body(
         (Some(t), Some(((bytes, sha), _ct))) => Some(
             transform::dll::decompile_type(&store_root, sha, bytes, t)
                 .await
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: e.to_string(),
-                })?,
+                .map_err(|e| ApiError::internal(e.to_string()))?,
         ),
         _ => None,
     };
@@ -1100,10 +1060,9 @@ async fn dll_node_body(
         )
             .into_response(),
         (None, None) => {
-            return Err(ApiError {
-                status: axum::http::StatusCode::BAD_REQUEST,
-                message: "structured-diff/node could not resolve either side".to_string(),
-            });
+            return Err(ApiError::bad_request(
+                "structured-diff/node could not resolve either side",
+            ));
         }
     };
     Ok((crate::http::ImmutableCache, body))
@@ -1183,10 +1142,10 @@ pub async fn manifest_file_structured_diff_node(
         _ => false,
     };
     if !supported {
-        return Err(ApiError {
-            status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            message: format!("structured diff not supported for: {}", q.path),
-        });
+        return Err(ApiError::unsupported_media_type(format!(
+            "structured diff not supported for: {}",
+            q.path
+        )));
     }
 
     if matches!(kind, Some(Transformer::Dll)) {
@@ -1312,19 +1271,10 @@ async fn unity_serialized_node_body(
         (b, t)
     })
     .await
-    .map_err(|e| ApiError {
-        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        message: format!("structured-diff/node task panicked: {e}"),
-    })?;
+    .map_err(|e| ApiError::internal(format!("structured-diff/node task panicked: {e}")))?;
 
-    let base_text = base_text.map_err(|e| ApiError {
-        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        message: e.to_string(),
-    })?;
-    let target_text = target_text.map_err(|e| ApiError {
-        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        message: e.to_string(),
-    })?;
+    let base_text = base_text.map_err(|e| ApiError::internal(e.to_string()))?;
+    let target_text = target_text.map_err(|e| ApiError::internal(e.to_string()))?;
 
     // One-sided node → return the available JSON verbatim. Both-sided
     // → unified diff so the frontend can highlight with `lang="diff"`.
@@ -1359,10 +1309,9 @@ async fn unity_serialized_node_body(
         )
             .into_response(),
         (None, None) => {
-            return Err(ApiError {
-                status: axum::http::StatusCode::BAD_REQUEST,
-                message: "structured-diff/node ids did not parse to object ids".to_string(),
-            });
+            return Err(ApiError::bad_request(
+                "structured-diff/node ids did not parse to object ids",
+            ));
         }
     };
     Ok((crate::http::ImmutableCache, body))
@@ -1390,9 +1339,10 @@ async fn prepare_structured_side(
             .files
             .iter()
             .find(|f| f.path == path)
-            .ok_or_else(|| ApiError {
-                status: axum::http::StatusCode::NOT_FOUND,
-                message: format!("file not in manifest {depot_id}/{manifest_id}: {path}"),
+            .ok_or_else(|| {
+                ApiError::not_found(format!(
+                    "file not in manifest {depot_id}/{manifest_id}: {path}"
+                ))
             })?;
         file.chunks
             .iter()
@@ -1421,9 +1371,8 @@ fn unity_side(
     let scratch = state
         .manifest_cache
         .scratch(appid, depot_id, manifest_id, branch);
-    let unity = scratch.unity(snapshot).ok_or_else(|| ApiError {
-        status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        message: "manifest is not a unity game".into(),
-    })?;
+    let unity = scratch
+        .unity(snapshot)
+        .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
     Ok((unity.env.clone(), unity.data_dir()))
 }

@@ -1,4 +1,3 @@
-// TODO(ai-review): review for style and correctness
 pub mod error;
 pub mod response;
 

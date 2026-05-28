@@ -69,14 +69,8 @@ pub async fn game_info(
         let version =
             tokio::task::spawn_blocking(move || env.unity_version().map(ToString::to_string))
                 .await
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: format!("game-info task panicked: {e}"),
-                })?
-                .map_err(|e| ApiError {
-                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    message: e.to_string(),
-                })?;
+                .map_err(|e| ApiError::internal(format!("game-info task panicked: {e}")))?
+                .map_err(|e| ApiError::internal(e.to_string()))?;
 
         return Ok((
             ImmutableCache,
