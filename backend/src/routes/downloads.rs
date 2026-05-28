@@ -38,6 +38,7 @@ pub struct DownloadManifestBody {
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/download",
+    tag = "downloads",
     request_body = DownloadManifestBody
 )]
 #[tracing::instrument(skip_all)]
@@ -99,12 +100,12 @@ pub async fn manifest_download(
     Ok(Json(summary))
 }
 
-#[utoipa::path(get, path = "/api/downloads")]
+#[utoipa::path(get, path = "/api/downloads", tag = "downloads")]
 pub async fn downloads_snapshot(State(state): State<AppState>) -> Json<DownloadStats> {
     Json(state.downloads.current())
 }
 
-#[utoipa::path(post, path = "/api/downloads/cancel")]
+#[utoipa::path(post, path = "/api/downloads/cancel", tag = "downloads")]
 #[tracing::instrument(skip_all)]
 pub async fn downloads_cancel(State(state): State<AppState>) -> Json<DownloadStats> {
     state.downloads.cancel();

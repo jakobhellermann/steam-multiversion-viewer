@@ -24,7 +24,9 @@ use crate::error::ApiError;
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 
-use super::{FileViewQuery, ManifestRef, Result};
+use super::Result;
+use super::files::FileViewQuery;
+use super::library::ManifestRef;
 
 #[derive(Deserialize, ToSchema)]
 pub struct ManifestDiffRequest {
@@ -69,6 +71,7 @@ pub enum ManifestDiffStatus {
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/manifests/diff",
+    tag = "diff",
     request_body = ManifestDiffRequest
 )]
 #[tracing::instrument(skip_all, fields(others = body.others.len()))]
@@ -218,6 +221,7 @@ pub enum FileDiffStatus {
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/file/diff-targets",
+    tag = "diff",
     request_body = FileDiffTargetsRequest
 )]
 #[tracing::instrument(skip_all, fields(path = %body.path, others = body.others.len()))]
@@ -318,6 +322,7 @@ pub struct FileDiffRequest {
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/diff",
+    tag = "diff",
     params(FileViewQuery),
     request_body = FileDiffRequest,
 )]
@@ -556,6 +561,7 @@ fn default_branch() -> String {
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured-diff",
+    tag = "diff",
     params(StructuredDiffQuery)
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
@@ -1040,6 +1046,7 @@ fn split_diff_id(node_id: &str) -> (Option<&str>, Option<&str>) {
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured-diff/node",
+    tag = "diff",
     params(StructuredDiffNodeQuery)
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]

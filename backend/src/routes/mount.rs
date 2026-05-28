@@ -8,7 +8,7 @@ use crate::error::ApiError;
 use crate::mount::{MountControlError, MountStatus};
 use crate::state::AppState;
 
-#[utoipa::path(post, path = "/api/mount/start")]
+#[utoipa::path(post, path = "/api/mount/start", tag = "mount")]
 #[tracing::instrument(skip_all)]
 pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, ApiError> {
     let cfg = state.config.load();
@@ -35,14 +35,14 @@ pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, A
     Ok(Json(status))
 }
 
-#[utoipa::path(post, path = "/api/mount/stop")]
+#[utoipa::path(post, path = "/api/mount/stop", tag = "mount")]
 #[tracing::instrument(skip_all)]
 pub async fn stop(State(state): State<AppState>) -> Result<Json<MountStatus>, ApiError> {
     state.mount.stop().map_err(mount_err)?;
     Ok(Json(state.mount.status()))
 }
 
-#[utoipa::path(get, path = "/api/mount/status")]
+#[utoipa::path(get, path = "/api/mount/status", tag = "mount")]
 #[tracing::instrument(skip_all)]
 pub async fn status(State(state): State<AppState>) -> Json<MountStatus> {
     Json(state.mount.status())

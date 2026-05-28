@@ -17,7 +17,8 @@ use crate::steam::{AppId, DepotId, ManifestId};
 use ::transform::Transformer;
 use ::transform::structured::{NodeContent, StructuredTree};
 
-use super::{FileViewQuery, Result};
+use super::Result;
+use super::files::FileViewQuery;
 
 /// Structured tree for the file at `q.path` in the given manifest.
 /// Returns 415 (Unsupported Media Type) when the file has no
@@ -26,6 +27,7 @@ use super::{FileViewQuery, Result};
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured",
+    tag = "structured",
     params(FileViewQuery)
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
@@ -142,6 +144,7 @@ pub struct NodeContentQuery {
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured/node",
+    tag = "structured",
     params(NodeContentQuery)
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path, node_id = %q.node_id))]
