@@ -330,6 +330,171 @@ pub async fn file_diff_targets(
 }
 
 #[derive(Deserialize, ToSchema)]
+pub struct ManifestDiffTargetsRequest {
+    pub base: ManifestRef,
+    pub others: Vec<ManifestRef>,
+    /// Whitespace-separated AND-tokens matched as lowercased substrings
+    /// against the depot path. Empty / missing → no filtering, every
+    /// path counts (in which case this endpoint degenerates to "does
+    /// any base path differ from this target", almost always `true`).
+    #[serde(default)]
+    pub query: String,
+}
+
+#[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "matching_targets": [
+        {"depot_id": 1234567, "manifest_id": "9876543210987654321"},
+        {"depot_id": 1234567, "manifest_id": "5555666677778888999"}
+    ]
+}))]
+pub struct ManifestDiffTargetsResponse {
+    /// Targets that have at least one path matching `query` whose
+    /// content fingerprint differs from base — or which is absent on
+    /// the target side. Targets with no qualifying differences are
+    /// omitted entirely.
+    pub matching_targets: Vec<ManifestRefShort>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ManifestRefShort {
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
+}
+
+/// Find manifests with changes in a path subset
+///
+/// Like `/manifests/diff` but answers a yes/no per target instead of
+/// returning the path list. The frontend uses this to filter the
+/// "Compare to…" dropdown to only those targets where the user's
+/// current search would yield changes.
+#[utoipa::path(
+    post,
+    path = "/api/apps/{appid}/manifests/diff-targets",
+    tag = "diff",
+    request_body = ManifestDiffTargetsRequest,
+    responses((status = 200, body = ManifestDiffTargetsResponse))
+)]
+#[tracing::instrument(skip_all, fields(others = body.others.len(), query = %body.query))]
+pub async fn manifest_diff_targets(
+    State(state): State<AppState>,
+    Path(appid): Path<AppId>,
+    Json(body): Json<ManifestDiffTargetsRequest>,
+) -> Result<Json<ManifestDiffTargetsResponse>> {
+    let base_snap = state
+        .open_manifest(
+            appid,
+            body.base.depot_id,
+            body.base.manifest_id,
+            &body.base.branch,
+        )
+        .await?;
+
+    // Pre-compute the path subset we care about: lowercased AND-token
+    // substring match on the depot path, mirroring the in-app search
+    // box. With no tokens every base path passes.
+    let tokens: Vec<String> = body
+        .query
+        .split_whitespace()
+        .map(|t| t.to_lowercase())
+        .collect();
+    let base = base_snap.manifest();
+    let mut base_subset: HashMap<&str, &DepotFile> = HashMap::with_capacity(base.files.len());
+    for f in &base.files {
+        if matches!(f.kind, FileKind::Directory) {
+            continue;
+        }
+        if !tokens.is_empty() {
+            let path_lc = f.path.to_lowercase();
+            if !tokens.iter().all(|t| path_lc.contains(t)) {
+                continue;
+            }
+        }
+        base_subset.insert(f.path.as_str(), f);
+    }
+
+    // Identity tuple — same as manifest_diff.
+    fn fp(f: &DepotFile) -> (FileKind, u64, Option<[u8; 20]>, Option<&str>) {
+        (f.kind, f.size, f.sha, f.linktarget.as_deref())
+    }
+
+    // Open every distinct `other` in parallel. Self-comparisons skip.
+    let sem = Arc::new(Semaphore::new(8));
+    let mut fu = FuturesUnordered::new();
+    let mut seen = HashSet::new();
+    for r in &body.others {
+        if !seen.insert((r.depot_id, r.manifest_id)) {
+            continue;
+        }
+        if (r.depot_id, r.manifest_id) == (body.base.depot_id, body.base.manifest_id) {
+            continue;
+        }
+        let state = &state;
+        let sem = sem.clone();
+        let depot_id = r.depot_id;
+        let manifest_id = r.manifest_id;
+        let branch = r.branch.clone();
+        fu.push(async move {
+            let _permit = sem.acquire().await.expect("semaphore not closed");
+            let result = state
+                .open_manifest(appid, depot_id, manifest_id, &branch)
+                .await;
+            (depot_id, manifest_id, result)
+        });
+    }
+
+    let mut matching_targets: Vec<ManifestRefShort> = Vec::new();
+    while let Some((depot_id, manifest_id, result)) = fu.next().await {
+        let snap = match result {
+            Ok(s) => s,
+            Err(err) => {
+                // Same defensive policy as `file_diff_targets`: treat
+                // an unfetchable target as "different" so the user
+                // still sees the candidate and can investigate.
+                tracing::warn!(%depot_id, %manifest_id, %err, "open_manifest failed in manifest_diff_targets");
+                matching_targets.push(ManifestRefShort {
+                    depot_id,
+                    manifest_id,
+                });
+                continue;
+            }
+        };
+        let other = snap.manifest();
+        let mut other_by_path: HashMap<&str, &DepotFile> =
+            HashMap::with_capacity(other.files.len());
+        for f in &other.files {
+            if matches!(f.kind, FileKind::Directory) {
+                continue;
+            }
+            other_by_path.insert(f.path.as_str(), f);
+        }
+        let mut has_diff = false;
+        for (path, base_f) in &base_subset {
+            match other_by_path.get(path) {
+                None => {
+                    has_diff = true;
+                    break;
+                }
+                Some(other_f) => {
+                    if fp(base_f) != fp(other_f) {
+                        has_diff = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if has_diff {
+            matching_targets.push(ManifestRefShort {
+                depot_id,
+                manifest_id,
+            });
+        }
+    }
+
+    Ok(Json(ManifestDiffTargetsResponse { matching_targets }))
+}
+
+#[derive(Deserialize, ToSchema)]
 pub struct FileDiffRequest {
     pub path: String,
     pub target: ManifestRef,

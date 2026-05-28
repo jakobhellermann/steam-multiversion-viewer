@@ -175,6 +175,36 @@ export async function fetchManifestDiff(
   return body.entries;
 }
 
+/// `{depot_id, manifest_id}` of a target whose at-least-one-path-
+/// matching-query differs from base. Returned by
+/// `/manifests/diff-targets` (see [`fetchManifestDiffTargets`]).
+export type ManifestDiffTarget = {
+  depot_id: number;
+  manifest_id: string;
+};
+
+/// Filter a candidate list of `others` down to those manifests where
+/// at least one path matching `query` (whitespace-AND-token substring,
+/// case-insensitive) differs from base. Used by the compare-to menu
+/// on the manifest-detail page so the dropdown only lists targets
+/// where the user's current search has changes to show.
+export async function fetchManifestDiffTargets(
+  appid: AppId,
+  base: ManifestRef,
+  others: ManifestRef[],
+  query: string,
+): Promise<ManifestDiffTarget[]> {
+  if (others.length === 0) return [];
+  const r = await fetch(`/api/apps/${appid}/manifests/diff-targets`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ base, others, query }),
+  });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  const body: { matching_targets: ManifestDiffTarget[] } = await r.json();
+  return body.matching_targets;
+}
+
 export type FileDiffStatus = "same" | "different" | "missing";
 
 export type FileDiffTargetStatus = {

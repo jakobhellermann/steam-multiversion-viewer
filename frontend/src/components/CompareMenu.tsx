@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchFileDiffTargets,
   fetchGameInfo,
+  fetchManifestDiffTargets,
   type AppInfo,
   type ExtraManifestEntry,
   type GameInfo,
@@ -73,6 +74,8 @@ export function CompareMenu({
   onChange,
   error,
   fileContext,
+  searchQuery,
+  searchBase,
 }: {
   appInfo: AppInfo;
   extras: ExtraManifestEntry[];
@@ -86,6 +89,13 @@ export function CompareMenu({
   /// `fileContext.path` is identical to the base — only `different`
   /// and `missing` candidates remain.
   fileContext?: FileContext;
+  /// When set (and `fileContext` is not), the menu filters out
+  /// manifests where no path matching `searchQuery` differs from
+  /// `searchBase`. Used by the manifest-detail page so an active
+  /// search restricts the compare-to dropdown to targets that
+  /// actually have changes inside the search results.
+  searchQuery?: string;
+  searchBase?: ManifestRef;
 }) {
   const [open, setOpen] = useState(false);
   const [activeDepotId, setActiveDepotId] = useState<number | null>(currentDepotId);
@@ -221,24 +231,88 @@ export function CompareMenu({
     return map;
   }, [fileDiff.data, currentDepotId]);
 
+  // Manifest-detail search variant: hide candidates that have no diff
+  // in any path matching the user's current search box. Mutually
+  // exclusive with `fileContext` — the file-detail page never has a
+  // free-form search box.
+  const searchActive =
+    !fileContext && !!searchBase && !!searchQuery && searchQuery.trim().length > 0;
+  const searchOthers = useMemo<ManifestRef[]>(() => {
+    if (!searchActive) return [];
+    return groups.flatMap((g) =>
+      g.candidates.map((c) => ({
+        depot_id: c.depotId,
+        manifest_id: c.manifestId,
+        branch: c.branch,
+      })),
+    );
+  }, [searchActive, groups]);
+  const searchDiff = useQuery({
+    queryKey: [
+      "manifest-diff-targets",
+      searchBase?.depot_id,
+      searchBase?.manifest_id,
+      searchBase?.branch,
+      searchQuery?.trim() ?? "",
+      searchOthers
+        .map((r) => `${r.depot_id}/${r.manifest_id}`)
+        .sort()
+        .join(","),
+    ],
+    queryFn: () =>
+      fetchManifestDiffTargets(appInfo.appid, searchBase!, searchOthers, searchQuery!.trim()),
+    enabled: searchActive && searchOthers.length > 0,
+    staleTime: Infinity,
+    gcTime: 60 * 60 * 1000,
+    placeholderData: (prev) => prev,
+  });
+  const searchKeptKeys = useMemo<Set<string> | null>(() => {
+    if (!searchActive) return null;
+    if (!searchDiff.data) return null;
+    const out = new Set<string>();
+    for (const t of searchDiff.data) {
+      out.add(diffTargetKey(t.depot_id, t.manifest_id, currentDepotId));
+    }
+    return out;
+  }, [searchActive, searchDiff.data, currentDepotId]);
+
   const visibleGroups = useMemo<DepotGroup[]>(() => {
-    if (!fileContext) return groups;
-    // Until the diff-targets query returns, don't render anything —
-    // otherwise the menu briefly shows every manifest and then collapses
-    // to the filtered subset, which looks like a flicker.
-    if (!fileDiff.data) return [];
-    const filtered = groups.map((g) => ({
-      ...g,
-      // Keep only manifests where the file still exists *and* differs —
-      // skip both `same` (no change to show) and `missing` (deleted in
-      // that version, nothing to compare to).
-      candidates: g.candidates.filter((c) => fileStatusByKey.get(c.key) === "different"),
-    }));
-    // Hide empty *other* depots but keep "this depot" — the right pane
-    // can then explicitly say "no different manifests in this depot"
-    // instead of the whole menu collapsing to "nothing".
-    return filtered.filter((g) => g.depotId === currentDepotId || g.candidates.length > 0);
-  }, [groups, fileContext, fileDiff.data, fileStatusByKey, currentDepotId]);
+    if (fileContext) {
+      // File-detail variant — original `/file/diff-targets` filter.
+      // Until the diff-targets query returns, don't render anything —
+      // otherwise the menu briefly shows every manifest and then collapses
+      // to the filtered subset, which looks like a flicker.
+      if (!fileDiff.data) return [];
+      const filtered = groups.map((g) => ({
+        ...g,
+        // Keep only manifests where the file still exists *and* differs —
+        // skip both `same` (no change to show) and `missing` (deleted in
+        // that version, nothing to compare to).
+        candidates: g.candidates.filter((c) => fileStatusByKey.get(c.key) === "different"),
+      }));
+      // Hide empty *other* depots but keep "this depot" — the right pane
+      // can then explicitly say "no different manifests in this depot"
+      // instead of the whole menu collapsing to "nothing".
+      return filtered.filter((g) => g.depotId === currentDepotId || g.candidates.length > 0);
+    }
+    if (searchActive) {
+      if (!searchKeptKeys) return [];
+      const filtered = groups.map((g) => ({
+        ...g,
+        candidates: g.candidates.filter((c) => searchKeptKeys.has(c.key)),
+      }));
+      return filtered.filter((g) => g.depotId === currentDepotId || g.candidates.length > 0);
+    }
+    return groups;
+  }, [
+    groups,
+    fileContext,
+    fileDiff.data,
+    fileStatusByKey,
+    currentDepotId,
+    searchActive,
+    searchKeptKeys,
+  ]);
 
   // If our previously-active depot stopped having candidates, fall back
   // to the first available group.
@@ -318,7 +392,11 @@ export function CompareMenu({
                   ? "Checking which manifests differ…"
                   : fileContext
                     ? "No manifests where this file differs."
-                    : "No other manifests."}
+                    : searchActive && searchDiff.isFetching
+                      ? "Checking which manifests differ…"
+                      : searchActive
+                        ? "No manifests with changes in the search results."
+                        : "No other manifests."}
               </p>
             ) : (
               <ul>
@@ -372,7 +450,9 @@ export function CompareMenu({
               <p className="px-3 py-2 text-sm text-slate-500">
                 {fileContext
                   ? "No manifests where this file differs."
-                  : "No manifests in this depot."}
+                  : searchActive
+                    ? "No manifests with changes in the search results."
+                    : "No manifests in this depot."}
               </p>
             ) : (
               <ul>

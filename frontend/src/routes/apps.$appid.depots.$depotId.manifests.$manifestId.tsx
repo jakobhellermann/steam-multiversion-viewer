@@ -810,6 +810,12 @@ function FilesPanel({
             selected={diffTargets}
             onChange={setDiffTargets}
             error={diffQuery.error as Error | null}
+            // Pass the live search box value so the menu can hide
+            // candidates with no diff inside the search results. We
+            // forward the un-deferred `query` here — `deferred` would
+            // make the dropdown filter lag behind the box.
+            searchQuery={query}
+            searchBase={{ depot_id: Number(depotId), manifest_id: manifestId, branch }}
           />
         )}
         <ExtensionFilter extCounts={extCounts} selected={extFilter} onChange={setExtFilter} />
