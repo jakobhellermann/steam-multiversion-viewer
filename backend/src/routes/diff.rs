@@ -588,7 +588,6 @@ fn default_branch() -> String {
 /// Per-node content (the actual JSON dump for changed objects) is
 /// fetched lazily by the client via the existing
 /// `/file/structured/node` endpoint, once per side.
-#[cfg(feature = "unity")]
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured-diff",
@@ -596,7 +595,7 @@ fn default_branch() -> String {
     params(StructuredDiffQuery),
     responses(
         (status = 200, body = transform::structured::StructuredTree),
-        (status = 415, description = "Only UnitySerialized files are supported today")
+        (status = 415, description = "No structured-diff builder for this file type")
     )
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
@@ -628,6 +627,7 @@ pub async fn manifest_file_structured_diff(
     )?;
 
     let diff = match kind {
+        #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
             let path = q.path.clone();
             let (base_env, base_data_dir) = unity_side(
@@ -665,6 +665,7 @@ pub async fn manifest_file_structured_diff(
                 message: e.to_string(),
             })?
         }
+        #[cfg(feature = "unity")]
         Some(Transformer::UnityBundle) => {
             use rabex_env::resolver::EnvResolver;
             let path = q.path.clone();
@@ -931,12 +932,7 @@ async fn bundle_node_body(
         (Some(b), Some(t)) => {
             let base_label = diff_label(depot_id, manifest_id, base_ct);
             let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
-            let text = transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
-                &b,
-                &t,
-                &base_label,
-                &target_label,
-            );
+            let text = transform::diff::unified_diff_text(&b, &t, &base_label, &target_label);
             (
                 [(
                     header::CONTENT_TYPE,
@@ -1077,12 +1073,7 @@ async fn dll_node_body(
                 q.target_manifest_id,
                 target_side.as_ref().map(|((_, _), ct)| *ct).unwrap_or(0),
             );
-            let text = transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
-                &b,
-                &t,
-                &base_label,
-                &target_label,
-            );
+            let text = transform::diff::unified_diff_text(&b, &t, &base_label, &target_label);
             (
                 [(
                     header::CONTENT_TYPE,
@@ -1161,7 +1152,6 @@ fn split_diff_id(node_id: &str) -> (Option<&str>, Option<&str>) {
 /// colouring for free. When only one side has a path-id the body
 /// returns that side's JSON unchanged (no `+`/`-` decorations) so an
 /// "added" or "removed" node still shows useful content.
-#[cfg(feature = "unity")]
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured-diff/node",
@@ -1186,26 +1176,45 @@ pub async fn manifest_file_structured_diff_node(
     use transform::Transformer;
 
     let kind = transform::tools::transformer_for(&q.path);
-    match kind {
-        Some(Transformer::UnitySerialized)
-        | Some(Transformer::UnityBundle)
-        | Some(Transformer::Dll) => {}
-        _ => {
-            return Err(ApiError {
-                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                message: format!("structured diff not supported for: {}", q.path),
-            });
-        }
+    let supported = match kind {
+        Some(Transformer::Dll) => true,
+        #[cfg(feature = "unity")]
+        Some(Transformer::UnitySerialized | Transformer::UnityBundle) => true,
+        _ => false,
+    };
+    if !supported {
+        return Err(ApiError {
+            status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            message: format!("structured diff not supported for: {}", q.path),
+        });
     }
 
     if matches!(kind, Some(Transformer::Dll)) {
         return dll_node_body(&state, appid, depot_id, manifest_id, &q).await;
     }
 
+    #[cfg(feature = "unity")]
     if matches!(kind, Some(Transformer::UnityBundle)) {
         return bundle_node_body(&state, appid, depot_id, manifest_id, &q).await;
     }
 
+    #[cfg(feature = "unity")]
+    {
+        return unity_serialized_node_body(&state, appid, depot_id, manifest_id, &q).await;
+    }
+
+    #[cfg(not(feature = "unity"))]
+    unreachable!("non-Dll variants filtered out above when unity is disabled")
+}
+
+#[cfg(feature = "unity")]
+async fn unity_serialized_node_body(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    q: &StructuredDiffNodeQuery,
+) -> Result<(crate::http::ImmutableCache, Response)> {
     // Split the diff-tree id into per-side inner ids, then parse the
     // unity-specific `obj:<pathid>` shape. Other inner shapes (section
     // headers, class-stats rows) have no per-object content and bail
@@ -1258,13 +1267,13 @@ pub async fn manifest_file_structured_diff_node(
 
     let base_side = base_arc
         .as_ref()
-        .map(|s| unity_side(&state, appid, depot_id, manifest_id, &q.branch, s.clone()))
+        .map(|s| unity_side(state, appid, depot_id, manifest_id, &q.branch, s.clone()))
         .transpose()?;
     let target_side = target_arc
         .as_ref()
         .map(|s| {
             unity_side(
-                &state,
+                state,
                 appid,
                 q.target_depot_id,
                 q.target_manifest_id,
@@ -1323,12 +1332,7 @@ pub async fn manifest_file_structured_diff_node(
         (Some(b), Some(t)) => {
             let base_label = diff_label(depot_id, manifest_id, base_ct);
             let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
-            let text = transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
-                &b,
-                &t,
-                &base_label,
-                &target_label,
-            );
+            let text = transform::diff::unified_diff_text(&b, &t, &base_label, &target_label);
             (
                 [(
                     header::CONTENT_TYPE,
@@ -1367,7 +1371,6 @@ pub async fn manifest_file_structured_diff_node(
 /// Open a manifest, find the file, enqueue its chunks for download
 /// and wait. Returns the (Arc'd) snapshot, ready to be handed to a
 /// blocking task that needs `chunk_store` access.
-#[cfg(feature = "unity")]
 async fn prepare_structured_side(
     state: &AppState,
     appid: AppId,

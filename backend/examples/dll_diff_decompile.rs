@@ -30,8 +30,8 @@ use steam_multiversion_viewer::config::Config;
 use tokio::sync::Semaphore;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use transform::diff::unified_diff_text;
 use transform::dll;
-use transform::unity::serializedfile::dump_value::dump_object_json_unified_diff;
 
 const APP_ID: u32 = 367520;
 const DEPOT_ID: u32 = 367523;
@@ -245,7 +245,7 @@ async fn decompile_and_write(
         // empty diff body so it's countable; the file size makes it
         // obvious.
     }
-    let diff = dump_object_json_unified_diff(&to_text, &from_text, "to", "from");
+    let diff = unified_diff_text(&to_text, &from_text, "to", "from");
     let path = out_dir.join(format!("{}.diff", sanitize_fqn(fqn)));
     std::fs::write(&path, diff).with_context(|| format!("writing {}", path.display()))?;
     Ok(())

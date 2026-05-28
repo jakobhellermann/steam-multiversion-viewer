@@ -557,7 +557,7 @@ fn dump_value_unified_diff() {
     // Pure string helper — feed two JSON-looking blobs and check the
     // `--- target / +++ base` header + the 3-line context match the
     // wire format the diff-content route returns.
-    let diff = crate::unity::serializedfile::dump_value::dump_object_json_unified_diff(
+    let diff = crate::diff::unified_diff_text(
         "{\n  \"m_Name\": \"Player\",\n  \"m_Layer\": 0\n}",
         "{\n  \"m_Name\": \"Hero\",\n  \"m_Layer\": 0\n}",
         "base-label",

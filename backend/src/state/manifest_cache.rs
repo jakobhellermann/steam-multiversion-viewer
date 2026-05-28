@@ -8,7 +8,9 @@
 //! right pair (diff view) at most.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(feature = "unity")]
+use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 
 use crate::steam::{AppId, DepotId, ManifestId};
 

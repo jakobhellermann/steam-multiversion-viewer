@@ -10,7 +10,9 @@ use axum::extract::{Path, Query, State};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::http::{ApiError, ImmutableCache};
+#[cfg(feature = "unity")]
+use crate::http::ApiError;
+use crate::http::ImmutableCache;
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 

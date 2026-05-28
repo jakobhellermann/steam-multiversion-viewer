@@ -88,25 +88,6 @@ pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
     Ok(serde_json::to_string_pretty(&value)?)
 }
 
-/// Unified diff between two object dumps in the exact wire format the
-/// `/file/structured-diff/node` route returns: `target` on the `-`
-/// side, `base` on the `+` side, three lines of context. Callers
-/// pass human-readable labels (depot/manifest + creation date) that
-/// land in the `--- …` / `+++ …` header — same shape as `/file/diff`.
-#[tracing::instrument(skip_all)]
-pub fn dump_object_json_unified_diff(
-    base: &str,
-    target: &str,
-    base_label: &str,
-    target_label: &str,
-) -> String {
-    similar::TextDiff::from_lines(target, base)
-        .unified_diff()
-        .context_radius(3)
-        .header(target_label, base_label)
-        .to_string()
-}
-
 /// Bundle equivalent of [`dump_object_json`]: parse `bundle_bytes`,
 /// extract `archive_entry`, then dump `path_id` from it. Callers
 /// must read the bundle bytes themselves (typically via

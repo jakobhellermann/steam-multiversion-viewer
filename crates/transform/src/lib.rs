@@ -10,6 +10,7 @@
 //! consolidates per-format dispatch in one place.
 
 pub mod cache;
+pub mod diff;
 pub mod dll;
 pub mod structured;
 pub mod tools;
