@@ -30,18 +30,61 @@ use super::markers::{
     as_file_id, as_path_id, color_hex_from_map, color_marker, pptr_from_map, pptr_marker,
 };
 
+/// Per-call hooks that influence what a dump returns. Defaulted to
+/// "render everything as JSON" so existing tests and CLI tools don't
+/// have to thread state they don't care about. Production callers in
+/// the backend can opt into class-id-specific rewrites by setting
+/// fields like [`DumpOptions::spp_key`].
+#[derive(Default, Clone, Copy)]
+pub struct DumpOptions<'a> {
+    /// `Some(key)` enables `SecPlayerPrefs`-style decryption for
+    /// TextAssets: if the asset's `m_Script` decodes as
+    /// `base64(AES-256-ECB-PKCS7(utf8))` under this key, the dump
+    /// returns the decrypted plaintext instead of the JSON object.
+    pub spp_key: Option<&'a [u8]>,
+}
+
+/// MIME type for a JSON object dump — the regular fall-through return
+/// of `dump_object_json` / `dump_bundle_object_json`.
+pub const MIME_JSON: &str = "application/json";
+
+/// MIME type for a decrypted TextAsset body that doesn't look like
+/// anything more specific.
+pub const MIME_PLAIN: &str = "text/plain; charset=utf-8";
+
+/// MIME type for a decrypted TextAsset body that starts with `<` and
+/// ends with `>` — most of the localised language sheets ship as XML
+/// so flagging them lets shiki pick the right grammar in the preview.
+pub const MIME_XML: &str = "application/xml";
+
+/// Lightweight content sniff for decrypted TextAsset bodies. Just the
+/// "looks like XML" check for now — anything else stays `text/plain`.
+fn sniff_mime(body: &str) -> &'static str {
+    let trimmed = body.trim();
+    if trimmed.starts_with('<') && trimmed.ends_with('>') {
+        MIME_XML
+    } else {
+        MIME_PLAIN
+    }
+}
+
 /// Read the object at `path_id` and pretty-print it as JSON using the
-/// typetree, applying [`simplify_for_dump`] on the way out.
+/// typetree, applying [`simplify_for_dump`] on the way out. Returns
+/// `(mime, body)` — usually the JSON `application/json` body, but
+/// class-id-specific rewrites enabled via [`DumpOptions`] (e.g. a
+/// decrypted TextAsset under `spp_key`) can substitute a different
+/// representation with a matching MIME.
 #[tracing::instrument(skip_all, fields(path, path_id))]
 pub fn dump_object_json<R: EnvResolver, P: TypeTreeProvider>(
     env: &Environment<R, P>,
     data_dir: &str,
     path: &str,
     path_id: PathId,
-) -> Result<String> {
+    opts: DumpOptions<'_>,
+) -> Result<(&'static str, String)> {
     let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
     let file = env.load_cached(relative)?;
-    dump_object_json_from_handle(&file, data_dir, "", path_id)
+    dump_object_json_from_handle(&file, data_dir, "", path_id, opts)
 }
 
 /// Pretty-print one object from an already-opened SerializedFile. Used
@@ -52,7 +95,8 @@ pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
     data_dir: &str,
     local_ref_prefix: &str,
     path_id: PathId,
-) -> Result<String> {
+    opts: DumpOptions<'_>,
+) -> Result<(&'static str, String)> {
     // Use serde_value::Value as the intermediate — unlike
     // serde_json::Value it has a Bytes variant, so non-UTF-8 string
     // fields (TextAssets that store binary blobs, savegame payloads
@@ -61,9 +105,35 @@ pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
     // Bytes(Vec<u8>) as a JSON array of integers, matching what `jq`
     // already does for similar cases.
     let object = file.object_at::<Value>(path_id)?;
+    let class_id = object.class_id();
     let mut value = object.read()?;
+    if let Some(plain) = try_decrypt_textasset(class_id, &value, opts.spp_key) {
+        return Ok((sniff_mime(&plain), plain));
+    }
     simplify_for_dump(file, data_dir, local_ref_prefix, &mut value);
-    Ok(serde_json::to_string_pretty(&value)?)
+    Ok((MIME_JSON, serde_json::to_string_pretty(&value)?))
+}
+
+/// If `value` looks like a TextAsset whose `m_Script` is a base64
+/// `SecurePlayerPrefs` blob decryptable under `key`, return the
+/// plaintext. `None` keeps the regular JSON dump path. Cheap to call
+/// on the hot path: the class-id gate skips the work for everything
+/// that isn't a TextAsset, and the rest is a base64 + AES round-trip.
+fn try_decrypt_textasset(class_id: ClassId, value: &Value, key: Option<&[u8]>) -> Option<String> {
+    if class_id != ClassId::TextAsset {
+        return None;
+    }
+    let key = key?;
+    // `m_Script` is the encrypted payload. The typetree dumps it as a
+    // String when the bytes happen to be valid UTF-8 (true for base64
+    // blobs); leave Bytes-variant assets alone since they're not what
+    // SecurePlayerPrefs writes anyway.
+    let Value::Map(map) = value else { return None };
+    let script = map.get(&svalue_str("m_Script"))?;
+    let Value::String(blob) = script else {
+        return None;
+    };
+    super::super::secure_player_prefs::decrypt(key, blob)
 }
 
 /// Bundle equivalent of [`dump_object_json`]: parse `bundle_bytes`,
@@ -78,7 +148,8 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
     bundle_bytes: rabex_env::env::Data,
     archive_entry: &str,
     path_id: PathId,
-) -> Result<String> {
+    opts: DumpOptions<'_>,
+) -> Result<(&'static str, String)> {
     use std::io::Cursor;
 
     use rabex_env::env::Data;
@@ -105,11 +176,14 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
         SerializedFile::from_reader(&mut Cursor::new(entry_bytes.as_slice()))?
     };
     let file = env.insert_cache(archive_entry.into(), sf, Data::InMemory(entry_bytes));
-    let value = {
+    let (class_id, value) = {
         let _span = tracing::info_span!("read_object").entered();
         let object = file.object_at::<Value>(path_id)?;
-        object.read()?
+        (object.class_id(), object.read()?)
     };
+    if let Some(plain) = try_decrypt_textasset(class_id, &value, opts.spp_key) {
+        return Ok((sniff_mime(&plain), plain));
+    }
     let value = {
         let _span = tracing::info_span!("simplify_for_dump").entered();
         let mut v = value;
@@ -121,7 +195,7 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
         let _span = tracing::info_span!("serialize_json").entered();
         serde_json::to_string_pretty(&value)?
     };
-    Ok(json)
+    Ok((MIME_JSON, json))
 }
 
 /// Single-pass rewrite of a deserialised object tree:

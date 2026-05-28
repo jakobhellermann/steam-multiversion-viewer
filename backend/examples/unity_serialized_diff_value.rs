@@ -65,9 +65,20 @@ async fn main() -> Result<()> {
             let target_tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
             let target_env = Environment::new(target_game_files, target_tpk);
 
-            let b = dump_value::dump_object_json(&base_env, &base_data_dir, PATH, BASE_PATH_ID)?;
-            let t =
-                dump_value::dump_object_json(&target_env, &target_data_dir, PATH, TARGET_PATH_ID)?;
+            let (_, b) = dump_value::dump_object_json(
+                &base_env,
+                &base_data_dir,
+                PATH,
+                BASE_PATH_ID,
+                Default::default(),
+            )?;
+            let (_, t) = dump_value::dump_object_json(
+                &target_env,
+                &target_data_dir,
+                PATH,
+                TARGET_PATH_ID,
+                Default::default(),
+            )?;
             Ok((b, t))
         })
         .await??;

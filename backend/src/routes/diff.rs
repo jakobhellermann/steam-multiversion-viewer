@@ -987,12 +987,12 @@ async fn bundle_node_body(
 
     let base_side = base_arc
         .as_ref()
-        .map(|s| unity_side(state, appid, depot_id, manifest_id, &q.branch, s.clone()))
+        .map(|s| unity_side_with_scratch(state, appid, depot_id, manifest_id, &q.branch, s.clone()))
         .transpose()?;
     let target_side = target_arc
         .as_ref()
         .map(|s| {
-            unity_side(
+            unity_side_with_scratch(
                 state,
                 appid,
                 q.target_depot_id,
@@ -1007,36 +1007,37 @@ async fn bundle_node_body(
     // recovers per-line side from the unified-diff `+`/`-` gutter.
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
         use rabex_env::resolver::EnvResolver;
-        let b = base_side.zip(base_target).map(
-            |((env, data_dir), (entry, pid))| -> anyhow::Result<String> {
-                let relative = bundle_path
-                    .strip_prefix(&format!("{data_dir}/"))
-                    .unwrap_or(&bundle_path);
-                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
-                transform::unity::serializedfile::dump_value::dump_bundle_object_json(
-                    &env,
-                    &data_dir,
-                    bundle_bytes,
-                    &entry,
-                    pid,
-                )
-            },
-        );
-        let t = target_side.zip(target_target).map(
-            |((env, data_dir), (entry, pid))| -> anyhow::Result<String> {
-                let relative = bundle_path
-                    .strip_prefix(&format!("{data_dir}/"))
-                    .unwrap_or(&bundle_path);
-                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
-                transform::unity::serializedfile::dump_value::dump_bundle_object_json(
-                    &env,
-                    &data_dir,
-                    bundle_bytes,
-                    &entry,
-                    pid,
-                )
-            },
-        );
+        let dump_side =
+            |side: Option<(Arc<crate::state::manifest_cache::ManifestScratch>, String)>,
+             target: Option<(String, rabex_env::rabex::objects::pptr::PathId)>|
+             -> Option<anyhow::Result<String>> {
+                let ((scratch, data_dir), (entry, pid)) = side.zip(target)?;
+                Some((|| -> anyhow::Result<String> {
+                    let unity = scratch
+                        .unity_already_initialized()
+                        .expect("unity scratch was initialised on the async side");
+                    let env = &unity.env;
+                    let relative = bundle_path
+                        .strip_prefix(&format!("{data_dir}/"))
+                        .unwrap_or(&bundle_path);
+                    let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
+                    let opts = transform::unity::serializedfile::dump_value::DumpOptions {
+                        spp_key: unity.secure_player_prefs_key(),
+                    };
+                    let (_mime, text) =
+                        transform::unity::serializedfile::dump_value::dump_bundle_object_json(
+                            env,
+                            &data_dir,
+                            bundle_bytes,
+                            &entry,
+                            pid,
+                            opts,
+                        )?;
+                    Ok(text)
+                })())
+            };
+        let b = dump_side(base_side, base_target);
+        let t = dump_side(target_side, target_target);
         (b, t)
     })
     .await
@@ -1404,12 +1405,12 @@ async fn unity_serialized_node_body(
 
     let base_side = base_arc
         .as_ref()
-        .map(|s| unity_side(state, appid, depot_id, manifest_id, &q.branch, s.clone()))
+        .map(|s| unity_side_with_scratch(state, appid, depot_id, manifest_id, &q.branch, s.clone()))
         .transpose()?;
     let target_side = target_arc
         .as_ref()
         .map(|s| {
-            unity_side(
+            unity_side_with_scratch(
                 state,
                 appid,
                 q.target_depot_id,
@@ -1421,22 +1422,27 @@ async fn unity_serialized_node_body(
         .transpose()?;
 
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
-        let b = base_side
-            .zip(base_pid)
-            .map(|((env, data_dir), pid)| {
-                transform::unity::serializedfile::dump_value::dump_object_json(
-                    &env, &data_dir, &path, pid,
-                )
-            })
-            .transpose();
-        let t = target_side
-            .zip(target_pid)
-            .map(|((env, data_dir), pid)| {
-                transform::unity::serializedfile::dump_value::dump_object_json(
-                    &env, &data_dir, &path, pid,
-                )
-            })
-            .transpose();
+        let dump_side =
+            |side: Option<(Arc<crate::state::manifest_cache::ManifestScratch>, String)>,
+             pid: Option<rabex_env::rabex::objects::pptr::PathId>|
+             -> Option<anyhow::Result<String>> {
+                let ((scratch, data_dir), pid) = side.zip(pid)?;
+                Some((|| -> anyhow::Result<String> {
+                    let unity = scratch
+                        .unity_already_initialized()
+                        .expect("unity scratch was initialised on the async side");
+                    let opts = transform::unity::serializedfile::dump_value::DumpOptions {
+                        spp_key: unity.secure_player_prefs_key(),
+                    };
+                    let (_mime, text) =
+                        transform::unity::serializedfile::dump_value::dump_object_json(
+                            &unity.env, &data_dir, &path, pid, opts,
+                        )?;
+                    Ok(text)
+                })())
+            };
+        let b = dump_side(base_side, base_pid).transpose();
+        let t = dump_side(target_side, target_pid).transpose();
         (b, t)
     })
     .await
@@ -1544,6 +1550,30 @@ fn unity_side(
         .unity(snapshot)
         .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
     Ok((unity.env.clone(), unity.data_dir()))
+}
+
+/// Variant of [`unity_side`] that hands the whole `Arc<ManifestScratch>`
+/// back. Used by the structured-diff/node path so the blocking dump
+/// closure can read manifest-scoped lazy state (notably the
+/// SecurePlayerPrefs key) without round-tripping through the cache
+/// again.
+#[cfg(feature = "unity")]
+fn unity_side_with_scratch(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    branch: &str,
+    snapshot: Arc<crate::state::Snapshot>,
+) -> Result<(Arc<crate::state::manifest_cache::ManifestScratch>, String), ApiError> {
+    let scratch = state
+        .manifest_cache
+        .scratch(appid, depot_id, manifest_id, branch);
+    let unity = scratch
+        .unity(snapshot)
+        .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
+    let data_dir = unity.data_dir();
+    Ok((scratch, data_dir))
 }
 
 #[cfg(all(test, feature = "unity"))]

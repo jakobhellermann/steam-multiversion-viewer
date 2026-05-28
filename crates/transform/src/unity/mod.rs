@@ -12,6 +12,7 @@ use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 
 pub mod bundle;
+pub mod secure_player_prefs;
 pub mod serializedfile;
 
 /// Dump a unity serialized-file as text using a prebuilt `env`.

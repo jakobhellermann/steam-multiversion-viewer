@@ -59,13 +59,15 @@ async fn main() -> Result<()> {
         let bundle_bytes = game_files.read_path(std::path::Path::new(relative))?;
         let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
         let env = Environment::new(game_files, tpk);
-        Ok(dump_value::dump_bundle_object_json(
+        let (_mime, text) = dump_value::dump_bundle_object_json(
             &env,
             &data_dir,
             bundle_bytes,
             ARCHIVE_ENTRY,
             OBJECT_PATH_ID,
-        )?)
+            Default::default(),
+        )?;
+        Ok::<_, anyhow::Error>(text)
     })
     .await??;
     println!(

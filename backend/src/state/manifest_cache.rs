@@ -19,6 +19,7 @@ use {
     super::{SnapChunkStore, Snapshot},
     rabex_env::rabex::tpk::TpkTypeTreeBlob,
     rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache,
+    rabex_env::resolver::EnvResolver,
     rabex_env_steam_depot_vfs::SteamDepotGameFiles,
 };
 
@@ -47,7 +48,12 @@ pub struct UnityScratch {
     /// typetree resolution is unity-version specific — sharing across
     /// versions would silently hand back wrong trees.
     pub env: Arc<Environment>,
-    // future per-manifest unity-specific lazy state lands here.
+    /// `Some(key)` if this game ships SecurePlayerPrefs and the AES
+    /// key could be extracted from `Managed/Assembly-CSharp.dll`,
+    /// `None` otherwise. Either negative path (no DLL, type missing,
+    /// IL pattern doesn't match) is cached so a non-securecplayerprefs
+    /// game doesn't reparse the DLL on every TextAsset preview.
+    spp_key: OnceLock<Option<Vec<u8>>>,
 }
 
 #[cfg(feature = "unity")]
@@ -57,6 +63,25 @@ impl UnityScratch {
     /// `env.load_cached`, which works in data-dir-relative paths.
     pub fn data_dir(&self) -> String {
         self.env.game_files.data_dir().display().to_string()
+    }
+
+    /// Lazy-extract the SecurePlayerPrefs AES key from this manifest's
+    /// `Managed/Assembly-CSharp.dll`. Blocking — call from inside a
+    /// `spawn_blocking` (the unity dump paths already do). Result is
+    /// cached for the lifetime of the scratch; `None` means "no
+    /// SecurePlayerPrefs in this game" and the caller should fall back
+    /// to the raw asset bytes.
+    pub fn secure_player_prefs_key(&self) -> Option<&[u8]> {
+        self.spp_key
+            .get_or_init(|| {
+                let bytes = self
+                    .env
+                    .game_files
+                    .read_path(std::path::Path::new("Managed/Assembly-CSharp.dll"))
+                    .ok()?;
+                transform::unity::secure_player_prefs::extract_key(bytes.as_ref())
+            })
+            .as_deref()
     }
 }
 
@@ -71,10 +96,20 @@ impl ManifestScratch {
                     let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
                     UnityScratch {
                         env: Arc::new(Environment::new(gf, tpk)),
+                        spp_key: OnceLock::new(),
                     }
                 })
             })
             .as_ref()
+    }
+
+    /// Borrow the unity scratch that a previous [`Self::unity`] call
+    /// already initialised — without needing a fresh `Arc<Snapshot>`.
+    /// Returns `None` if probe hasn't run, or ran and decided this is
+    /// not a unity manifest. Used by blocking-task closures that
+    /// pre-acquired the scratch on the async side.
+    pub fn unity_already_initialized(&self) -> Option<&UnityScratch> {
+        self.unity.get()?.as_ref()
     }
 }
 

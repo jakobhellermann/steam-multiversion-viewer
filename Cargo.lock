@@ -756,6 +756,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "ecb"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a8bfa975b1aec2145850fcaa1c6fe269a16578c44705a532ae3edc92b8881c7"
+dependencies = [
+ "cipher 0.4.4",
+]
+
+[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3468,10 +3477,13 @@ dependencies = [
 name = "transform"
 version = "0.1.0"
 dependencies = [
+ "aes 0.8.4",
  "anyhow",
  "async-trait",
+ "base64",
  "camino",
  "dll-diff",
+ "ecb",
  "insta",
  "rabex-env",
  "serde",

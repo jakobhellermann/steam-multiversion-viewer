@@ -420,7 +420,9 @@ fn dump_value_gameobject_with_components() {
     // tree_small_scene where the AssetBundle takes slot 1 — here we
     // have no AssetBundle so the GameObject lands at 1).
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", 1).unwrap()
+        dump_object_json_from_handle(handle, "", "", 1, Default::default())
+            .unwrap()
+            .1
     });
     insta::assert_snapshot!(json, @r#"
     {
@@ -450,7 +452,9 @@ fn dump_value_transform_with_pptrs() {
         .write();
     // Path id 2 = root Transform (Parent: GO=1, T=2 ; Child: GO=3, T=4).
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", 2).unwrap()
+        dump_object_json_from_handle(handle, "", "", 2, Default::default())
+            .unwrap()
+            .1
     });
     insta::assert_snapshot!(json, @r#"
     {
@@ -489,7 +493,9 @@ fn dump_value_assetbundle_singleton() {
         .with_asset_bundle("test_bundle")
         .write();
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", 1).unwrap()
+        dump_object_json_from_handle(handle, "", "", 1, Default::default())
+            .unwrap()
+            .1
     });
     insta::assert_snapshot!(json, @r#"
     {
@@ -665,7 +671,9 @@ fn dump_value_color_via_lens_flare() {
         a: 1.0,
     });
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", path_id).unwrap()
+        dump_object_json_from_handle(handle, "", "", path_id, Default::default())
+            .unwrap()
+            .1
     });
     insta::assert_snapshot!(json, @r#"
     {
@@ -714,7 +722,9 @@ fn dump_value_custom_mb_with_color_and_map() {
     };
     let (bytes, path_id) = scene_with_custom_mb(body);
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", path_id).unwrap()
+        dump_object_json_from_handle(handle, "", "", path_id, Default::default())
+            .unwrap()
+            .1
     });
     insta::assert_snapshot!(json, @r#"
     {

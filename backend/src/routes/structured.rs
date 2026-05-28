@@ -192,11 +192,21 @@ pub async fn manifest_file_structured_node(
             let unity = scratch
                 .unity(snapshot.clone())
                 .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
-            let env = unity.env.clone();
             let data_dir = unity.data_dir();
-            let text = tokio::task::spawn_blocking(move || {
+            let scratch = scratch.clone();
+            let (mime, text) = tokio::task::spawn_blocking(move || {
+                // Re-borrow inside the blocking task so the
+                // SecurePlayerPrefs key lookup (lazy I/O on the manifest's
+                // Managed/Assembly-CSharp.dll) doesn't sit on the async
+                // runtime.
+                let unity = scratch
+                    .unity_already_initialized()
+                    .expect("unity scratch was initialised on the async side");
+                let opts = transform::unity::serializedfile::dump_value::DumpOptions {
+                    spp_key: unity.secure_player_prefs_key(),
+                };
                 transform::unity::serializedfile::dump_value::dump_object_json(
-                    &env, &data_dir, &path, path_id,
+                    &unity.env, &data_dir, &path, path_id, opts,
                 )
             })
             .await
@@ -205,7 +215,7 @@ pub async fn manifest_file_structured_node(
             Ok((
                 ImmutableCache,
                 Json(NodeContent {
-                    mime: "application/json".to_string(),
+                    mime: mime.to_string(),
                     text,
                 }),
             ))
@@ -245,19 +255,27 @@ pub async fn manifest_file_structured_node(
             let unity = scratch
                 .unity(snapshot.clone())
                 .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
-            let env = unity.env.clone();
             let data_dir = unity.data_dir();
-            let text = tokio::task::spawn_blocking(move || {
+            let scratch = scratch.clone();
+            let (mime, text) = tokio::task::spawn_blocking(move || {
+                let unity = scratch
+                    .unity_already_initialized()
+                    .expect("unity scratch was initialised on the async side");
+                let env = &unity.env;
                 let relative = bundle_path
                     .strip_prefix(&format!("{data_dir}/"))
                     .unwrap_or(&bundle_path);
                 let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
+                let opts = transform::unity::serializedfile::dump_value::DumpOptions {
+                    spp_key: unity.secure_player_prefs_key(),
+                };
                 transform::unity::serializedfile::dump_value::dump_bundle_object_json(
-                    &env,
+                    env,
                     &data_dir,
                     bundle_bytes,
                     &archive_entry,
                     path_id,
+                    opts,
                 )
             })
             .await
@@ -266,7 +284,7 @@ pub async fn manifest_file_structured_node(
             Ok((
                 ImmutableCache,
                 Json(NodeContent {
-                    mime: "application/json".to_string(),
+                    mime: mime.to_string(),
                     text,
                 }),
             ))

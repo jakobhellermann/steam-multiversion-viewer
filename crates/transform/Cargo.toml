@@ -7,7 +7,7 @@ edition = "2024"
 default = ["unity"]
 # Optional unity-asset support — serializedfile / bundle handling via
 # rabex. Disable to drop the rabex dep entirely.
-unity = ["dep:rabex-env"]
+unity = ["dep:rabex-env", "dep:aes", "dep:ecb", "dep:base64"]
 
 [dependencies]
 anyhow = "1.0"
@@ -23,6 +23,11 @@ tracing = "0.1"
 utoipa = "5"
 zstd = "0.13.3"
 rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = ["tracing-instrument"] }
+# Unity-specific TextAsset decryption (SecurePlayerPrefs.keyArray
+# extracted from Assembly-CSharp.dll, blob = base64(AES-256-ECB(xml))).
+aes = { version = "0.8", optional = true }
+ecb = { version = "0.1", features = ["std"], optional = true }
+base64 = { version = "0.22", optional = true }
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
