@@ -280,6 +280,12 @@ function ManifestHeader({
             <>
               <dt className="text-slate-400">Engine</dt>
               <dd>Unity {gameInfo.engine.data.version}</dd>
+              {gameInfo.engine.data.bundle_version && (
+                <>
+                  <dt className="text-slate-400">Game version</dt>
+                  <dd>{gameInfo.engine.data.bundle_version}</dd>
+                </>
+              )}
             </>
           )
         )}

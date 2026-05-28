@@ -510,7 +510,10 @@ export function fetchManifestInfo(
   return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}?${qs}`);
 }
 
-export type EngineInfo = { engine: "unity"; data: { version: string } };
+export type EngineInfo = {
+  engine: "unity";
+  data: { version: string; bundle_version?: string };
+};
 export type GameInfo = { engine: EngineInfo | null };
 
 export function fetchGameInfo(

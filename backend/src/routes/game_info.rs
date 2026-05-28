@@ -27,7 +27,35 @@ pub struct GameInfoQuery {
 #[derive(Serialize, ToSchema)]
 #[serde(tag = "engine", content = "data", rename_all = "snake_case")]
 pub enum EngineInfo {
-    Unity { version: String },
+    Unity {
+        /// Engine version (e.g. "2022.3.62f1"). Pulled from
+        /// `globalgamemanagers`' file header — present on every
+        /// Unity build.
+        version: String,
+        /// `PlayerSettings.bundleVersion` — the developer-set
+        /// shipping version string (e.g. "1.0.5"). `None` if the
+        /// PlayerSettings object is absent or carries no value
+        /// (older Unity versions can leave this empty).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bundle_version: Option<String>,
+    },
+}
+
+/// Minimal `PlayerSettings` shape — we only deserialise the one
+/// field we care about. The typetree carries dozens of others that
+/// we'd skip anyway, so a slim shape keeps the deserialise cheap and
+/// resilient to upstream additions.
+#[cfg(feature = "unity")]
+#[derive(Debug, serde::Deserialize)]
+#[allow(non_snake_case)]
+struct PlayerSettingsSlim {
+    bundleVersion: Option<String>,
+}
+
+#[cfg(feature = "unity")]
+impl rabex_env::rabex::objects::ClassIdType for PlayerSettingsSlim {
+    const CLASS_ID: rabex_env::rabex::objects::ClassId =
+        rabex_env::rabex::objects::ClassId::PlayerSettings;
 }
 
 #[derive(Serialize, ToSchema)]
@@ -66,17 +94,31 @@ pub async fn game_info(
         };
         let env = unity.env.clone();
 
-        let version =
-            tokio::task::spawn_blocking(move || env.unity_version().map(ToString::to_string))
-                .await
-                .map_err(|e| ApiError::internal(format!("game-info task panicked: {e}")))?
-                .map_err(|e| ApiError::internal(e.to_string()))?;
+        // Both fields come out of globalgamemanagers — combine the
+        // reads in one blocking call so we don't pay the deserialise
+        // setup twice. PlayerSettings is best-effort: a missing or
+        // unparsable object should not turn the whole game-info into
+        // a 500, it just means we have no bundleVersion to report.
+        let (version, bundle_version) = tokio::task::spawn_blocking(move || {
+            let version = env.unity_version().map(ToString::to_string)?;
+            let bundle_version = env
+                .load_cached("globalgamemanagers")
+                .and_then(|ggm| ggm.find_object_of::<PlayerSettingsSlim>())
+                .ok()
+                .flatten()
+                .and_then(|ps| ps.bundleVersion);
+            Ok::<_, anyhow::Error>((version, bundle_version))
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("game-info task panicked: {e}")))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
         return Ok((
             ImmutableCache,
             Json(GameInfo {
                 engine: Some(EngineInfo::Unity {
-                    version: version.to_string(),
+                    version,
+                    bundle_version,
                 }),
             }),
         ));
