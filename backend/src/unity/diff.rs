@@ -1005,7 +1005,11 @@ fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
 }
 
 fn loose_label(key: &LooseKey, _item: &LooseItem) -> String {
-    if key.name.starts_with("__pid:") {
+    // Empty name happens for singletons (we deliberately drop the name
+    // from the key to keep singletons paired across path-id renumbers)
+    // and the synthetic `__pid:<n>` fallback for unnamed objects.
+    // Both should render as the bare class label, not `"Class: "`.
+    if key.name.is_empty() || key.name.starts_with("__pid:") {
         key.label.clone()
     } else {
         format!("{}: {}", key.label, key.name)

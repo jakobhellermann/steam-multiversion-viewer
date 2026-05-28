@@ -98,7 +98,7 @@ fn tree_small_scene() {
           badge: "1"
           children:
             - id: "obj:1"
-              label: AssetBundle
+              label: test_bundle
               kind: component
               badge: "[1]"
               facets:
@@ -199,7 +199,7 @@ fn diff_added_removed_renamed() {
           status: changed
           children:
             - id: "obj:1"
-              label: "AssetBundle: "
+              label: AssetBundle
               kind: component
               badge: "[1]"
               facets:
@@ -310,7 +310,7 @@ fn tree_with_monobehaviours() {
           badge: "2"
           children:
             - id: "obj:5"
-              label: MonoScript
+              label: PlayerController
               kind: component
               badge: "[5]"
               facets:
@@ -318,7 +318,7 @@ fn tree_with_monobehaviours() {
               has_content: true
               children: []
             - id: "obj:6"
-              label: MonoScript
+              label: Inventory
               kind: component
               badge: "[6]"
               facets:

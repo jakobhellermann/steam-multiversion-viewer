@@ -345,11 +345,46 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     } else {
         format!("{class_id:?}")
     };
-    let mut node = Node::leaf(format!("obj:{path_id}"), &class_label, "component")
+    // For loose objects (`with_pathid_badge`) we additionally pull
+    // `m_Name` to label assets by their author-set name — e.g. a
+    // `MonoScript` row reads `PlayerController` instead of the bare
+    // engine class. Components under a gameobject keep the class
+    // label: their m_Name is almost always empty and the position in
+    // the hierarchy already disambiguates them.
+    //
+    // MonoBehaviours stay on `class_label` because `full_name()` is
+    // already the user-mental identity, and MB's own `m_Name` is
+    // typically empty.
+    let display_label = if with_pathid_badge && !matches!(class_id, ClassId::MonoBehaviour) {
+        read_m_name(file, path_id)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| class_label.clone())
+    } else {
+        class_label.clone()
+    };
+    let mut node = Node::leaf(format!("obj:{path_id}"), &display_label, "component")
         .with_facet("class", &class_label);
     node.has_content = true;
     if with_pathid_badge {
         node = node.with_badge(format!("[{path_id}]"));
     }
     Ok(node)
+}
+
+/// Best-effort read of `m_Name` via the dynamic value path — failure
+/// (missing field, unreadable type tree) returns `None` and the
+/// caller falls back to the class label.
+fn read_m_name<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    path_id: PathId,
+) -> Option<String> {
+    use serde_value::Value;
+    let value: Value = file.object_at::<Value>(path_id).ok()?.read().ok()?;
+    let Value::Map(map) = value else {
+        return None;
+    };
+    match map.get(&Value::String("m_Name".to_string()))? {
+        Value::String(s) => Some(s.clone()),
+        _ => None,
+    }
 }
