@@ -406,7 +406,7 @@ fn diff_identical_is_unchanged() {
 // Value dump (dump_value.rs)
 // -----------------------------------------------------------------------
 
-use crate::unity::serializedfile::dump_value::{DumpSide, dump_object_json_from_handle};
+use crate::unity::serializedfile::dump_value::dump_object_json_from_handle;
 use crate::unity::serializedfile::format::{format_class_stats, format_hierarchy};
 
 #[test]
@@ -420,16 +420,16 @@ fn dump_value_gameobject_with_components() {
     // tree_small_scene where the AssetBundle takes slot 1 — here we
     // have no AssetBundle so the GameObject lands at 1).
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", DumpSide::None, 1).unwrap()
+        dump_object_json_from_handle(handle, "", "", 1).unwrap()
     });
     insta::assert_snapshot!(json, @r#"
     {
       "m_Component": [
         {
-          "component": "__MARK__pptr␞obj:2␞Player␞Transform␞␞"
+          "component": "__MARK__pptr␞obj:2␞Player␞Transform␞"
         },
         {
-          "component": "__MARK__pptr␞obj:3␞Player␞Game.Player.PlayerController␞␞"
+          "component": "__MARK__pptr␞obj:3␞Player␞Game.Player.PlayerController␞"
         }
       ],
       "m_IsActive": true,
@@ -450,15 +450,15 @@ fn dump_value_transform_with_pptrs() {
         .write();
     // Path id 2 = root Transform (Parent: GO=1, T=2 ; Child: GO=3, T=4).
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", DumpSide::None, 2).unwrap()
+        dump_object_json_from_handle(handle, "", "", 2).unwrap()
     });
     insta::assert_snapshot!(json, @r#"
     {
       "m_Children": [
-        "__MARK__pptr␞obj:4␞Parent/Child␞Transform␞␞"
+        "__MARK__pptr␞obj:4␞Parent/Child␞Transform␞"
       ],
       "m_Father": null,
-      "m_GameObject": "__MARK__pptr␞obj:1␞Parent␞GameObject␞␞",
+      "m_GameObject": "__MARK__pptr␞obj:1␞Parent␞GameObject␞",
       "m_LocalPosition": {
         "x": 0.0,
         "y": 0.0,
@@ -489,7 +489,7 @@ fn dump_value_assetbundle_singleton() {
         .with_asset_bundle("test_bundle")
         .write();
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", DumpSide::None, 1).unwrap()
+        dump_object_json_from_handle(handle, "", "", 1).unwrap()
     });
     insta::assert_snapshot!(json, @r#"
     {
@@ -508,33 +508,6 @@ fn dump_value_assetbundle_singleton() {
       "m_PreloadTable": [],
       "m_RuntimeCompatibility": 1,
       "m_SceneHashes": {}
-    }
-    "#);
-}
-
-#[test]
-fn dump_value_with_side_prefix() {
-    // DumpSide::Base shows up in the `__PPTR__` marker's `side` slot.
-    let bytes = Scene::new()
-        .with_root(SceneNode::new("Player").with_script("", "Solo"))
-        .write();
-    let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "/data", "archive:CAB-x/", DumpSide::Base, 1).unwrap()
-    });
-    insta::assert_snapshot!(json, @r#"
-    {
-      "m_Component": [
-        {
-          "component": "__MARK__pptr␞archive:CAB-x/obj:2␞Player␞Transform␞␞base"
-        },
-        {
-          "component": "__MARK__pptr␞archive:CAB-x/obj:3␞Player␞Solo␞␞base"
-        }
-      ],
-      "m_IsActive": true,
-      "m_Layer": 0,
-      "m_Name": "Player",
-      "m_Tag": 0
     }
     "#);
 }
@@ -616,13 +589,7 @@ fn dump_value_rewrites_color_map_to_marker() {
         map.insert(Value::String("b".into()), Value::F32(0.0));
         map.insert(Value::String("a".into()), Value::F32(1.0));
         let mut value = Value::Map(map);
-        crate::unity::serializedfile::dump_value::simplify_for_dump(
-            handle,
-            "",
-            "",
-            DumpSide::None,
-            &mut value,
-        );
+        crate::unity::serializedfile::dump_value::simplify_for_dump(handle, "", "", &mut value);
         serde_json::to_string_pretty(&value).unwrap()
     });
     insta::assert_snapshot!(out, @r#""__MARK__color␞#ff8000ff""#);
@@ -642,13 +609,7 @@ fn dump_value_flattens_non_string_keyed_map() {
         map.insert(Value::I32(7), Value::String("seven".into()));
         map.insert(Value::I32(42), Value::String("answer".into()));
         let mut value = Value::Map(map);
-        crate::unity::serializedfile::dump_value::simplify_for_dump(
-            handle,
-            "",
-            "",
-            DumpSide::None,
-            &mut value,
-        );
+        crate::unity::serializedfile::dump_value::simplify_for_dump(handle, "", "", &mut value);
         serde_json::to_string_pretty(&value).unwrap()
     });
     insta::assert_snapshot!(out, @r#"
@@ -680,18 +641,12 @@ fn dump_value_unit_key_becomes_null_pptr_sentinel() {
         // Pre-resolved null pptr key → Value::Unit.
         map.insert(Value::Unit, Value::String("dangling".into()));
         let mut value = Value::Map(map);
-        crate::unity::serializedfile::dump_value::simplify_for_dump(
-            handle,
-            "",
-            "",
-            DumpSide::None,
-            &mut value,
-        );
+        crate::unity::serializedfile::dump_value::simplify_for_dump(handle, "", "", &mut value);
         serde_json::to_string_pretty(&value).unwrap()
     });
     insta::assert_snapshot!(out, @r#"
     {
-      "__MARK__pptr␞␞␞␞␞": "dangling"
+      "__MARK__pptr␞␞␞␞": "dangling"
     }
     "#);
 }
@@ -710,7 +665,7 @@ fn dump_value_color_via_lens_flare() {
         a: 1.0,
     });
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", DumpSide::None, path_id).unwrap()
+        dump_object_json_from_handle(handle, "", "", path_id).unwrap()
     });
     insta::assert_snapshot!(json, @r#"
     {
@@ -759,7 +714,7 @@ fn dump_value_custom_mb_with_color_and_map() {
     };
     let (bytes, path_id) = scene_with_custom_mb(body);
     let json = with_handle(PATH, bytes, |handle| {
-        dump_object_json_from_handle(handle, "", "", DumpSide::None, path_id).unwrap()
+        dump_object_json_from_handle(handle, "", "", path_id).unwrap()
     });
     insta::assert_snapshot!(json, @r#"
     {
@@ -776,7 +731,7 @@ fn dump_value_custom_mb_with_color_and_map() {
         }
       ],
       "m_Name": "demo",
-      "m_Script": "__MARK__pptr␞obj:1␞CustomBehaviour␞MonoScript␞␞",
+      "m_Script": "__MARK__pptr␞obj:1␞CustomBehaviour␞MonoScript␞",
       "m_TintColor": "__MARK__color␞#00ff80ff"
     }
     "#);

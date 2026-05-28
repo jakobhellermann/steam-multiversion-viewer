@@ -45,17 +45,16 @@ pub const MARK_TYPE_COLOR: &str = "color";
 /// Build a `pptr` marker. Empty fields are allowed (a null pptr lands
 /// in a map key as the all-empty variant; see the walker).
 ///
-/// `side` is `""` outside of diff dumps; in the diff content endpoint
-/// it's `"base"` / `"target"` so the frontend can resolve the marker
-/// against the correct manifest (a `-` line's pptr targets the
-/// target side, a `+` line's the base side).
-pub fn pptr_marker(ref_: &str, target: &str, type_id: &str, file: &str, side: &str) -> String {
+/// Inside a diff dump both sides emit byte-identical markers — the
+/// frontend recovers per-line side from the unified-diff `+`/`-`
+/// gutter, so we don't bake a side field into the wire shape.
+pub fn pptr_marker(ref_: &str, target: &str, type_id: &str, file: &str) -> String {
     let mut out = String::with_capacity(
-        MARK_PREFIX.len() + 7 + ref_.len() + target.len() + type_id.len() + file.len() + side.len(),
+        MARK_PREFIX.len() + 6 + ref_.len() + target.len() + type_id.len() + file.len(),
     );
     let _ = write!(
         &mut out,
-        "{MARK_PREFIX}{MARK_TYPE_PPTR}{MARK_SEP}{ref_}{MARK_SEP}{target}{MARK_SEP}{type_id}{MARK_SEP}{file}{MARK_SEP}{side}",
+        "{MARK_PREFIX}{MARK_TYPE_PPTR}{MARK_SEP}{ref_}{MARK_SEP}{target}{MARK_SEP}{type_id}{MARK_SEP}{file}",
     );
     out
 }
@@ -133,12 +132,12 @@ mod tests {
 
     #[test]
     fn pptr_marker_round_trip() {
-        let m = pptr_marker("obj:5", "Player/Camera", "Camera", "depot.dll", "base");
-        // Wire shape: prefix + "pptr" + 5 sep-delimited fields.
+        let m = pptr_marker("obj:5", "Player/Camera", "Camera", "depot.dll");
+        // Wire shape: prefix + "pptr" + 4 sep-delimited fields.
         assert_eq!(
             m,
             format!(
-                "{MARK_PREFIX}pptr{MARK_SEP}obj:5{MARK_SEP}Player/Camera{MARK_SEP}Camera{MARK_SEP}depot.dll{MARK_SEP}base",
+                "{MARK_PREFIX}pptr{MARK_SEP}obj:5{MARK_SEP}Player/Camera{MARK_SEP}Camera{MARK_SEP}depot.dll",
             )
         );
     }

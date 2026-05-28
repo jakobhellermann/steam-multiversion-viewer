@@ -30,26 +30,6 @@ use super::markers::{
     as_file_id, as_path_id, color_hex_from_map, color_marker, pptr_from_map, pptr_marker,
 };
 
-/// Which side of a diff this dump is for — wired into every pptr
-/// marker so the frontend can route the click to the right
-/// manifest. Outside diff contexts use [`DumpSide::None`].
-#[derive(Clone, Copy, Debug)]
-pub enum DumpSide {
-    None,
-    Base,
-    Target,
-}
-
-impl DumpSide {
-    fn as_str(self) -> &'static str {
-        match self {
-            DumpSide::None => "",
-            DumpSide::Base => "base",
-            DumpSide::Target => "target",
-        }
-    }
-}
-
 /// Read the object at `path_id` and pretty-print it as JSON using the
 /// typetree, applying [`simplify_for_dump`] on the way out.
 #[tracing::instrument(skip_all, fields(path, path_id))]
@@ -58,11 +38,10 @@ pub fn dump_object_json<R: EnvResolver, P: TypeTreeProvider>(
     data_dir: &str,
     path: &str,
     path_id: PathId,
-    side: DumpSide,
 ) -> Result<String> {
     let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
     let file = env.load_cached(relative)?;
-    dump_object_json_from_handle(&file, data_dir, "", side, path_id)
+    dump_object_json_from_handle(&file, data_dir, "", path_id)
 }
 
 /// Pretty-print one object from an already-opened SerializedFile. Used
@@ -72,7 +51,6 @@ pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     data_dir: &str,
     local_ref_prefix: &str,
-    side: DumpSide,
     path_id: PathId,
 ) -> Result<String> {
     // Use serde_value::Value as the intermediate — unlike
@@ -84,7 +62,7 @@ pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
     // already does for similar cases.
     let object = file.object_at::<Value>(path_id)?;
     let mut value = object.read()?;
-    simplify_for_dump(file, data_dir, local_ref_prefix, side, &mut value);
+    simplify_for_dump(file, data_dir, local_ref_prefix, &mut value);
     Ok(serde_json::to_string_pretty(&value)?)
 }
 
@@ -100,7 +78,6 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
     bundle_bytes: rabex_env::env::Data,
     archive_entry: &str,
     path_id: PathId,
-    side: DumpSide,
 ) -> Result<String> {
     use std::io::Cursor;
 
@@ -137,7 +114,7 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
         let _span = tracing::info_span!("simplify_for_dump").entered();
         let mut v = value;
         let archive_prefix = format!("archive:{archive_entry}/");
-        simplify_for_dump(&file, data_dir, &archive_prefix, side, &mut v);
+        simplify_for_dump(&file, data_dir, &archive_prefix, &mut v);
         v
     };
     let json = {
@@ -163,7 +140,6 @@ pub(crate) fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
     // directly into the marker's `ref` field so the frontend's
     // hash-link matches the tree-row id.
     local_ref_prefix: &str,
-    side: DumpSide,
     value: &mut Value,
 ) {
     match value {
@@ -171,7 +147,7 @@ pub(crate) fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
             // Whole-map rewrites — short-circuit before recursing into
             // children we're about to throw away.
             if let Some(pptr) = pptr_from_map(map) {
-                *value = qualify_pptr(file, data_dir, local_ref_prefix, side, pptr);
+                *value = qualify_pptr(file, data_dir, local_ref_prefix, pptr);
                 return;
             }
             if let Some(hex) = color_hex_from_map(map) {
@@ -191,14 +167,14 @@ pub(crate) fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
             let taken = std::mem::take(map);
             let mut any_non_string = false;
             for (mut k, mut v) in taken {
-                simplify_for_dump(file, data_dir, local_ref_prefix, side, &mut k);
+                simplify_for_dump(file, data_dir, local_ref_prefix, &mut k);
                 // Null pptr keys land here as `Value::Unit`; JSON
                 // object keys can't be null, so swap in an explicit
                 // sentinel that matches the regular pptr null shape.
                 if matches!(k, Value::Unit) {
-                    k = svalue_str(pptr_marker("", "", "", "", side.as_str()));
+                    k = svalue_str(pptr_marker("", "", "", ""));
                 }
-                simplify_for_dump(file, data_dir, local_ref_prefix, side, &mut v);
+                simplify_for_dump(file, data_dir, local_ref_prefix, &mut v);
                 if !matches!(k, Value::String(_)) {
                     any_non_string = true;
                 }
@@ -220,12 +196,12 @@ pub(crate) fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
         }
         Value::Seq(items) => {
             for v in items {
-                simplify_for_dump(file, data_dir, local_ref_prefix, side, v);
+                simplify_for_dump(file, data_dir, local_ref_prefix, v);
             }
         }
-        Value::Newtype(inner) => simplify_for_dump(file, data_dir, local_ref_prefix, side, inner),
+        Value::Newtype(inner) => simplify_for_dump(file, data_dir, local_ref_prefix, inner),
         Value::Option(Some(inner)) => {
-            simplify_for_dump(file, data_dir, local_ref_prefix, side, inner);
+            simplify_for_dump(file, data_dir, local_ref_prefix, inner);
         }
         _ => {}
     }
@@ -243,7 +219,6 @@ fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
     // sees. Empty for bare SerializedFiles. External pptrs ignore it
     // — they're addressed by depot path + bare `obj:<pathid>`.
     local_ref_prefix: &str,
-    side: DumpSide,
     pptr: PPtr,
 ) -> Value {
     let Some(pptr) = pptr.optional() else {
@@ -298,13 +273,7 @@ fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
             .unwrap_or_default();
         external_target(file.env, data_dir, &raw_name, pptr.m_PathID)
     };
-    svalue_str(pptr_marker(
-        &ref_part,
-        &target,
-        &class_id,
-        &file_part,
-        side.as_str(),
-    ))
+    svalue_str(pptr_marker(&ref_part, &target, &class_id, &file_part))
 }
 
 /// Resolve an external pptr target into (depot-path, ref-id).

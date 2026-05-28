@@ -65,7 +65,6 @@ async fn main() -> Result<()> {
             bundle_bytes,
             ARCHIVE_ENTRY,
             OBJECT_PATH_ID,
-            dump_value::DumpSide::None,
         )?)
     })
     .await??;

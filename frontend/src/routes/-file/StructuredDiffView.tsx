@@ -172,12 +172,11 @@ function DiffNodeBody({
   if (settled.text.length === 0) {
     return <p className="text-sm text-slate-500">No content.</p>;
   }
-  // Pptr markers carry a `side` field in diff dumps; the renderer
-  // dispatches base-side pptrs against `baseLocator` and target-side
-  // against `targetLocator` so hover-href / middle-click open the
-  // right manifest. Same-page hash clicks may still land off-target
-  // (the diff tree's ids are prefixed) — improving that is a separate
-  // step.
+  // Both diff sides emit identical pptr markers (side info isn't baked
+  // into the marker shape — that's recoverable per-line from the
+  // unified-diff `+`/`-` gutter but not worth the complexity yet).
+  // Every link resolves against the base manifest; cross-side click
+  // routing is a follow-up.
   const baseLocator: FileLocator = {
     appid,
     depotId: base.depotId,
@@ -185,11 +184,7 @@ function DiffNodeBody({
     branch: base.branch,
     path,
   };
-  const targetLocator: FileLocator = { ...target, appid, path };
-  const postProcess = makePostProcess(baseLocator, () => true, {
-    base: baseLocator,
-    target: targetLocator,
-  });
+  const postProcess = makePostProcess(baseLocator, () => true);
   return (
     <DiffContentPane>
       <HighlightedPre code={settled.text} lang={settled.lang} bare postProcess={postProcess} />

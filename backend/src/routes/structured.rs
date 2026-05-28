@@ -196,11 +196,7 @@ pub async fn manifest_file_structured_node(
             let data_dir = unity.data_dir();
             let text = tokio::task::spawn_blocking(move || {
                 transform::unity::serializedfile::dump_value::dump_object_json(
-                    &env,
-                    &data_dir,
-                    &path,
-                    path_id,
-                    transform::unity::serializedfile::dump_value::DumpSide::None,
+                    &env, &data_dir, &path, path_id,
                 )
             })
             .await
@@ -262,7 +258,6 @@ pub async fn manifest_file_structured_node(
                     bundle_bytes,
                     &archive_entry,
                     path_id,
-                    transform::unity::serializedfile::dump_value::DumpSide::None,
                 )
             })
             .await

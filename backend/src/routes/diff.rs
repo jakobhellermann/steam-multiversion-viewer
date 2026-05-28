@@ -838,9 +838,10 @@ async fn bundle_node_body(
         })
         .transpose()?;
 
+    // Dump both sides — PPtr markers are side-agnostic, the frontend
+    // recovers per-line side from the unified-diff `+`/`-` gutter.
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
         use rabex_env::resolver::EnvResolver;
-        use transform::unity::serializedfile::dump_value::DumpSide;
         let b = base_side.zip(base_target).map(
             |((env, data_dir), (entry, pid))| -> anyhow::Result<String> {
                 let relative = bundle_path
@@ -853,7 +854,6 @@ async fn bundle_node_body(
                     bundle_bytes,
                     &entry,
                     pid,
-                    DumpSide::Base,
                 )
             },
         );
@@ -869,7 +869,6 @@ async fn bundle_node_body(
                     bundle_bytes,
                     &entry,
                     pid,
-                    DumpSide::Target,
                 )
             },
         );
@@ -1257,16 +1256,11 @@ async fn unity_serialized_node_body(
         .transpose()?;
 
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
-        use transform::unity::serializedfile::dump_value::DumpSide;
         let b = base_side
             .zip(base_pid)
             .map(|((env, data_dir), pid)| {
                 transform::unity::serializedfile::dump_value::dump_object_json(
-                    &env,
-                    &data_dir,
-                    &path,
-                    pid,
-                    DumpSide::Base,
+                    &env, &data_dir, &path, pid,
                 )
             })
             .transpose();
@@ -1274,11 +1268,7 @@ async fn unity_serialized_node_body(
             .zip(target_pid)
             .map(|((env, data_dir), pid)| {
                 transform::unity::serializedfile::dump_value::dump_object_json(
-                    &env,
-                    &data_dir,
-                    &path,
-                    pid,
-                    DumpSide::Target,
+                    &env, &data_dir, &path, pid,
                 )
             })
             .transpose();

@@ -15,10 +15,10 @@
 //
 // Currently shipped markers:
 //
-// - `pptr` — `__MARK__pptr␞<ref>␞<target>␞<type>␞<file>␞<side>` (Unity PPtr).
-//   `side` is `""` for non-diff dumps, `"base"`/`"target"` inside the
-//   structured-diff content endpoint so the renderer can resolve the
-//   pptr against the right manifest.
+// - `pptr` — `__MARK__pptr␞<ref>␞<target>␞<type>␞<file>` (Unity PPtr).
+//   Inside a structured-diff content body both sides emit byte-equal
+//   markers — the per-side routing is taken from the unified-diff
+//   `+`/`-` gutter, not baked into the marker shape.
 // - `color` — `__MARK__color␞#rrggbbaa` (rgba color).
 
 import type { FileLocator } from "./types";
@@ -40,35 +40,16 @@ const MARKER_RE = new RegExp(`"${MARK_PREFIX}([a-z]+)${MARK_SEP}([^"]*)"`, "g");
 /// text). The backend filters most dead refs (self-transforms, etc)
 /// but some — like Transform refs on components when the tree only
 /// lists GameObjects — still come through with the marker shape.
-///
-/// `sideLocators` is the diff-mode hook: when set, pptrs carrying a
-/// `side=base|target` tag in their payload are resolved against the
-/// matching locator instead of the default one. Pass `undefined`
-/// outside the structured-diff content pane.
 export function makePostProcess(
   locator: FileLocator,
   isLocalRefInTree: (ref: string) => boolean,
-  sideLocators?: { base: FileLocator; target: FileLocator },
 ): (html: string) => string {
-  const defaultRenderer = makePptrRenderer(locator, isLocalRefInTree);
-  const baseRenderer = sideLocators
-    ? makePptrRenderer(sideLocators.base, isLocalRefInTree)
-    : defaultRenderer;
-  const targetRenderer = sideLocators
-    ? makePptrRenderer(sideLocators.target, isLocalRefInTree)
-    : defaultRenderer;
+  const renderPptr = makePptrRenderer(locator, isLocalRefInTree);
   return (html) =>
     html.replace(MARKER_RE, (whole, type, payload) => {
       switch (type) {
-        case "pptr": {
-          // The trailing `␞<side>` field (added for diff dumps) tells us
-          // which renderer to pick. Missing or empty → caller didn't
-          // tag a side and we use the default locator.
-          const side = payload.split(MARK_SEP)[4] ?? "";
-          if (side === "base") return baseRenderer(payload);
-          if (side === "target") return targetRenderer(payload);
-          return defaultRenderer(payload);
-        }
+        case "pptr":
+          return renderPptr(payload);
         case "color":
           return renderColor(payload);
         default:
