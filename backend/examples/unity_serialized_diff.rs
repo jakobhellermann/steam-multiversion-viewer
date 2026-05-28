@@ -8,7 +8,7 @@ use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
 use steam_multiversion_viewer::structured::{Node, NodeStatus};
-use steam_multiversion_viewer::unity::diff;
+use steam_multiversion_viewer::unity::serializedfile::diff;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 

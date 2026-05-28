@@ -32,16 +32,16 @@ use serde::Serialize;
 /// Default unity version used by every fixture. Picked because the
 /// embedded TPK has full coverage and it matches what the prod
 /// builder example uses.
-pub(super) const TEST_UNITY_VERSION: &str = "2022.3.0f1";
+pub(crate) const TEST_UNITY_VERSION: &str = "2022.3.0f1";
 
 /// Tiny in-memory [`EnvResolver`]. One path → one byte buffer; no
 /// listing semantics beyond the fixture set.
-pub(super) struct MemResolver {
+pub(crate) struct MemResolver {
     files: HashMap<PathBuf, Vec<u8>>,
 }
 
 impl MemResolver {
-    pub(super) fn single(path: &str, bytes: Vec<u8>) -> Self {
+    pub(crate) fn single(path: &str, bytes: Vec<u8>) -> Self {
         let mut files = HashMap::new();
         files.insert(PathBuf::from(path), bytes);
         Self { files }
@@ -82,14 +82,14 @@ impl EnvResolver for MemResolver {
 /// child list. Build with [`Scene::root`] / [`Scene::child`] for
 /// readability; the [`Scene::write`] step turns it into the bytes of a
 /// SerializedFile.
-pub(super) struct Scene {
+pub(crate) struct Scene {
     roots: Vec<SceneNode>,
     /// Loose AssetBundle entry if requested. Placed at path id 1 (the
     /// builder requires AssetBundle there).
     asset_bundle_name: Option<String>,
 }
 
-pub(super) struct SceneNode {
+pub(crate) struct SceneNode {
     name: &'static str,
     /// MonoBehaviour scripts attached to this gameobject. Each entry
     /// produces one MB instance plus one MonoScript (deduplicated by
@@ -100,30 +100,30 @@ pub(super) struct SceneNode {
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
-pub(super) struct ScriptRef {
-    pub(super) namespace: &'static str,
-    pub(super) class_name: &'static str,
+pub(crate) struct ScriptRef {
+    pub(crate) namespace: &'static str,
+    pub(crate) class_name: &'static str,
 }
 
 impl Scene {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             roots: Vec::new(),
             asset_bundle_name: None,
         }
     }
 
-    pub(super) fn with_root(mut self, node: SceneNode) -> Self {
+    pub(crate) fn with_root(mut self, node: SceneNode) -> Self {
         self.roots.push(node);
         self
     }
 
-    pub(super) fn with_asset_bundle(mut self, name: &str) -> Self {
+    pub(crate) fn with_asset_bundle(mut self, name: &str) -> Self {
         self.asset_bundle_name = Some(name.to_owned());
         self
     }
 
-    pub(super) fn write(&self) -> Vec<u8> {
+    pub(crate) fn write(&self) -> Vec<u8> {
         let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
         let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
         let common = build_common_offset_map(&tpk.inner, &unity_version);
@@ -227,7 +227,7 @@ impl ScriptRegistry {
 }
 
 impl SceneNode {
-    pub(super) fn new(name: &'static str) -> Self {
+    pub(crate) fn new(name: &'static str) -> Self {
         Self {
             name,
             scripts: Vec::new(),
@@ -235,14 +235,14 @@ impl SceneNode {
         }
     }
 
-    pub(super) fn with_child(mut self, child: SceneNode) -> Self {
+    pub(crate) fn with_child(mut self, child: SceneNode) -> Self {
         self.children.push(child);
         self
     }
 
     /// Attach a MonoBehaviour referencing the script identified by
     /// `namespace.class_name`. Use an empty namespace for global types.
-    pub(super) fn with_script(mut self, namespace: &'static str, class_name: &'static str) -> Self {
+    pub(crate) fn with_script(mut self, namespace: &'static str, class_name: &'static str) -> Self {
         self.scripts.push(ScriptRef {
             namespace,
             class_name,
@@ -360,7 +360,7 @@ struct AssetInfo {
 /// Open scene bytes via a fresh `Environment` and hand the resulting
 /// handle to `f`. Closure-shaped so the env's lifetime brackets the
 /// handle without callers having to thread it through manually.
-pub(super) fn with_handle<R>(
+pub(crate) fn with_handle<R>(
     path: &str,
     bytes: Vec<u8>,
     f: impl FnOnce(&SerializedFileHandle<'_, MemResolver, TypeTreeCache<TpkTypeTreeBlob>>) -> R,
@@ -370,115 +370,4 @@ pub(super) fn with_handle<R>(
     let env = Environment::new(resolver, tpk);
     let handle = env.load_cached(path).unwrap();
     f(&handle)
-}
-
-// -----------------------------------------------------------------------
-// Bundle fixtures
-// -----------------------------------------------------------------------
-
-use rabex_env::rabex::files::bundlefile::{
-    BundleFileHeader, BundleFileReader, BundleSignature, CompressionType, ExtractionConfig,
-    write_bundle,
-};
-use rabex_env::rabex::files::unityfile::FileEntry;
-
-/// One entry to add to a test bundle. Either an embedded SerializedFile
-/// (`Scene` already written to bytes) or a raw blob of explicit size.
-pub(super) enum BundleEntry {
-    Serialized { path: String, bytes: Vec<u8> },
-    Blob { path: String, bytes: Vec<u8> },
-}
-
-/// Build a `.unity3d`-style bundle in memory. Uses the low-level
-/// [`write_bundle`] API directly so we can set per-entry flags (the
-/// stock `BundleFileBuilder::add_file` forces every entry to flag 4,
-/// which would mark blob entries as SerializedFiles and break the
-/// bundle-walk dispatch we want to test).
-pub(super) struct BundleBuilder {
-    entries: Vec<BundleEntry>,
-}
-
-impl BundleBuilder {
-    pub(super) fn new() -> Self {
-        Self {
-            entries: Vec::new(),
-        }
-    }
-
-    pub(super) fn add_serialized(mut self, path: &str, bytes: Vec<u8>) -> Self {
-        self.entries.push(BundleEntry::Serialized {
-            path: path.to_owned(),
-            bytes,
-        });
-        self
-    }
-
-    pub(super) fn add_blob(mut self, path: &str, bytes: Vec<u8>) -> Self {
-        self.entries.push(BundleEntry::Blob {
-            path: path.to_owned(),
-            bytes,
-        });
-        self
-    }
-
-    pub(super) fn write(self) -> Vec<u8> {
-        // Concatenate every entry's bytes into one uncompressed blob and
-        // build the directory entries with offsets pointing into it.
-        let mut uncompressed: Vec<u8> = Vec::new();
-        let mut dir: Vec<FileEntry> = Vec::new();
-        for entry in self.entries {
-            let (path, bytes, flags) = match entry {
-                BundleEntry::Serialized { path, bytes } => (path, bytes, 4u32),
-                BundleEntry::Blob { path, bytes } => (path, bytes, 0u32),
-            };
-            let offset = uncompressed.len() as i64;
-            let size = bytes.len() as i64;
-            uncompressed.extend_from_slice(&bytes);
-            dir.push(FileEntry {
-                offset,
-                size,
-                flags,
-                path,
-            });
-        }
-
-        let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
-        let header = BundleFileHeader {
-            signature: BundleSignature::UnityFS,
-            version: 7,
-            unity_version: "5.x.x".to_owned(),
-            unity_revision: Some(unity_version),
-            size: 0,
-        };
-        let mut out = std::io::Cursor::new(Vec::new());
-        write_bundle(
-            &header,
-            &mut out,
-            CompressionType::None,
-            CompressionType::None,
-            &dir,
-            &uncompressed,
-        )
-        .unwrap();
-        out.into_inner()
-    }
-}
-
-/// Open bundle bytes via a fresh `Environment` and hand the parsed
-/// reader to `f`. Same closure shape as [`with_handle`] for the
-/// per-file path; tests pick whichever fits.
-pub(super) fn with_bundle<R>(
-    bytes: Vec<u8>,
-    f: impl FnOnce(
-        &Environment<MemResolver, TypeTreeCache<TpkTypeTreeBlob>>,
-        &BundleFileReader<Cursor<Vec<u8>>>,
-    ) -> R,
-) -> R {
-    let resolver = MemResolver::single("__unused__", Vec::new());
-    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
-    let env = Environment::new(resolver, tpk);
-    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
-    let config = ExtractionConfig::default().with_fallback_unity_version(unity_version);
-    let bundle = BundleFileReader::from_reader(Cursor::new(bytes), &config).unwrap();
-    f(&env, &bundle)
 }

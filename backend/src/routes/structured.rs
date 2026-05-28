@@ -77,7 +77,7 @@ pub async fn manifest_file_structured(
         Some(Transformer::UnitySerialized) => {
             let snapshot_for_blocking = snapshot.clone();
             let tree = tokio::task::spawn_blocking(move || {
-                crate::unity::tree::build_tree(snapshot_for_blocking, &path)
+                crate::unity::serializedfile::tree::build_tree(snapshot_for_blocking, &path)
             })
             .await
             .map_err(|e| ApiError {
@@ -171,7 +171,9 @@ pub async fn manifest_file_structured_node(
             // Resolve the node id to a path-id; non-object ids
             // (section headers, class-stats rows) get an empty body so
             // the frontend hides the panel.
-            let Some(path_id) = crate::unity::tree::parse_object_node_id(&q.node_id) else {
+            let Some(path_id) =
+                crate::unity::serializedfile::tree::parse_object_node_id(&q.node_id)
+            else {
                 return Ok((
                     ImmutableCache,
                     Json(NodeContent {
@@ -182,11 +184,11 @@ pub async fn manifest_file_structured_node(
             };
             let path = q.path.clone();
             let text = tokio::task::spawn_blocking(move || {
-                crate::unity::dump_value::dump_object_json(
+                crate::unity::serializedfile::dump_value::dump_object_json(
                     snapshot,
                     &path,
                     path_id,
-                    crate::unity::dump_value::DumpSide::None,
+                    crate::unity::serializedfile::dump_value::DumpSide::None,
                 )
             })
             .await
@@ -222,7 +224,8 @@ pub async fn manifest_file_structured_node(
                     }),
                 ));
             };
-            let Some(path_id) = crate::unity::tree::parse_object_node_id(inner) else {
+            let Some(path_id) = crate::unity::serializedfile::tree::parse_object_node_id(inner)
+            else {
                 return Ok((
                     ImmutableCache,
                     Json(NodeContent {
@@ -234,12 +237,12 @@ pub async fn manifest_file_structured_node(
             let bundle_path = q.path.clone();
             let archive_entry = archive_entry.to_string();
             let text = tokio::task::spawn_blocking(move || {
-                crate::unity::dump_value::dump_bundle_object_json(
+                crate::unity::serializedfile::dump_value::dump_bundle_object_json(
                     snapshot,
                     &bundle_path,
                     &archive_entry,
                     path_id,
-                    crate::unity::dump_value::DumpSide::None,
+                    crate::unity::serializedfile::dump_value::DumpSide::None,
                 )
             })
             .await

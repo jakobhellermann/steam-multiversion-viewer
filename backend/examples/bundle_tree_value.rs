@@ -6,7 +6,7 @@ use anyhow::Result;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
-use steam_multiversion_viewer::unity::dump_value;
+use steam_multiversion_viewer::unity::serializedfile::dump_value;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 

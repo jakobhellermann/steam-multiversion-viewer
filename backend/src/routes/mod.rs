@@ -711,7 +711,7 @@ fn structured_info_for(path: &str) -> Option<StructuredInfo> {
     match crate::transform::tools::transformer_for(path) {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized | Transformer::UnityBundle) => Some(StructuredInfo {
-            kind: crate::unity::tree::TREE_KIND.to_string(),
+            kind: crate::unity::serializedfile::tree::TREE_KIND.to_string(),
         }),
         Some(Transformer::Dll) => Some(StructuredInfo {
             kind: crate::dll::tree::TREE_KIND.to_string(),

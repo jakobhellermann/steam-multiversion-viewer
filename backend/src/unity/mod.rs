@@ -17,14 +17,7 @@ use steam_depot_vfs::chunk_store::ChunkStore;
 use steam_depot_vfs::fs::DepotManifestStore;
 
 pub mod bundle;
-pub mod diff;
-pub mod dump_value;
-mod format;
-mod markers;
-pub mod tree;
-
-#[cfg(test)]
-mod test;
+pub mod serializedfile;
 
 /// Dump a unity serialized-file as text
 /// Synchronous because rabex's I/O trampolines
@@ -48,9 +41,9 @@ pub fn dump_unity_serialized<C: ChunkStore + 'static>(
     let file = env.load_cached(relative)?;
 
     let mut out = String::new();
-    format::format_class_stats(&mut out, &file);
+    serializedfile::format::format_class_stats(&mut out, &file);
     out.push('\n');
-    format::format_hierarchy(&mut out, &file)?;
+    serializedfile::format::format_hierarchy(&mut out, &file)?;
     Ok(out)
 }
 

@@ -28,7 +28,7 @@ use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
 use steam_multiversion_viewer::dll;
-use steam_multiversion_viewer::unity::dump_value::dump_object_json_unified_diff;
+use steam_multiversion_viewer::unity::serializedfile::dump_value::dump_object_json_unified_diff;
 use tokio::sync::Semaphore;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
