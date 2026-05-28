@@ -775,18 +775,7 @@ async fn bundle_node_body(
     manifest_id: ManifestId,
     q: &StructuredDiffNodeQuery,
 ) -> Result<(crate::http::ImmutableCache, Response)> {
-    /// Pull `(archive_entry, obj_pid)` out of a per-side inner id of
-    /// the shape `archive:<entry>/obj:<pid>`.
-    fn parse_bundle_inner(id: &str) -> Option<(String, i64)> {
-        let (entry, inner) = transform::unity::bundle::parse_archive_id(id)?;
-        let pid = transform::unity::serializedfile::tree::parse_object_node_id(inner)?;
-        Some((entry.to_string(), pid))
-    }
-
-    let (base_inner, target_inner) = split_diff_id(&q.node_id);
-    let base_target = base_inner.and_then(parse_bundle_inner);
-    let target_target = target_inner.and_then(parse_bundle_inner);
-
+    let (base_target, target_target) = parse_bundle_node_id(&q.node_id);
     if base_target.is_none() && target_target.is_none() {
         return Err(ApiError::bad_request(format!(
             "bundle structured-diff/node: id has no body: {}",
@@ -1104,6 +1093,31 @@ fn split_diff_id(node_id: &str) -> (Option<&str>, Option<&str>) {
     (Some(node_id), Some(node_id))
 }
 
+/// Resolve a bundle diff-tree node id to per-side `(archive_entry,
+/// obj_pid)` tuples. Bundle ids carry the archive prefix on the
+/// *outside* (`archive:<entry>/...`) while the `base:`/`target:`/`mod:`
+/// side markers from `diff_sections` sit on the *inside*. We strip
+/// the archive prefix first, [`split_diff_id`] the inner part, then
+/// parse the object path-id on each per-side id.
+///
+/// Either side is `None` when that side has no parseable object id
+/// (section headers, class-stats rows, malformed input).
+#[cfg(feature = "unity")]
+fn parse_bundle_node_id(node_id: &str) -> (Option<(String, i64)>, Option<(String, i64)>) {
+    let Some((entry, inner)) = transform::unity::bundle::parse_archive_id(node_id) else {
+        return (None, None);
+    };
+    let (base_inner, target_inner) = split_diff_id(inner);
+    let parse_obj = |s: &str| {
+        transform::unity::serializedfile::tree::parse_object_node_id(s)
+            .map(|pid| (entry.to_string(), pid))
+    };
+    (
+        base_inner.and_then(parse_obj),
+        target_inner.and_then(parse_obj),
+    )
+}
+
 /// Structured tree diff node content
 ///
 /// Dumps both sides as JSON, then runs the same unified-diff used by
@@ -1375,4 +1389,80 @@ fn unity_side(
         .unity(snapshot)
         .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
     Ok((unity.env.clone(), unity.data_dir()))
+}
+
+#[cfg(all(test, feature = "unity"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_diff_id_handles_side_prefixes() {
+        assert_eq!(split_diff_id("obj:42"), (Some("obj:42"), Some("obj:42")));
+        assert_eq!(split_diff_id("base:obj:42"), (Some("obj:42"), None));
+        assert_eq!(split_diff_id("target:obj:42"), (None, Some("obj:42")));
+        assert_eq!(
+            split_diff_id("mod:obj:1,obj:2"),
+            (Some("obj:1"), Some("obj:2"))
+        );
+    }
+
+    /// Matched-pair (both sides see the same object) inside a bundle:
+    /// `archive:<entry>/obj:N`. Both per-side targets resolve to the
+    /// same `(entry, pid)`.
+    #[test]
+    fn parse_bundle_node_id_matched_pair() {
+        let (base, target) = parse_bundle_node_id("archive:CAB-abc/obj:42");
+        assert_eq!(base, Some(("CAB-abc".to_string(), 42)));
+        assert_eq!(target, Some(("CAB-abc".to_string(), 42)));
+    }
+
+    /// One-sided row inside a matched archive subtree — the side
+    /// marker lives *inside* the archive prefix (see
+    /// `diff_archive_pair`'s `prefix_ids` walk). Regression test for
+    /// the "id has no body" bug where the outer split was being run
+    /// against `archive:CAB-…/target:obj:335` and saw no side prefix.
+    #[test]
+    fn parse_bundle_node_id_one_sided_target() {
+        let (base, target) =
+            parse_bundle_node_id("archive:CAB-d2149d4004bbc85c803fc79e72339a31/target:obj:335");
+        assert_eq!(base, None);
+        assert_eq!(
+            target,
+            Some(("CAB-d2149d4004bbc85c803fc79e72339a31".to_string(), 335))
+        );
+    }
+
+    #[test]
+    fn parse_bundle_node_id_one_sided_base() {
+        let (base, target) = parse_bundle_node_id("archive:CAB-abc/base:obj:7");
+        assert_eq!(base, Some(("CAB-abc".to_string(), 7)));
+        assert_eq!(target, None);
+    }
+
+    /// Renumbered object: same logical asset on both sides but its
+    /// path-id changed between manifests.
+    #[test]
+    fn parse_bundle_node_id_mod_pair() {
+        let (base, target) = parse_bundle_node_id("archive:CAB-abc/mod:obj:10,obj:11");
+        assert_eq!(base, Some(("CAB-abc".to_string(), 10)));
+        assert_eq!(target, Some(("CAB-abc".to_string(), 11)));
+    }
+
+    /// Section header / class-stats row inside an archive — no
+    /// per-object body to dump.
+    #[test]
+    fn parse_bundle_node_id_non_object_inner() {
+        let (base, target) = parse_bundle_node_id("archive:CAB-abc/section:hierarchy");
+        assert_eq!(base, None);
+        assert_eq!(target, None);
+    }
+
+    /// Ids that don't even carry the archive prefix don't belong in
+    /// this endpoint at all.
+    #[test]
+    fn parse_bundle_node_id_no_archive_prefix() {
+        let (base, target) = parse_bundle_node_id("obj:42");
+        assert_eq!(base, None);
+        assert_eq!(target, None);
+    }
 }
