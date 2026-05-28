@@ -149,13 +149,6 @@ fn diff_added_removed_renamed() {
       kind: file
       status: changed
       children:
-        - id: "section:class-stats"
-          label: Class stats
-          kind: section
-          badge: 9 objects
-          default_collapsed: true
-          status: unchanged
-          children: []
         - id: "section:hierarchy"
           label: Hierarchy
           kind: section
@@ -374,26 +367,7 @@ fn diff_identical_same_named_siblings_prunes_clean() {
       label: level0
       kind: file
       status: unchanged
-      children:
-        - id: "section:class-stats"
-          label: Class stats
-          kind: section
-          badge: 8 objects
-          default_collapsed: true
-          status: unchanged
-          children: []
-        - id: "section:hierarchy"
-          label: Hierarchy
-          kind: section
-          badge: 1 root
-          status: unchanged
-          children: []
-        - id: "section:loose"
-          label: Loose components
-          kind: section
-          badge: 0 objects
-          status: unchanged
-          children: []
+      children: []
     "#);
 }
 
@@ -424,26 +398,7 @@ fn diff_identical_is_unchanged() {
       label: level0
       kind: file
       status: unchanged
-      children:
-        - id: "section:class-stats"
-          label: Class stats
-          kind: section
-          badge: 9 objects
-          default_collapsed: true
-          status: unchanged
-          children: []
-        - id: "section:hierarchy"
-          label: Hierarchy
-          kind: section
-          badge: 2 roots
-          status: unchanged
-          children: []
-        - id: "section:loose"
-          label: Loose components
-          kind: section
-          badge: 1 object
-          status: unchanged
-          children: []
+      children: []
     "#);
 }
 

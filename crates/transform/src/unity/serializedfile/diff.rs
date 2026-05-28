@@ -171,7 +171,13 @@ pub(crate) fn diff_sections<R: EnvResolver, P: TypeTreeProvider>(
     let (hierarchy, covered) = diff_hierarchy(base_file, target_file)?;
     let loose = diff_loose(base_file, target_file, &covered)?;
 
-    let children = vec![class_stats, hierarchy, loose];
+    // Drop sections whose own diff is fully `Unchanged` and empty —
+    // each section pre-prunes its own descendants, so an Unchanged
+    // section with no children genuinely has nothing to show. Keeping
+    // the empty header row only clutters the tree (e.g. a "Loose
+    // components — 25 objects" row that hides the fact that none of
+    // the 25 actually differ).
+    let children = prune_unchanged(vec![class_stats, hierarchy, loose]);
     let status = aggregate_status(&children);
     Ok((children, status))
 }

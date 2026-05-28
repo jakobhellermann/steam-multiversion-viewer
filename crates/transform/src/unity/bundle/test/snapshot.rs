@@ -113,13 +113,6 @@ fn bundle_diff_added_changed_unchanged() {
           kind: archive
           status: changed
           children:
-            - id: "archive:CAB-scene/section:class-stats"
-              label: Class stats
-              kind: section
-              badge: 2 objects
-              default_collapsed: true
-              status: unchanged
-              children: []
             - id: "archive:CAB-scene/section:hierarchy"
               label: Hierarchy
               kind: section
@@ -138,12 +131,6 @@ fn bundle_diff_added_changed_unchanged() {
                   status: removed
                   has_content: true
                   children: []
-            - id: "archive:CAB-scene/section:loose"
-              label: Loose components
-              kind: section
-              badge: 0 objects
-              status: unchanged
-              children: []
         - id: "blob:CAB-scene.resS"
           label: CAB-scene.resS
           kind: blob
