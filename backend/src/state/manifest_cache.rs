@@ -60,7 +60,7 @@ pub struct UnityScratch {
 impl UnityScratch {
     /// Game's data dir as a path string (`"<Game>_Data"`), suitable for
     /// stripping from manifest-relative paths before handing them to
-    /// `env.load_cached`, which works in data-dir-relative paths.
+    /// `env.load_serialized`, which works in data-dir-relative paths.
     pub fn data_dir(&self) -> String {
         self.env.game_files.data_dir().display().to_string()
     }

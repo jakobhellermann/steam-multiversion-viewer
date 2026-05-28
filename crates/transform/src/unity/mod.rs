@@ -25,7 +25,7 @@ pub fn dump_unity_serialized<R: EnvResolver, P: TypeTreeProvider>(
     path: &str,
 ) -> Result<String, anyhow::Error> {
     let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
-    let file = env.load_cached(relative)?;
+    let file = env.load_serialized(relative)?;
 
     let mut out = String::new();
     serializedfile::format::format_class_stats(&mut out, &file);

@@ -58,7 +58,7 @@ pub fn parse_object_node_id(id: &str) -> Option<PathId> {
 /// Construct the structured tree for the file at `path` (manifest-
 /// relative) using a prebuilt `env`. `data_dir` is the game's data
 /// directory, used to strip the prefix before handing the path to
-/// `env.load_cached` (which works in data-dir-relative paths).
+/// `env.load_serialized` (which works in data-dir-relative paths).
 /// Synchronous — wrap in `spawn_blocking` from async context.
 pub fn build_tree<R: EnvResolver, P: TypeTreeProvider>(
     env: &Environment<R, P>,
@@ -66,7 +66,7 @@ pub fn build_tree<R: EnvResolver, P: TypeTreeProvider>(
     path: &str,
 ) -> Result<StructuredTree> {
     let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
-    let file = env.load_cached(relative)?;
+    let file = env.load_serialized(relative)?;
     let root = build_root_node(&file, path)?;
     Ok(StructuredTree {
         kind: TREE_KIND.to_string(),

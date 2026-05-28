@@ -10,6 +10,7 @@ use std::io::Cursor;
 use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
+use rabex_env::rabex::files::unityfile::FileEntry;
 use rabex_env::resolver::EnvResolver;
 use tracing::info_span;
 
@@ -17,10 +18,7 @@ use crate::structured::{Node, NodeStatus, StructuredTree};
 use crate::unity::serializedfile::diff::diff_sections;
 use crate::unity::serializedfile::tree::{TREE_KIND, build_root_node};
 
-use super::{
-    ARCHIVE_ID_PREFIX, BUNDLE_ENTRY_FLAG_SERIALIZED_FILE, archive_prefix, blob_node, human_bytes,
-    insert_archive_entry,
-};
+use super::{ARCHIVE_ID_PREFIX, archive_prefix, blob_node, human_bytes, insert_archive_entry};
 
 /// Build the structured diff for a bundle path between two prebuilt
 /// envs. Per-entry: SF↔SF runs through [`diff_sections`], blob↔blob
@@ -185,7 +183,7 @@ fn classify_entries<T: AsRef<[u8]>>(bundle: &BundleFileReader<Cursor<T>>) -> Vec
         .iter()
         .map(|e| BundleEntryView {
             path: e.path.clone(),
-            kind: if (e.flags & BUNDLE_ENTRY_FLAG_SERIALIZED_FILE) != 0 {
+            kind: if (e.flags & FileEntry::FLAG_SERIALIZEDFILE) != 0 {
                 EntryKind::Serialized
             } else {
                 EntryKind::Blob

@@ -102,7 +102,7 @@ pub async fn game_info(
         let (version, bundle_version) = tokio::task::spawn_blocking(move || {
             let version = env.unity_version().map(ToString::to_string)?;
             let bundle_version = env
-                .load_cached("globalgamemanagers")
+                .load_serialized("globalgamemanagers")
                 .and_then(|ggm| ggm.find_object_of::<PlayerSettingsSlim>())
                 .ok()
                 .flatten()

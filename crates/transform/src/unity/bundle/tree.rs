@@ -9,6 +9,7 @@ use std::io::Cursor;
 use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
+use rabex_env::rabex::files::unityfile::FileEntry;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 use tracing::info_span;
@@ -16,10 +17,7 @@ use tracing::info_span;
 use crate::structured::{Node, StructuredTree};
 use crate::unity::serializedfile::tree::{TREE_KIND, build_root_node};
 
-use super::{
-    ARCHIVE_ID_PREFIX, BUNDLE_ENTRY_FLAG_SERIALIZED_FILE, archive_prefix, blob_node,
-    insert_archive_entry,
-};
+use super::{ARCHIVE_ID_PREFIX, archive_prefix, blob_node, insert_archive_entry};
 
 /// Construct the structured tree for the bundle at `path` (manifest-
 /// relative) using a prebuilt `env`. `bundle_bytes` must be supplied
@@ -62,7 +60,7 @@ where
     let mut children = Vec::new();
     let _walk = info_span!("walk_entries", entries = bundle.files().len()).entered();
     for entry in bundle.files() {
-        let is_serialized = (entry.flags & BUNDLE_ENTRY_FLAG_SERIALIZED_FILE) != 0;
+        let is_serialized = (entry.flags & FileEntry::FLAG_SERIALIZEDFILE) != 0;
         children.push(if is_serialized {
             build_archive_subtree(env, bundle, &entry.path)?
         } else {

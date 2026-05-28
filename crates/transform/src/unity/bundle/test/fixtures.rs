@@ -20,7 +20,6 @@ use rabex_env::rabex::files::unityfile::FileEntry;
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 
-use crate::unity::bundle::BUNDLE_ENTRY_FLAG_SERIALIZED_FILE;
 use crate::unity::serializedfile::test::fixtures::{MemResolver, TEST_UNITY_VERSION};
 
 /// One entry to add to a test bundle. Either an embedded SerializedFile
@@ -63,7 +62,7 @@ impl BundleBuilder {
         for entry in self.entries {
             let (path, bytes, flags) = match entry {
                 BundleEntry::Serialized { path, bytes } => {
-                    (path, bytes, BUNDLE_ENTRY_FLAG_SERIALIZED_FILE)
+                    (path, bytes, FileEntry::FLAG_SERIALIZEDFILE)
                 }
                 BundleEntry::Blob { path, bytes } => (path, bytes, 0),
             };

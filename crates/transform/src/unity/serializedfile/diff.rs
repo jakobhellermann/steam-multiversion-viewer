@@ -136,8 +136,8 @@ pub fn build_diff<R: EnvResolver, P: TypeTreeProvider>(
     let target_relative = path
         .strip_prefix(&format!("{target_data_dir}/"))
         .unwrap_or(path);
-    let base_file = base_env.load_cached(base_relative)?;
-    let target_file = target_env.load_cached(target_relative)?;
+    let base_file = base_env.load_serialized(base_relative)?;
+    let target_file = target_env.load_serialized(target_relative)?;
 
     let (children, status) = diff_sections(&base_file, &target_file)?;
     let root = Node {

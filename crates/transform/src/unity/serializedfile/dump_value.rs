@@ -83,7 +83,7 @@ pub fn dump_object_json<R: EnvResolver, P: TypeTreeProvider>(
     opts: DumpOptions<'_>,
 ) -> Result<(&'static str, String)> {
     let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
-    let file = env.load_cached(relative)?;
+    let file = env.load_serialized(relative)?;
     dump_object_json_from_handle(&file, data_dir, "", path_id, opts)
 }
 

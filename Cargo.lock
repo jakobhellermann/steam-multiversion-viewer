@@ -1673,9 +1673,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50b7e5b27aa02a74bac8c3f23f448f8d87ff11f92d3aac1a6ed369ee08cc56c1"
+checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
 dependencies = [
  "libc",
  "wasi",
@@ -2115,7 +2115,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 [[package]]
 name = "rabex"
 version = "0.0.3"
-source = "git+https://github.com/jakobhellermann/RustyAssetBundleEXtractor#522a4b919d3a7d12dafeb5a8943bfd3c566ea7bd"
+source = "git+https://github.com/jakobhellermann/RustyAssetBundleEXtractor#0333df164aa034d13cd78647949b831961695214"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -2132,7 +2132,7 @@ dependencies = [
 [[package]]
 name = "rabex-env"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#f5877415ce3f561ef861be3cd85c37c1c45203a0"
+source = "git+https://github.com/jakobhellermann/rabex-env#ca93abd2b62b6361250c5610520ed9c8e7f483fa"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -2153,7 +2153,7 @@ dependencies = [
 [[package]]
 name = "rabex-env-steam-depot-vfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#f5877415ce3f561ef861be3cd85c37c1c45203a0"
+source = "git+https://github.com/jakobhellermann/rabex-env#ca93abd2b62b6361250c5610520ed9c8e7f483fa"
 dependencies = [
  "anyhow",
  "rabex-env",
@@ -2847,9 +2847,9 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "socket2"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
+checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",

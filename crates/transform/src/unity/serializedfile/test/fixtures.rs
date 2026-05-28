@@ -368,7 +368,7 @@ pub(crate) fn with_handle<R>(
     let resolver = MemResolver::single(path, bytes);
     let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
     let env = Environment::new(resolver, tpk);
-    let handle = env.load_cached(path).unwrap();
+    let handle = env.load_serialized(path).unwrap();
     f(&handle)
 }
 

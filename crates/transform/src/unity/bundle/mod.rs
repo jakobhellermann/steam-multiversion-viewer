@@ -48,12 +48,6 @@ pub use tree::build_tree;
 /// id produced by the per-file builders (`obj:N`, `section:…`).
 pub(super) const ARCHIVE_ID_PREFIX: &str = "archive:";
 
-/// Bit on `BundleEntry::flags` that marks an entry as a SerializedFile
-/// (vs. a raw blob like `*.resource`). Matches what
-/// `BundleFileReader::serialized_files` filters on internally; we
-/// inline the check here so we only walk the entry list once.
-pub(crate) const BUNDLE_ENTRY_FLAG_SERIALIZED_FILE: u32 = 4;
-
 /// Build the wire-form `archive:<entry>/` prefix for namespacing a
 /// per-file subtree's ids.
 pub(super) fn archive_prefix(entry: &str) -> String {
