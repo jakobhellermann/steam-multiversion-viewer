@@ -1,5 +1,6 @@
 pub mod downloads;
 pub mod extra_manifests;
+pub mod manifest_cache;
 pub mod mount;
 pub mod store_index;
 
@@ -20,7 +21,11 @@ use crate::config::Config;
 use crate::steam::chunk_store::TrackedChunkStore;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient, auth};
 
-pub type Snapshot = DepotManifestStore<FsCacheStore<TrackedChunkStore<CdnChunkStore<SteamClient>>>>;
+/// Concrete chunk-store stack used inside every opened manifest. Exposed
+/// as an alias so per-manifest caches (e.g. the unity `Environment`)
+/// can name the resolver type without re-typing the wrapping chain.
+pub type SnapChunkStore = FsCacheStore<TrackedChunkStore<CdnChunkStore<SteamClient>>>;
+pub type Snapshot = DepotManifestStore<SnapChunkStore>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -40,6 +45,7 @@ pub struct AppState {
     pub downloads: Arc<DownloadManager>,
     pub extra_manifests: Arc<ExtraManifestsStore>,
     pub mount: Arc<MountManager>,
+    pub manifest_cache: Arc<manifest_cache::ManifestCache>,
 }
 
 impl AppState {
@@ -78,6 +84,7 @@ impl AppState {
             downloads,
             extra_manifests,
             mount,
+            manifest_cache: Arc::new(manifest_cache::ManifestCache::new()),
         })
     }
 

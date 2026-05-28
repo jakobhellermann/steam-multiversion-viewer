@@ -3,6 +3,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use rabex_env::Environment;
+use rabex_env::rabex::tpk::TpkTypeTreeBlob;
+use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
+use rabex_env::resolver::EnvResolver;
+use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
@@ -44,14 +49,24 @@ async fn main() -> Result<()> {
         .await?;
 
     let started = Instant::now();
-    let json = tokio::task::spawn_blocking(move || {
-        dump_value::dump_bundle_object_json(
-            Arc::new(manifest_store),
-            BUNDLE_PATH,
+    let json = tokio::task::spawn_blocking(move || -> Result<_> {
+        let manifest_store = Arc::new(manifest_store);
+        let game_files = SteamDepotGameFiles::new(manifest_store)?;
+        let data_dir = game_files.data_dir().display().to_string();
+        let relative = BUNDLE_PATH
+            .strip_prefix(&format!("{data_dir}/"))
+            .unwrap_or(BUNDLE_PATH);
+        let bundle_bytes = game_files.read_path(std::path::Path::new(relative))?;
+        let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+        let env = Environment::new(game_files, tpk);
+        Ok(dump_value::dump_bundle_object_json(
+            &env,
+            &data_dir,
+            bundle_bytes,
             ARCHIVE_ENTRY,
             OBJECT_PATH_ID,
             dump_value::DumpSide::None,
-        )
+        )?)
     })
     .await??;
     println!(

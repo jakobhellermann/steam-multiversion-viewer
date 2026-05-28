@@ -25,6 +25,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use rabex_env::Environment;
+use rabex_env::rabex::tpk::TpkTypeTreeBlob;
+use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
+use rabex_env::resolver::EnvResolver;
+use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
@@ -56,10 +61,6 @@ async fn main() -> Result<()> {
         .with(tracing_timetree::layer().with_min(Duration::from_micros(500)))
         .init();
 
-    // Phase 1: Steam login + CDN discover. Pays the "first contact"
-    // cost. LazyCachedAuth caches the refresh token on disk so a
-    // recent prior run can short-circuit the login itself; the CDN
-    // discover is per-process.
     let started_auth = Instant::now();
     let auth = LazyCachedAuth::prepare(
         LazyCachedAuth::default_refresh_token_cache(),
@@ -73,9 +74,6 @@ async fn main() -> Result<()> {
         started_auth.elapsed()
     );
 
-    // Allow overriding the store root via env var so cold-cache
-    // runs can be reproduced without nuking the real cache. Defaults
-    // to the config's normal store_root.
     let config = Config::load_or_default()?;
     let store_root = match std::env::var("STORE_ROOT") {
         Ok(p) => std::path::PathBuf::from(p),
@@ -84,10 +82,6 @@ async fn main() -> Result<()> {
     println!("[cfg] store_root = {}", store_root.display());
     let store = DepotStore::new(store_root);
 
-    // Phase 2: open both manifests in parallel. First time for an
-    // (app, depot) combo this also fetches the depot key from Steam
-    // (cached per-process inside `LazyDepotKey`). Mirrors
-    // `prepare_structured_side` from the HTTP endpoint.
     let started_open = Instant::now();
     let (base_snap, target_snap) = {
         let auth_b = auth.clone();
@@ -121,14 +115,33 @@ async fn main() -> Result<()> {
         started_open.elapsed()
     );
 
-    // Phase 3: build_diff. Inside this `unity_version` is its own
-    // info_span (see bundle::open_bundle) — cold path reads
-    // globalgamemanagers from the depot, warm path is sub-µs. Look
-    // for the timetree span called `unity_version` in the stderr
-    // output below for the breakdown.
     let started_diff = Instant::now();
-    let tree = tokio::task::spawn_blocking(move || {
-        bundle::build_diff(Arc::new(base_snap), Arc::new(target_snap), PATH)
+    let tree = tokio::task::spawn_blocking(move || -> Result<_> {
+        let base_game_files = SteamDepotGameFiles::new(Arc::new(base_snap))?;
+        let base_data_dir = base_game_files.data_dir().display().to_string();
+        let base_relative = PATH
+            .strip_prefix(&format!("{base_data_dir}/"))
+            .unwrap_or(PATH);
+        let base_bytes = base_game_files.read_path(std::path::Path::new(base_relative))?;
+        let base_tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+        let base_env = Environment::new(base_game_files, base_tpk);
+
+        let target_game_files = SteamDepotGameFiles::new(Arc::new(target_snap))?;
+        let target_data_dir = target_game_files.data_dir().display().to_string();
+        let target_relative = PATH
+            .strip_prefix(&format!("{target_data_dir}/"))
+            .unwrap_or(PATH);
+        let target_bytes = target_game_files.read_path(std::path::Path::new(target_relative))?;
+        let target_tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+        let target_env = Environment::new(target_game_files, target_tpk);
+
+        Ok(bundle::build_diff(
+            &base_env,
+            base_bytes,
+            &target_env,
+            target_bytes,
+            PATH,
+        )?)
     })
     .await??;
     let elapsed = started_diff.elapsed();

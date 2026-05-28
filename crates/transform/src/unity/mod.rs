@@ -7,37 +7,23 @@
 //! without pulling rabex (and its transitive unity-specific deps) at
 //! all.
 
-use std::sync::Arc;
-
 use rabex_env::Environment;
-use rabex_env::rabex::tpk::TpkTypeTreeBlob;
-use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
-use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
-use steam_depot_vfs::chunk_store::ChunkStore;
-use steam_depot_vfs::fs::DepotManifestStore;
+use rabex_env::rabex::typetree::TypeTreeProvider;
+use rabex_env::resolver::EnvResolver;
 
 pub mod bundle;
 pub mod serializedfile;
 
-/// Dump a unity serialized-file as text
-/// Synchronous because rabex's I/O trampolines
-/// through `block_in_place`/`block_on`; callers from async context must
-/// wrap in `tokio::task::spawn_blocking`.
-pub fn dump_unity_serialized<C: ChunkStore + 'static>(
-    manifest_store: Arc<DepotManifestStore<C>>,
+/// Dump a unity serialized-file as text using a prebuilt `env`.
+/// Synchronous because rabex's I/O trampolines through
+/// `block_in_place`/`block_on`; callers from async context must wrap in
+/// `tokio::task::spawn_blocking`.
+pub fn dump_unity_serialized<R: EnvResolver, P: TypeTreeProvider>(
+    env: &Environment<R, P>,
+    data_dir: &str,
     path: &str,
 ) -> Result<String, anyhow::Error> {
-    let game_files = SteamDepotGameFiles::new(manifest_store)?;
-    // `Environment` works in data-dir-relative paths, but we receive
-    // the manifest-relative one — strip the `<game>_Data/` prefix
-    // before handing it over, otherwise the resolver doubles it.
-    let relative = path
-        .strip_prefix(&format!("{}/", game_files.data_dir().display()))
-        .unwrap_or(path);
-    // TPK rebuilt per call for now — it's just an embedded blob and we
-    // don't share an `Environment` across requests yet.
-    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
-    let env = Environment::new(game_files, &tpk);
+    let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
     let file = env.load_cached(relative)?;
 
     let mut out = String::new();
@@ -45,23 +31,6 @@ pub fn dump_unity_serialized<C: ChunkStore + 'static>(
     out.push('\n');
     serializedfile::format::format_hierarchy(&mut out, &file)?;
     Ok(out)
-}
-
-/// Read the unity version from a manifest's `globalgamemanagers`.
-/// Returns `None` if the manifest isn't a unity game (no ggm in the
-/// data dir). Synchronous for the same reason as [`dump_unity_serialized`].
-pub fn read_unity_version<C: ChunkStore + 'static>(
-    manifest_store: Arc<DepotManifestStore<C>>,
-) -> Result<Option<String>, anyhow::Error> {
-    let game_files = match SteamDepotGameFiles::new(manifest_store) {
-        Ok(gf) => gf,
-        // No `<game>_Data` dir → not a unity game.
-        Err(_) => return Ok(None),
-    };
-    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
-    let env = Environment::new(game_files, &tpk);
-    let version = env.unity_version()?;
-    Ok(Some(version.to_string()))
 }
 
 /// True for unity serialized-file conventions that don't carry a

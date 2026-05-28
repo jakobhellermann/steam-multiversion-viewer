@@ -23,22 +23,16 @@
 //! and skips deserialisation entirely.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::handle::SerializedFileHandle;
 use rabex_env::rabex::files::serializedfile::ObjectInfo;
 use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::PathId;
-use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::TypeTreeProvider;
-use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
-use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
-use steam_depot_vfs::chunk_store::ChunkStore;
-use steam_depot_vfs::fs::DepotManifestStore;
 
 use crate::structured::{Node, NodeStatus, StructuredTree};
 
@@ -125,19 +119,25 @@ fn one_sided_id(side: Side, path_id: PathId) -> String {
     format!("{}:obj:{path_id}", side.prefix())
 }
 
-/// Build the structured diff for `path` between the two manifests.
+/// Build the structured diff for `path` between two prebuilt envs.
 /// Synchronous; callers from async context must wrap in
 /// `tokio::task::spawn_blocking`.
 #[tracing::instrument(skip_all, fields(path))]
-pub fn build_diff<C: ChunkStore + 'static>(
-    base_manifest: Arc<DepotManifestStore<C>>,
-    target_manifest: Arc<DepotManifestStore<C>>,
+pub fn build_diff<R: EnvResolver, P: TypeTreeProvider>(
+    base_env: &Environment<R, P>,
+    base_data_dir: &str,
+    target_env: &Environment<R, P>,
+    target_data_dir: &str,
     path: &str,
 ) -> Result<StructuredTree> {
-    let base = open_side(base_manifest, path).context("base side")?;
-    let target = open_side(target_manifest, path).context("target side")?;
-    let base_file = load_file(&base)?;
-    let target_file = load_file(&target)?;
+    let base_relative = path
+        .strip_prefix(&format!("{base_data_dir}/"))
+        .unwrap_or(path);
+    let target_relative = path
+        .strip_prefix(&format!("{target_data_dir}/"))
+        .unwrap_or(path);
+    let base_file = base_env.load_cached(base_relative)?;
+    let target_file = target_env.load_cached(target_relative)?;
 
     let (children, status) = diff_sections(&base_file, &target_file)?;
     let root = Node {
@@ -174,29 +174,6 @@ pub(crate) fn diff_sections<R: EnvResolver, P: TypeTreeProvider>(
     let children = vec![class_stats, hierarchy, loose];
     let status = aggregate_status(&children);
     Ok((children, status))
-}
-
-/// One side opened for diffing: the path's data dir prefix (so we can
-/// stash it next to the file handle) plus everything `SerializedFile`
-/// needs.
-struct OpenedSide<R: EnvResolver, P: TypeTreeProvider> {
-    env: Environment<R, P>,
-    relative: String,
-}
-
-#[tracing::instrument(skip_all)]
-fn open_side<C: ChunkStore + 'static>(
-    manifest: Arc<DepotManifestStore<C>>,
-    path: &str,
-) -> Result<OpenedSide<SteamDepotGameFiles<C>, TypeTreeCache<TpkTypeTreeBlob>>> {
-    let game_files = SteamDepotGameFiles::new(manifest)?;
-    let relative = path
-        .strip_prefix(&format!("{}/", game_files.data_dir().display()))
-        .unwrap_or(path)
-        .to_owned();
-    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
-    let env = Environment::new(game_files, tpk);
-    Ok(OpenedSide { env, relative })
 }
 
 // ---- class-stats ---------------------------------------------------------
@@ -1018,12 +995,6 @@ fn loose_label(key: &LooseKey, _item: &LooseItem) -> String {
 }
 
 // ---- shared helpers ------------------------------------------------------
-
-fn load_file<R: EnvResolver, P: TypeTreeProvider>(
-    side: &OpenedSide<R, P>,
-) -> Result<SerializedFileHandle<'_, R, P>> {
-    side.env.load_cached(&side.relative)
-}
 
 fn object_bytes<'a, R: EnvResolver, P>(
     file: &SerializedFileHandle<'a, R, P>,

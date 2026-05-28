@@ -24,6 +24,8 @@ use utoipa::ToSchema;
 
 use crate::http::ApiError;
 use crate::state::AppState;
+#[cfg(feature = "unity")]
+use crate::state::manifest_cache::Environment;
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::Result;
@@ -467,9 +469,9 @@ async fn resolve_diff_text(
         )
     };
 
-    if let Some(transformer) = ::transform::tools::transformer_for(&file_path) {
+    if let Some(transformer) = transform::tools::transformer_for(&file_path) {
         let cfg = state.config.load();
-        if let Some(cached) = ::transform::read_cached(&cfg.store_root, &file_sha)? {
+        if let Some(cached) = transform::read_cached(&cfg.store_root, &file_sha)? {
             return Ok(DiffSide {
                 text: cached,
                 creation_time,
@@ -480,9 +482,9 @@ async fn resolve_diff_text(
             .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
             .await;
         let text = match transformer {
-            ::transform::Transformer::Cli(tool) => {
+            transform::Transformer::Cli(tool) => {
                 let bytes = snapshot.read_full(&file_path).await?;
-                ::transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
+                transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
                     .await
                     .map_err(|e| ApiError {
                         status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -490,11 +492,18 @@ async fn resolve_diff_text(
                     })?
             }
             #[cfg(feature = "unity")]
-            ::transform::Transformer::UnitySerialized => {
-                let snapshot = snapshot.clone();
+            transform::Transformer::UnitySerialized => {
+                let (env, data_dir) = unity_side(
+                    state,
+                    appid,
+                    depot_id,
+                    manifest_id,
+                    branch,
+                    snapshot.clone(),
+                )?;
                 let file_path = file_path.clone();
                 tokio::task::spawn_blocking(move || {
-                    ::transform::unity::dump_unity_serialized(snapshot, &file_path)
+                    transform::unity::dump_unity_serialized(&env, &data_dir, &file_path)
                 })
                 .await
                 .map_err(|e| ApiError {
@@ -506,7 +515,7 @@ async fn resolve_diff_text(
                     message: e.to_string(),
                 })?
             }
-            ::transform::Transformer::Dll => {
+            transform::Transformer::Dll => {
                 // .NET assemblies don't have a single text dump to
                 // diff — they're inherently per-type. A future
                 // structured-diff endpoint can cover this; for now
@@ -517,7 +526,7 @@ async fn resolve_diff_text(
                 });
             }
             #[cfg(feature = "unity")]
-            ::transform::Transformer::UnityBundle => {
+            transform::Transformer::UnityBundle => {
                 // Bundles contain multiple SerializedFiles; a single
                 // text dump for diff is awkward and the structured
                 // tree carries the actual signal. Punt for now.
@@ -597,11 +606,11 @@ pub async fn manifest_file_structured_diff(
     Query(q): Query<StructuredDiffQuery>,
 ) -> Result<(
     crate::http::ImmutableCache,
-    Json<::transform::structured::StructuredTree>,
+    Json<transform::structured::StructuredTree>,
 )> {
-    use ::transform::Transformer;
+    use transform::Transformer;
 
-    let kind = ::transform::tools::transformer_for(&q.path);
+    let kind = transform::tools::transformer_for(&q.path);
 
     // Open both manifests + pre-download the file's chunks on each
     // side in parallel — both passes are needed before we can hand the
@@ -621,8 +630,30 @@ pub async fn manifest_file_structured_diff(
     let diff = match kind {
         Some(Transformer::UnitySerialized) => {
             let path = q.path.clone();
+            let (base_env, base_data_dir) = unity_side(
+                &state,
+                appid,
+                depot_id,
+                manifest_id,
+                &q.branch,
+                base.clone(),
+            )?;
+            let (target_env, target_data_dir) = unity_side(
+                &state,
+                appid,
+                q.target_depot_id,
+                q.target_manifest_id,
+                &q.target_branch,
+                target.clone(),
+            )?;
             tokio::task::spawn_blocking(move || {
-                ::transform::unity::serializedfile::diff::build_diff(base, target, &path)
+                transform::unity::serializedfile::diff::build_diff(
+                    &base_env,
+                    &base_data_dir,
+                    &target_env,
+                    &target_data_dir,
+                    &path,
+                )
             })
             .await
             .map_err(|e| ApiError {
@@ -635,9 +666,44 @@ pub async fn manifest_file_structured_diff(
             })?
         }
         Some(Transformer::UnityBundle) => {
+            use rabex_env::resolver::EnvResolver;
             let path = q.path.clone();
-            tokio::task::spawn_blocking(move || {
-                ::transform::unity::bundle::build_diff(base, target, &path)
+            let (base_env, base_data_dir) = unity_side(
+                &state,
+                appid,
+                depot_id,
+                manifest_id,
+                &q.branch,
+                base.clone(),
+            )?;
+            let (target_env, target_data_dir) = unity_side(
+                &state,
+                appid,
+                q.target_depot_id,
+                q.target_manifest_id,
+                &q.target_branch,
+                target.clone(),
+            )?;
+            tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+                let base_relative = path
+                    .strip_prefix(&format!("{base_data_dir}/"))
+                    .unwrap_or(&path);
+                let target_relative = path
+                    .strip_prefix(&format!("{target_data_dir}/"))
+                    .unwrap_or(&path);
+                let base_bytes = base_env
+                    .game_files
+                    .read_path(std::path::Path::new(base_relative))?;
+                let target_bytes = target_env
+                    .game_files
+                    .read_path(std::path::Path::new(target_relative))?;
+                transform::unity::bundle::build_diff(
+                    &base_env,
+                    base_bytes,
+                    &target_env,
+                    target_bytes,
+                    &path,
+                )
             })
             .await
             .map_err(|e| ApiError {
@@ -660,7 +726,7 @@ pub async fn manifest_file_structured_diff(
             // `from = target` and `to = base`.
             let (to_bytes, to_sha) = dll_side_bytes(&base, &q.path).await?;
             let (from_bytes, from_sha) = dll_side_bytes(&target, &q.path).await?;
-            let tree = ::transform::dll::diff::build_tree(
+            let tree = transform::dll::diff::build_tree(
                 &store_root,
                 &from_sha,
                 &from_bytes,
@@ -677,8 +743,8 @@ pub async fn manifest_file_structured_diff(
             // Per-type lazy decompile calls from the node endpoint then
             // hit the cache instead of spawning a fresh `ilspycmd -t`.
             // Idempotent: skipped if already warming this sha.
-            ::transform::dll::warm_full_decompile(&store_root, from_sha, from_bytes);
-            ::transform::dll::warm_full_decompile(&store_root, to_sha, to_bytes);
+            transform::dll::warm_full_decompile(&store_root, from_sha, from_bytes);
+            transform::dll::warm_full_decompile(&store_root, to_sha, to_bytes);
             tree
         }
         _ => {
@@ -720,11 +786,11 @@ async fn dll_side_bytes(
 /// same `base:` / `target:` / `mod:` shapes that [`split_diff_id`]
 /// handles. We split that first, then strip `archive:<entry>/` from
 /// each per-side id to land back at a plain `obj:<pid>` we can dump
-/// with [`::transform::unity::serializedfile::dump_value::dump_bundle_object_json`].
+/// with [`transform::unity::serializedfile::dump_value::dump_bundle_object_json`].
 ///
 /// One-sided rows from a fully-Added or fully-Removed archive entry
 /// have no `base:`/`target:` wrapper (the prefix-id pass inside
-/// [`::transform::unity::bundle::one_sided_entry`] doesn't add one) — there
+/// [`transform::unity::bundle::one_sided_entry`] doesn't add one) — there
 /// we fall back to attempting both sides and returning whichever has
 /// the object. The missing-side errors get swallowed silently rather
 /// than 500ing the request.
@@ -739,8 +805,8 @@ async fn bundle_node_body(
     /// Pull `(archive_entry, obj_pid)` out of a per-side inner id of
     /// the shape `archive:<entry>/obj:<pid>`.
     fn parse_bundle_inner(id: &str) -> Option<(String, i64)> {
-        let (entry, inner) = ::transform::unity::bundle::parse_archive_id(id)?;
-        let pid = ::transform::unity::serializedfile::tree::parse_object_node_id(inner)?;
+        let (entry, inner) = transform::unity::bundle::parse_archive_id(id)?;
+        let pid = transform::unity::serializedfile::tree::parse_object_node_id(inner)?;
         Some((entry.to_string(), pid))
     }
 
@@ -792,26 +858,59 @@ async fn bundle_node_body(
     let target_arc = target_snap.map(Arc::new);
     let bundle_path = q.path.clone();
 
+    let base_side = base_arc
+        .as_ref()
+        .map(|s| unity_side(state, appid, depot_id, manifest_id, &q.branch, s.clone()))
+        .transpose()?;
+    let target_side = target_arc
+        .as_ref()
+        .map(|s| {
+            unity_side(
+                state,
+                appid,
+                q.target_depot_id,
+                q.target_manifest_id,
+                &q.target_branch,
+                s.clone(),
+            )
+        })
+        .transpose()?;
+
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
-        use ::transform::unity::serializedfile::dump_value::DumpSide;
-        let b = base_arc.zip(base_target).map(|(snap, (entry, pid))| {
-            ::transform::unity::serializedfile::dump_value::dump_bundle_object_json(
-                snap,
-                &bundle_path,
-                &entry,
-                pid,
-                DumpSide::Base,
-            )
-        });
-        let t = target_arc.zip(target_target).map(|(snap, (entry, pid))| {
-            ::transform::unity::serializedfile::dump_value::dump_bundle_object_json(
-                snap,
-                &bundle_path,
-                &entry,
-                pid,
-                DumpSide::Target,
-            )
-        });
+        use rabex_env::resolver::EnvResolver;
+        use transform::unity::serializedfile::dump_value::DumpSide;
+        let b = base_side.zip(base_target).map(
+            |((env, data_dir), (entry, pid))| -> anyhow::Result<String> {
+                let relative = bundle_path
+                    .strip_prefix(&format!("{data_dir}/"))
+                    .unwrap_or(&bundle_path);
+                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
+                transform::unity::serializedfile::dump_value::dump_bundle_object_json(
+                    &env,
+                    &data_dir,
+                    bundle_bytes,
+                    &entry,
+                    pid,
+                    DumpSide::Base,
+                )
+            },
+        );
+        let t = target_side.zip(target_target).map(
+            |((env, data_dir), (entry, pid))| -> anyhow::Result<String> {
+                let relative = bundle_path
+                    .strip_prefix(&format!("{data_dir}/"))
+                    .unwrap_or(&bundle_path);
+                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
+                transform::unity::serializedfile::dump_value::dump_bundle_object_json(
+                    &env,
+                    &data_dir,
+                    bundle_bytes,
+                    &entry,
+                    pid,
+                    DumpSide::Target,
+                )
+            },
+        );
         (b, t)
     })
     .await
@@ -832,13 +931,12 @@ async fn bundle_node_body(
         (Some(b), Some(t)) => {
             let base_label = diff_label(depot_id, manifest_id, base_ct);
             let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
-            let text =
-                ::transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
-                    &b,
-                    &t,
-                    &base_label,
-                    &target_label,
-                );
+            let text = transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
+                &b,
+                &t,
+                &base_label,
+                &target_label,
+            );
             (
                 [(
                     header::CONTENT_TYPE,
@@ -879,7 +977,7 @@ async fn bundle_node_body(
 
 /// Per-node body for the Dll structured-diff route. `base_id` /
 /// `target_id` are `type:<FQN>` ids from
-/// [`::transform::dll::diff::build_tree`]; we decompile the type via
+/// [`transform::dll::diff::build_tree`]; we decompile the type via
 /// `ilspycmd -t` on each side (cached) and return either a unified
 /// diff of the two C# texts (both-sided) or the available text
 /// verbatim (added/removed).
@@ -946,7 +1044,7 @@ async fn dll_node_body(
 
     let base_text = match (base_type, base_side.as_ref()) {
         (Some(t), Some(((bytes, sha), _ct))) => Some(
-            ::transform::dll::decompile_type(&store_root, sha, bytes, t)
+            transform::dll::decompile_type(&store_root, sha, bytes, t)
                 .await
                 .map_err(|e| ApiError {
                     status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -957,7 +1055,7 @@ async fn dll_node_body(
     };
     let target_text = match (target_type, target_side.as_ref()) {
         (Some(t), Some(((bytes, sha), _ct))) => Some(
-            ::transform::dll::decompile_type(&store_root, sha, bytes, t)
+            transform::dll::decompile_type(&store_root, sha, bytes, t)
                 .await
                 .map_err(|e| ApiError {
                     status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -979,13 +1077,12 @@ async fn dll_node_body(
                 q.target_manifest_id,
                 target_side.as_ref().map(|((_, _), ct)| *ct).unwrap_or(0),
             );
-            let text =
-                ::transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
-                    &b,
-                    &t,
-                    &base_label,
-                    &target_label,
-                );
+            let text = transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
+                &b,
+                &t,
+                &base_label,
+                &target_label,
+            );
             (
                 [(
                     header::CONTENT_TYPE,
@@ -1086,9 +1183,9 @@ pub async fn manifest_file_structured_diff_node(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<StructuredDiffNodeQuery>,
 ) -> Result<(crate::http::ImmutableCache, Response)> {
-    use ::transform::Transformer;
+    use transform::Transformer;
 
-    let kind = ::transform::tools::transformer_for(&q.path);
+    let kind = transform::tools::transformer_for(&q.path);
     match kind {
         Some(Transformer::UnitySerialized)
         | Some(Transformer::UnityBundle)
@@ -1114,7 +1211,7 @@ pub async fn manifest_file_structured_diff_node(
     // headers, class-stats rows) have no per-object content and bail
     // out with `None` here.
     fn parse_obj_id(node_id: &str) -> Option<i64> {
-        ::transform::unity::serializedfile::tree::parse_object_node_id(node_id)
+        transform::unity::serializedfile::tree::parse_object_node_id(node_id)
     }
     let (base_inner, target_inner) = split_diff_id(&q.node_id);
     let base_pid = base_inner.and_then(parse_obj_id);
@@ -1159,24 +1256,44 @@ pub async fn manifest_file_structured_diff_node(
     let base_arc = base_snap.map(Arc::new);
     let target_arc = target_snap.map(Arc::new);
 
+    let base_side = base_arc
+        .as_ref()
+        .map(|s| unity_side(&state, appid, depot_id, manifest_id, &q.branch, s.clone()))
+        .transpose()?;
+    let target_side = target_arc
+        .as_ref()
+        .map(|s| {
+            unity_side(
+                &state,
+                appid,
+                q.target_depot_id,
+                q.target_manifest_id,
+                &q.target_branch,
+                s.clone(),
+            )
+        })
+        .transpose()?;
+
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
-        use ::transform::unity::serializedfile::dump_value::DumpSide;
-        let b = base_arc
+        use transform::unity::serializedfile::dump_value::DumpSide;
+        let b = base_side
             .zip(base_pid)
-            .map(|(snap, pid)| {
-                ::transform::unity::serializedfile::dump_value::dump_object_json(
-                    snap,
+            .map(|((env, data_dir), pid)| {
+                transform::unity::serializedfile::dump_value::dump_object_json(
+                    &env,
+                    &data_dir,
                     &path,
                     pid,
                     DumpSide::Base,
                 )
             })
             .transpose();
-        let t = target_arc
+        let t = target_side
             .zip(target_pid)
-            .map(|(snap, pid)| {
-                ::transform::unity::serializedfile::dump_value::dump_object_json(
-                    snap,
+            .map(|((env, data_dir), pid)| {
+                transform::unity::serializedfile::dump_value::dump_object_json(
+                    &env,
+                    &data_dir,
                     &path,
                     pid,
                     DumpSide::Target,
@@ -1206,13 +1323,12 @@ pub async fn manifest_file_structured_diff_node(
         (Some(b), Some(t)) => {
             let base_label = diff_label(depot_id, manifest_id, base_ct);
             let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
-            let text =
-                ::transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
-                    &b,
-                    &t,
-                    &base_label,
-                    &target_label,
-                );
+            let text = transform::unity::serializedfile::dump_value::dump_object_json_unified_diff(
+                &b,
+                &t,
+                &base_label,
+                &target_label,
+            );
             (
                 [(
                     header::CONTENT_TYPE,
@@ -1285,4 +1401,26 @@ async fn prepare_structured_side(
         .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
         .await;
     Ok(snapshot)
+}
+
+/// Resolve the per-manifest unity `Environment` + data_dir for a
+/// structured-diff side. Encapsulates the scratch lookup + the 415
+/// error when the manifest isn't a unity game.
+#[cfg(feature = "unity")]
+fn unity_side(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    branch: &str,
+    snapshot: Arc<crate::state::Snapshot>,
+) -> Result<(Arc<Environment>, String), ApiError> {
+    let scratch = state
+        .manifest_cache
+        .scratch(appid, depot_id, manifest_id, branch);
+    let unity = scratch.unity(snapshot).ok_or_else(|| ApiError {
+        status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        message: "manifest is not a unity game".into(),
+    })?;
+    Ok((unity.env.clone(), unity.data_dir()))
 }

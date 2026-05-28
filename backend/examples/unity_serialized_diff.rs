@@ -4,6 +4,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use rabex_env::Environment;
+use rabex_env::rabex::tpk::TpkTypeTreeBlob;
+use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
+use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
@@ -50,8 +54,24 @@ async fn main() -> Result<()> {
         .await?;
 
     let started = Instant::now();
-    let tree = tokio::task::spawn_blocking(move || {
-        diff::build_diff(Arc::new(base), Arc::new(target), PATH)
+    let tree = tokio::task::spawn_blocking(move || -> Result<_> {
+        let base_game_files = SteamDepotGameFiles::new(Arc::new(base))?;
+        let base_data_dir = base_game_files.data_dir().display().to_string();
+        let base_tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+        let base_env = Environment::new(base_game_files, base_tpk);
+
+        let target_game_files = SteamDepotGameFiles::new(Arc::new(target))?;
+        let target_data_dir = target_game_files.data_dir().display().to_string();
+        let target_tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+        let target_env = Environment::new(target_game_files, target_tpk);
+
+        Ok(diff::build_diff(
+            &base_env,
+            &base_data_dir,
+            &target_env,
+            &target_data_dir,
+            PATH,
+        )?)
     })
     .await??;
     let elapsed = started.elapsed();

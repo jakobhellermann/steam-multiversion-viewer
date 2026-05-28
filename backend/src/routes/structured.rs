@@ -13,8 +13,10 @@ use serde::Deserialize;
 use crate::http::{ApiError, ImmutableCache};
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
-use ::transform::Transformer;
-use ::transform::structured::{NodeContent, StructuredTree};
+#[cfg(feature = "unity")]
+use rabex_env::resolver::EnvResolver;
+use transform::Transformer;
+use transform::structured::{NodeContent, StructuredTree};
 
 use super::Result;
 use super::files::FileViewQuery;
@@ -74,12 +76,20 @@ pub async fn manifest_file_structured(
         .await;
 
     let path = q.path.clone();
-    match ::transform::tools::transformer_for(&path) {
+    match transform::tools::transformer_for(&path) {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
-            let snapshot_for_blocking = snapshot.clone();
+            let scratch = state
+                .manifest_cache
+                .scratch(appid, depot_id, manifest_id, &q.branch);
+            let unity = scratch.unity(snapshot.clone()).ok_or_else(|| ApiError {
+                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                message: "manifest is not a unity game".into(),
+            })?;
+            let env = unity.env.clone();
+            let data_dir = unity.data_dir();
             let tree = tokio::task::spawn_blocking(move || {
-                ::transform::unity::serializedfile::tree::build_tree(snapshot_for_blocking, &path)
+                transform::unity::serializedfile::tree::build_tree(&env, &data_dir, &path)
             })
             .await
             .map_err(|e| ApiError {
@@ -94,9 +104,19 @@ pub async fn manifest_file_structured(
         }
         #[cfg(feature = "unity")]
         Some(Transformer::UnityBundle) => {
-            let snapshot_for_blocking = snapshot.clone();
+            let scratch = state
+                .manifest_cache
+                .scratch(appid, depot_id, manifest_id, &q.branch);
+            let unity = scratch.unity(snapshot.clone()).ok_or_else(|| ApiError {
+                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                message: "manifest is not a unity game".into(),
+            })?;
+            let env = unity.env.clone();
+            let data_dir = unity.data_dir();
             let tree = tokio::task::spawn_blocking(move || {
-                ::transform::unity::bundle::build_tree(snapshot_for_blocking, &path)
+                let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(&path);
+                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
+                transform::unity::bundle::build_tree(&env, bundle_bytes, &path)
             })
             .await
             .map_err(|e| ApiError {
@@ -112,17 +132,16 @@ pub async fn manifest_file_structured(
         Some(Transformer::Dll) => {
             let cfg = state.config.load();
             let bytes = snapshot.read_full(&path).await?;
-            let tree =
-                ::transform::dll::tree::build_tree(&cfg.store_root, &file_sha, &bytes, &path)
-                    .await
-                    .map_err(|e| ApiError {
-                        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        message: e.to_string(),
-                    })?;
+            let tree = transform::dll::tree::build_tree(&cfg.store_root, &file_sha, &bytes, &path)
+                .await
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e.to_string(),
+                })?;
             // Kick off the bulk `-p` decompile in the background so
             // follow-up type clicks become cache hits. Dedups per-sha
             // inside the warmer.
-            ::transform::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
+            transform::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
             Ok((ImmutableCache, Json(tree)))
         }
         _ => Err(ApiError {
@@ -174,14 +193,14 @@ pub async fn manifest_file_structured_node(
             message: format!("file not in manifest: {}", q.path),
         })?;
 
-    match ::transform::tools::transformer_for(&q.path) {
+    match transform::tools::transformer_for(&q.path) {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
             // Resolve the node id to a path-id; non-object ids
             // (section headers, class-stats rows) get an empty body so
             // the frontend hides the panel.
             let Some(path_id) =
-                ::transform::unity::serializedfile::tree::parse_object_node_id(&q.node_id)
+                transform::unity::serializedfile::tree::parse_object_node_id(&q.node_id)
             else {
                 return Ok((
                     ImmutableCache,
@@ -192,12 +211,22 @@ pub async fn manifest_file_structured_node(
                 ));
             };
             let path = q.path.clone();
+            let scratch = state
+                .manifest_cache
+                .scratch(appid, depot_id, manifest_id, &q.branch);
+            let unity = scratch.unity(snapshot.clone()).ok_or_else(|| ApiError {
+                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                message: "manifest is not a unity game".into(),
+            })?;
+            let env = unity.env.clone();
+            let data_dir = unity.data_dir();
             let text = tokio::task::spawn_blocking(move || {
-                ::transform::unity::serializedfile::dump_value::dump_object_json(
-                    snapshot,
+                transform::unity::serializedfile::dump_value::dump_object_json(
+                    &env,
+                    &data_dir,
                     &path,
                     path_id,
-                    ::transform::unity::serializedfile::dump_value::DumpSide::None,
+                    transform::unity::serializedfile::dump_value::DumpSide::None,
                 )
             })
             .await
@@ -224,7 +253,7 @@ pub async fn manifest_file_structured_node(
             // right SerializedFile inside the container. Non-object ids
             // (archive headers, sections, raw blobs) get an empty body.
             let Some((archive_entry, inner)) =
-                ::transform::unity::bundle::parse_archive_id(&q.node_id)
+                transform::unity::bundle::parse_archive_id(&q.node_id)
             else {
                 return Ok((
                     ImmutableCache,
@@ -234,8 +263,7 @@ pub async fn manifest_file_structured_node(
                     }),
                 ));
             };
-            let Some(path_id) =
-                ::transform::unity::serializedfile::tree::parse_object_node_id(inner)
+            let Some(path_id) = transform::unity::serializedfile::tree::parse_object_node_id(inner)
             else {
                 return Ok((
                     ImmutableCache,
@@ -247,13 +275,27 @@ pub async fn manifest_file_structured_node(
             };
             let bundle_path = q.path.clone();
             let archive_entry = archive_entry.to_string();
+            let scratch = state
+                .manifest_cache
+                .scratch(appid, depot_id, manifest_id, &q.branch);
+            let unity = scratch.unity(snapshot.clone()).ok_or_else(|| ApiError {
+                status: axum::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                message: "manifest is not a unity game".into(),
+            })?;
+            let env = unity.env.clone();
+            let data_dir = unity.data_dir();
             let text = tokio::task::spawn_blocking(move || {
-                ::transform::unity::serializedfile::dump_value::dump_bundle_object_json(
-                    snapshot,
-                    &bundle_path,
+                let relative = bundle_path
+                    .strip_prefix(&format!("{data_dir}/"))
+                    .unwrap_or(&bundle_path);
+                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
+                transform::unity::serializedfile::dump_value::dump_bundle_object_json(
+                    &env,
+                    &data_dir,
+                    bundle_bytes,
                     &archive_entry,
                     path_id,
-                    ::transform::unity::serializedfile::dump_value::DumpSide::None,
+                    transform::unity::serializedfile::dump_value::DumpSide::None,
                 )
             })
             .await
@@ -288,7 +330,7 @@ pub async fn manifest_file_structured_node(
             let cfg = state.config.load();
             let bytes = snapshot.read_full(&q.path).await?;
             let text =
-                ::transform::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
+                transform::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
                     .await
                     .map_err(|e| ApiError {
                         status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,

@@ -56,24 +56,32 @@ pub async fn game_info(
 
     #[cfg(feature = "unity")]
     {
-        let snapshot_for_blocking = snapshot.clone();
-        let version = tokio::task::spawn_blocking(move || {
-            ::transform::unity::read_unity_version(snapshot_for_blocking)
-        })
-        .await
-        .map_err(|e| ApiError {
-            status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("game-info task panicked: {e}"),
-        })?
-        .map_err(|e| ApiError {
-            status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            message: e.to_string(),
-        })?;
+        let scratch = state
+            .manifest_cache
+            .scratch(appid, depot_id, manifest_id, &q.branch);
+        let Some(unity) = scratch.unity(snapshot) else {
+            return Ok((ImmutableCache, Json(GameInfo { engine: None })));
+        };
+        let env = unity.env.clone();
+
+        let version =
+            tokio::task::spawn_blocking(move || env.unity_version().map(ToString::to_string))
+                .await
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: format!("game-info task panicked: {e}"),
+                })?
+                .map_err(|e| ApiError {
+                    status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    message: e.to_string(),
+                })?;
 
         return Ok((
             ImmutableCache,
             Json(GameInfo {
-                engine: version.map(|v| EngineInfo::Unity { version: v }),
+                engine: Some(EngineInfo::Unity {
+                    version: version.to_string(),
+                }),
             }),
         ));
     }

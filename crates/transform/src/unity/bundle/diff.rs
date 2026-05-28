@@ -6,19 +6,11 @@
 
 use std::collections::BTreeMap;
 use std::io::Cursor;
-use std::path::Path;
-use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rabex_env::Environment;
-use rabex_env::env::Data;
 use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
-use rabex_env::rabex::tpk::TpkTypeTreeBlob;
-use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env::resolver::EnvResolver;
-use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
-use steam_depot_vfs::chunk_store::ChunkStore;
-use steam_depot_vfs::fs::DepotManifestStore;
 use tracing::info_span;
 
 use crate::structured::{Node, NodeStatus, StructuredTree};
@@ -27,23 +19,41 @@ use crate::unity::serializedfile::tree::{TREE_KIND, build_root_node};
 
 use super::{
     ARCHIVE_ID_PREFIX, BUNDLE_ENTRY_FLAG_SERIALIZED_FILE, archive_prefix, blob_node, human_bytes,
-    insert_archive_entry, strip_data_prefix,
+    insert_archive_entry,
 };
 
-/// Build the structured diff for a bundle path between the two
-/// manifests. Per-entry: SF↔SF runs through [`diff_sections`], blob↔blob
+/// Build the structured diff for a bundle path between two prebuilt
+/// envs. Per-entry: SF↔SF runs through [`diff_sections`], blob↔blob
 /// is a size compare, mismatched-or-missing entries become fully
 /// Added/Removed subtrees. Synchronous; callers from async context
 /// must wrap in `tokio::task::spawn_blocking`.
 #[tracing::instrument(skip_all, fields(path))]
-pub fn build_diff<C: ChunkStore + 'static>(
-    base_manifest: Arc<DepotManifestStore<C>>,
-    target_manifest: Arc<DepotManifestStore<C>>,
+pub fn build_diff<R: EnvResolver, P: rabex_env::rabex::typetree::TypeTreeProvider>(
+    base_env: &Environment<R, P>,
+    base_bundle_bytes: rabex_env::env::Data,
+    target_env: &Environment<R, P>,
+    target_bundle_bytes: rabex_env::env::Data,
     path: &str,
 ) -> Result<StructuredTree> {
-    let base = open_bundle(base_manifest, path).context("base side")?;
-    let target = open_bundle(target_manifest, path).context("target side")?;
-    build_diff_from_bundles(&base.env, &base.bundle, &target.env, &target.bundle, path)
+    let base_bundle = open_bundle_from_bytes(base_env, base_bundle_bytes)?;
+    let target_bundle = open_bundle_from_bytes(target_env, target_bundle_bytes)?;
+    build_diff_from_bundles(base_env, &base_bundle, target_env, &target_bundle, path)
+}
+
+fn open_bundle_from_bytes<R: EnvResolver, P: rabex_env::rabex::typetree::TypeTreeProvider>(
+    env: &Environment<R, P>,
+    bundle_bytes: rabex_env::env::Data,
+) -> Result<BundleFileReader<Cursor<rabex_env::env::Data>>> {
+    let unity_version = {
+        let _span = info_span!("unity_version").entered();
+        env.unity_version()?.clone()
+    };
+    let _span = info_span!("parse_bundle_header").entered();
+    let config = ExtractionConfig::default().with_fallback_unity_version(unity_version);
+    Ok(BundleFileReader::from_reader(
+        Cursor::new(bundle_bytes),
+        &config,
+    )?)
 }
 
 /// Diff two already-parsed bundles. Same role as
@@ -150,40 +160,6 @@ where
         kind: TREE_KIND.to_string(),
         root,
     })
-}
-
-/// One side opened for bundle diffing. Owns the env + bundle reader so
-/// the handles handed to [`build_diff`] live as long as the side does.
-struct OpenedBundle<C: ChunkStore + 'static> {
-    env: Environment<SteamDepotGameFiles<C>, TypeTreeCache<TpkTypeTreeBlob>>,
-    bundle: BundleFileReader<Cursor<Data>>,
-}
-
-#[tracing::instrument(skip_all, fields(path))]
-fn open_bundle<C: ChunkStore + 'static>(
-    manifest_store: Arc<DepotManifestStore<C>>,
-    path: &str,
-) -> Result<OpenedBundle<C>> {
-    let game_files = SteamDepotGameFiles::new(manifest_store)?;
-    let relative = strip_data_prefix(&game_files, path).to_owned();
-    let raw = {
-        let _span = info_span!("read_bundle_bytes").entered();
-        game_files
-            .read_path(Path::new(&relative))
-            .with_context(|| format!("reading bundle bytes {relative}"))?
-    };
-    let tpk = info_span!("get tpk").in_scope(|| TypeTreeCache::new(TpkTypeTreeBlob::embedded()));
-    let env = Environment::new(game_files, tpk);
-    let unity_version = {
-        let _span = info_span!("unity_version").entered();
-        env.unity_version()?.clone()
-    };
-    let bundle = {
-        let _span = info_span!("parse_bundle_header").entered();
-        let config = ExtractionConfig::default().with_fallback_unity_version(unity_version);
-        BundleFileReader::from_reader(Cursor::new(raw), &config)?
-    };
-    Ok(OpenedBundle { env, bundle })
 }
 
 /// Sit-classification for one bundle entry — used as the join key

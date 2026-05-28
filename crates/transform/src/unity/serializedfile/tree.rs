@@ -22,21 +22,15 @@
 //! collapse hundreds of distinct scripts into one bucket.
 
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 
 use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::handle::SerializedFileHandle;
 use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::PathId;
-use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::TypeTreeProvider;
-use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
-use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
-use steam_depot_vfs::chunk_store::ChunkStore;
-use steam_depot_vfs::fs::DepotManifestStore;
 
 use crate::structured::{Node, StructuredTree};
 
@@ -61,19 +55,17 @@ pub fn parse_object_node_id(id: &str) -> Option<PathId> {
     id.strip_prefix("obj:").and_then(|n| n.parse().ok())
 }
 
-/// Construct the structured tree for the file at `path` in
-/// `manifest_store`. Synchronous — wrap in `spawn_blocking` from async
-/// context (same as [`super::dump_unity_serialized`]).
-pub fn build_tree<C: ChunkStore + 'static>(
-    manifest_store: Arc<DepotManifestStore<C>>,
+/// Construct the structured tree for the file at `path` (manifest-
+/// relative) using a prebuilt `env`. `data_dir` is the game's data
+/// directory, used to strip the prefix before handing the path to
+/// `env.load_cached` (which works in data-dir-relative paths).
+/// Synchronous — wrap in `spawn_blocking` from async context.
+pub fn build_tree<R: EnvResolver, P: TypeTreeProvider>(
+    env: &Environment<R, P>,
+    data_dir: &str,
     path: &str,
 ) -> Result<StructuredTree> {
-    let game_files = SteamDepotGameFiles::new(manifest_store)?;
-    let relative = path
-        .strip_prefix(&format!("{}/", game_files.data_dir().display()))
-        .unwrap_or(path);
-    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
-    let env = Environment::new(game_files, &tpk);
+    let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
     let file = env.load_cached(relative)?;
     let root = build_root_node(&file, path)?;
     Ok(StructuredTree {

@@ -32,8 +32,6 @@ use rabex_env::env::Data;
 use rabex_env::handle::SerializedFileHandle;
 use rabex_env::rabex::files::SerializedFile;
 use rabex_env::rabex::files::bundlefile::BundleFileReader;
-use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
-use steam_depot_vfs::chunk_store::ChunkStore;
 
 use crate::structured::Node;
 
@@ -95,17 +93,6 @@ pub(super) fn human_bytes(n: u64) -> String {
     } else {
         format!("{v:.1} {}", UNITS[i])
     }
-}
-
-/// Strip the leading `<DataDir>/` (e.g. `silksong_Data/`) from a
-/// manifest-relative path so the result is what rabex-env's resolvers
-/// expect.
-pub(super) fn strip_data_prefix<'a, C: ChunkStore>(
-    game_files: &SteamDepotGameFiles<C>,
-    path: &'a str,
-) -> &'a str {
-    let data_dir = game_files.data_dir().display().to_string();
-    path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path)
 }
 
 /// Load a SerializedFile entry's bytes from the bundle and stash it in

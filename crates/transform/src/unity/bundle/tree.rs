@@ -5,18 +5,12 @@
 //! [`Environment`]/[`BundleFileReader`].
 
 use std::io::Cursor;
-use std::path::Path;
-use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
-use rabex_env::rabex::tpk::TpkTypeTreeBlob;
-use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
+use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
-use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
-use steam_depot_vfs::chunk_store::ChunkStore;
-use steam_depot_vfs::fs::DepotManifestStore;
 use tracing::info_span;
 
 use crate::structured::{Node, StructuredTree};
@@ -24,29 +18,20 @@ use crate::unity::serializedfile::tree::{TREE_KIND, build_root_node};
 
 use super::{
     ARCHIVE_ID_PREFIX, BUNDLE_ENTRY_FLAG_SERIALIZED_FILE, archive_prefix, blob_node,
-    insert_archive_entry, strip_data_prefix,
+    insert_archive_entry,
 };
 
-/// Construct the structured tree for the bundle at `path`. Synchronous;
-/// callers from async context must wrap in `tokio::task::spawn_blocking`.
+/// Construct the structured tree for the bundle at `path` (manifest-
+/// relative) using a prebuilt `env`. `bundle_bytes` must be supplied
+/// by the caller (typically `env.game_files.read_path(...)`) so the
+/// I/O stays at the route layer. Synchronous; callers from async
+/// context must wrap in `tokio::task::spawn_blocking`.
 #[tracing::instrument(skip_all, fields(path))]
-pub fn build_tree<C: ChunkStore + 'static>(
-    manifest_store: Arc<DepotManifestStore<C>>,
+pub fn build_tree<R: EnvResolver, P: TypeTreeProvider>(
+    env: &Environment<R, P>,
+    bundle_bytes: rabex_env::env::Data,
     path: &str,
 ) -> Result<StructuredTree> {
-    let game_files = SteamDepotGameFiles::new(manifest_store)?;
-    let relative = strip_data_prefix(&game_files, path).to_owned();
-
-    let raw = {
-        let _span = info_span!("read_bundle_bytes").entered();
-        game_files
-            .read_path(Path::new(&relative))
-            .with_context(|| format!("reading bundle bytes {relative}"))?
-    };
-
-    let tpk = info_span!("get tpk").in_scope(|| TypeTreeCache::new(TpkTypeTreeBlob::embedded()));
-
-    let env = Environment::new(game_files, &tpk);
     // Bundles don't carry a unity-version header — the version lives in
     // the SerializedFiles inside, which the reader hasn't parsed yet at
     // open time. Pull the version from globalgamemanagers via the env
@@ -55,10 +40,10 @@ pub fn build_tree<C: ChunkStore + 'static>(
     let bundle = {
         let _span = info_span!("parse_bundle_header").entered();
         let config = ExtractionConfig::default().with_fallback_unity_version(unity_version);
-        BundleFileReader::from_reader(Cursor::new(raw.as_ref()), &config)?
+        BundleFileReader::from_reader(Cursor::new(bundle_bytes.as_ref()), &config)?
     };
 
-    build_tree_from_bundle(&env, &bundle, path)
+    build_tree_from_bundle(env, &bundle, path)
 }
 
 /// Walk an already-parsed bundle and produce its structured tree.

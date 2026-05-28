@@ -15,22 +15,16 @@
 //! shouldn't break the whole preview.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::handle::SerializedFileHandle;
 use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::{PPtr, PathId};
-use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::TypeTreeProvider;
-use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour};
-use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use serde_value::Value;
-use steam_depot_vfs::chunk_store::ChunkStore;
-use steam_depot_vfs::fs::DepotManifestStore;
 
 use super::markers::{
     as_file_id, as_path_id, color_hex_from_map, color_marker, pptr_from_map, pptr_marker,
@@ -59,19 +53,16 @@ impl DumpSide {
 /// Read the object at `path_id` and pretty-print it as JSON using the
 /// typetree, applying [`simplify_for_dump`] on the way out.
 #[tracing::instrument(skip_all, fields(path, path_id))]
-pub fn dump_object_json<C: ChunkStore + 'static>(
-    manifest_store: Arc<DepotManifestStore<C>>,
+pub fn dump_object_json<R: EnvResolver, P: TypeTreeProvider>(
+    env: &Environment<R, P>,
+    data_dir: &str,
     path: &str,
     path_id: PathId,
     side: DumpSide,
 ) -> Result<String> {
-    let game_files = SteamDepotGameFiles::new(manifest_store)?;
-    let data_dir = game_files.data_dir().display().to_string();
     let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
-    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
-    let env = Environment::new(game_files, &tpk);
     let file = env.load_cached(relative)?;
-    dump_object_json_from_handle(&file, &data_dir, "", side, path_id)
+    dump_object_json_from_handle(&file, data_dir, "", side, path_id)
 }
 
 /// Pretty-print one object from an already-opened SerializedFile. Used
@@ -116,15 +107,16 @@ pub fn dump_object_json_unified_diff(
         .to_string()
 }
 
-/// Bundle equivalent of [`dump_object_json`]: load the SerializedFile
-/// at `archive_entry` inside the bundle at `bundle_path`, then dump
-/// `path_id` from it. Builds its own [`Environment`] because the env
-/// has to know about the inner SerializedFile by-path (PPtr resolution
-/// inside the dump walks back through `env`).
-#[tracing::instrument(skip_all, fields(bundle_path, archive_entry, path_id))]
-pub fn dump_bundle_object_json<C: ChunkStore + 'static>(
-    manifest_store: Arc<DepotManifestStore<C>>,
-    bundle_path: &str,
+/// Bundle equivalent of [`dump_object_json`]: parse `bundle_bytes`,
+/// extract `archive_entry`, then dump `path_id` from it. Callers
+/// must read the bundle bytes themselves (typically via
+/// `env.game_files.read_path`) so the I/O stays visible at the route
+/// layer where it can be scheduled inside `spawn_blocking`.
+#[tracing::instrument(skip_all, fields(archive_entry, path_id))]
+pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
+    env: &Environment<R, P>,
+    data_dir: &str,
+    bundle_bytes: rabex_env::env::Data,
     archive_entry: &str,
     path_id: PathId,
     side: DumpSide,
@@ -134,19 +126,7 @@ pub fn dump_bundle_object_json<C: ChunkStore + 'static>(
     use rabex_env::env::Data;
     use rabex_env::rabex::files::SerializedFile;
     use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
-    use rabex_env::resolver::EnvResolver;
 
-    let game_files = SteamDepotGameFiles::new(manifest_store)?;
-    let data_dir = game_files.data_dir().display().to_string();
-    let relative = bundle_path
-        .strip_prefix(&format!("{data_dir}/"))
-        .unwrap_or(bundle_path);
-    let bundle_bytes = {
-        let _span = tracing::info_span!("read_bundle_bytes").entered();
-        game_files.read_path(std::path::Path::new(relative))?
-    };
-    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
-    let env = Environment::new(game_files, &tpk);
     let unity_version = {
         let _span = tracing::info_span!("unity_version").entered();
         env.unity_version()?.clone()
@@ -176,7 +156,7 @@ pub fn dump_bundle_object_json<C: ChunkStore + 'static>(
         let _span = tracing::info_span!("simplify_for_dump").entered();
         let mut v = value;
         let archive_prefix = format!("archive:{archive_entry}/");
-        simplify_for_dump(&file, &data_dir, &archive_prefix, side, &mut v);
+        simplify_for_dump(&file, data_dir, &archive_prefix, side, &mut v);
         v
     };
     let json = {
