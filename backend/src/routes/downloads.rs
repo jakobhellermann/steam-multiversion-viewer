@@ -35,11 +35,13 @@ pub struct DownloadManifestBody {
     pub paths: Option<Vec<String>>,
 }
 
+/// Enqueue manifest download
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/download",
     tag = "downloads",
-    request_body = DownloadManifestBody
+    request_body = DownloadManifestBody,
+    responses((status = 200, body = EnqueueSummary))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn manifest_download(
@@ -100,12 +102,24 @@ pub async fn manifest_download(
     Ok(Json(summary))
 }
 
-#[utoipa::path(get, path = "/api/downloads", tag = "downloads")]
+/// Active download progress
+#[utoipa::path(
+    get,
+    path = "/api/downloads",
+    tag = "downloads",
+    responses((status = 200, body = DownloadStats))
+)]
 pub async fn downloads_snapshot(State(state): State<AppState>) -> Json<DownloadStats> {
     Json(state.downloads.current())
 }
 
-#[utoipa::path(post, path = "/api/downloads/cancel", tag = "downloads")]
+/// Cancel all downloads
+#[utoipa::path(
+    post,
+    path = "/api/downloads/cancel",
+    tag = "downloads",
+    responses((status = 200, body = DownloadStats))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn downloads_cancel(State(state): State<AppState>) -> Json<DownloadStats> {
     state.downloads.cancel();

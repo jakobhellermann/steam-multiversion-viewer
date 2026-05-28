@@ -38,7 +38,7 @@ tower = { version = "0.5", features = ["timeout"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-utoipa = { version = "5", features = ["axum_extras"] }
+utoipa = { version = "5", features = ["axum_extras", "preserve_path_order"] }
 utoipa-axum = "0.2"
 zstd = "0.13.3"
 time = { version = "0.3.47", features = ["formatting", "macros"] }

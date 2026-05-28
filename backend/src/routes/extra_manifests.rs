@@ -5,6 +5,8 @@
 use axum::Json;
 use axum::extract::{Path, State};
 use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
+use serde_json::json;
 use utoipa::ToSchema;
 
 use crate::state::AppState;
@@ -13,6 +15,11 @@ use crate::steam::{AppId, DepotId, ManifestId};
 use super::Result;
 
 #[derive(Serialize, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "depot_id": 1234567,
+    "manifest_id": "9876543210987654321",
+    "branch": "public"
+}))]
 pub struct ExtraManifestEntryDto {
     pub depot_id: DepotId,
     pub manifest_id: ManifestId,
@@ -44,10 +51,12 @@ impl From<ExtraManifestEntryDto> for crate::extra_manifests::ExtraManifestEntry 
     }
 }
 
+/// List tracked manifests
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/extra_manifests",
-    tag = "extra-manifests"
+    tag = "extra-manifests",
+    responses((status = 200, body = Vec<ExtraManifestEntryDto>))
 )]
 pub async fn get_extra_manifests(
     State(state): State<AppState>,
@@ -57,12 +66,13 @@ pub async fn get_extra_manifests(
     Ok(Json(list.into_iter().map(Into::into).collect()))
 }
 
-/// Replace the full list of user-tracked manifests for this app.
+/// Replace tracked manifest list
 #[utoipa::path(
     put,
     path = "/api/apps/{appid}/extra_manifests",
     tag = "extra-manifests",
-    request_body = ExtraManifestsRequest
+    request_body = ExtraManifestsRequest,
+    responses((status = 200, body = Vec<ExtraManifestEntryDto>))
 )]
 pub async fn put_extra_manifests(
     State(state): State<AppState>,
@@ -74,10 +84,12 @@ pub async fn put_extra_manifests(
     Ok(Json(saved.into_iter().map(Into::into).collect()))
 }
 
+/// Remove one tracked manifest
 #[utoipa::path(
     delete,
     path = "/api/apps/{appid}/extra_manifests/{depot_id}/{manifest_id}",
-    tag = "extra-manifests"
+    tag = "extra-manifests",
+    responses((status = 200, body = Vec<ExtraManifestEntryDto>))
 )]
 pub async fn delete_extra_manifest(
     State(state): State<AppState>,

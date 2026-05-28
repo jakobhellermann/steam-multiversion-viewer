@@ -16,6 +16,8 @@ use axum::response::{IntoResponse as _, Response};
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
+use serde_json::json;
 use steam_vent_depot::{DepotFile, FileKind};
 use tokio::sync::Semaphore;
 use utoipa::ToSchema;
@@ -38,6 +40,12 @@ pub struct ManifestDiffRequest {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "entries": [
+        {"path": "Data/Engine.dll",      "status": "changed"},
+        {"path": "Data/NewModule.dll",   "status": "added"}
+    ]
+}))]
 pub struct ManifestDiffResponse {
     /// Entries are paths *in `base`* that are either content-different
     /// from at least one `other` (`Changed`) or absent from every
@@ -64,15 +72,17 @@ pub enum ManifestDiffStatus {
     Changed,
 }
 
-/// Path-level diff between a base manifest and a set of others. Each
-/// reported entry is a path in `base` whose status is either `Changed`
-/// (content differs from some `other`) or `Added` (absent from every
-/// `other`). Identity is `(kind, size, sha, linktarget)`.
+/// Manifest path-level diff
+///
+/// Each reported entry is a path in `base` whose status is either
+/// `Changed` (content differs from some `other`) or `Added` (absent
+/// from every `other`). Identity is `(kind, size, sha, linktarget)`.
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/manifests/diff",
     tag = "diff",
-    request_body = ManifestDiffRequest
+    request_body = ManifestDiffRequest,
+    responses((status = 200, body = ManifestDiffResponse))
 )]
 #[tracing::instrument(skip_all, fields(others = body.others.len()))]
 pub async fn manifest_diff(
@@ -191,6 +201,13 @@ pub struct FileDiffTargetsRequest {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "statuses": [
+        {"depot_id": 1234567, "manifest_id": "9876543210987654321", "status": "different"},
+        {"depot_id": 1234567, "manifest_id": "1111222233334444555",  "status": "same"},
+        {"depot_id": 1234567, "manifest_id": "5555666677778888999",  "status": "missing"}
+    ]
+}))]
 pub struct FileDiffTargetsResponse {
     /// For each `other` manifest, whether the file at `path` differs
     /// from the base (`different`), doesn't exist there (`missing`), or
@@ -214,15 +231,17 @@ pub enum FileDiffStatus {
     Missing,
 }
 
-/// Per-target diff status for a single file across many manifests.
-/// One round trip instead of fanning out N file-view requests — useful
-/// for callers that want to filter a long candidate list down to the
-/// manifests where a specific file actually changed.
+/// Find manifests with changes
+///
+/// For one file (`path`) against N target manifests, report which
+/// ones have it byte-identical to `base` (`same`), present but
+/// different (`different`), or absent (`missing`).
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/file/diff-targets",
     tag = "diff",
-    request_body = FileDiffTargetsRequest
+    request_body = FileDiffTargetsRequest,
+    responses((status = 200, body = FileDiffTargetsResponse))
 )]
 #[tracing::instrument(skip_all, fields(path = %body.path, others = body.others.len()))]
 pub async fn file_diff_targets(
@@ -314,17 +333,20 @@ pub struct FileDiffRequest {
     pub target: ManifestRef,
 }
 
-/// Unified diff between the file at `path` in the base manifest and in
-/// `body.target`. Both sides go through the same text-resolution as
-/// `/file/transformed` — if a transformer is registered, the diff is on
-/// its output. Response body is a unified-diff text blob with
-/// `Content-Type: text/x-diff`.
+/// Unified file diff
+///
+/// Both sides go through the same text-resolution as `/file/transformed`
+/// — if a transformer is registered, the diff is on its output.
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/diff",
     tag = "diff",
     params(FileViewQuery),
     request_body = FileDiffRequest,
+    responses(
+        (status = 200, content_type = "text/x-diff", body = String),
+        (status = 415, description = "Binary file with no registered transformer")
+    )
 )]
 #[tracing::instrument(skip_all, fields(path = %body.path))]
 pub async fn manifest_file_diff(
@@ -548,21 +570,25 @@ fn default_branch() -> String {
     "public".to_string()
 }
 
-/// Structured per-object diff between two SerializedFiles. Returns a
-/// pruned tree where each node is tagged `added`/`removed`/`changed`/
-/// `unchanged`; unchanged leaves are dropped so the payload carries
-/// only the spine to every difference.
+/// Structured tree diff
 ///
-/// Only `UnitySerialized` files are supported today; everything else
-/// returns 415. Per-node content (the actual JSON dump for changed
-/// objects) is fetched lazily by the client via the existing
+/// Returns a pruned tree where each node is tagged
+/// `added`/`removed`/`changed`/`unchanged`; unchanged leaves are
+/// dropped so the payload carries only the spine to every difference.
+///
+/// Per-node content (the actual JSON dump for changed objects) is
+/// fetched lazily by the client via the existing
 /// `/file/structured/node` endpoint, once per side.
 #[cfg(feature = "unity")]
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured-diff",
     tag = "diff",
-    params(StructuredDiffQuery)
+    params(StructuredDiffQuery),
+    responses(
+        (status = 200, body = transform::structured::StructuredTree),
+        (status = 415, description = "Only UnitySerialized files are supported today")
+    )
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
 pub async fn manifest_file_structured_diff(
@@ -1008,12 +1034,7 @@ pub struct StructuredDiffNodeQuery {
     pub target_manifest_id: ManifestId,
     #[serde(default = "default_branch")]
     pub target_branch: String,
-    /// Tree-row id from the diff tree. One of:
-    /// - `<inner>` — matched, same id on both sides → dump both with
-    ///   `<inner>` on each.
-    /// - `mod:<base-inner>,<target-inner>` — matched but renumbered.
-    /// - `base:<inner>` — added (only on base).
-    /// - `target:<inner>` — removed (only on target).
+    /// Opaque node id from the diff tree's `id` field.
     pub node_id: String,
 }
 
@@ -1036,18 +1057,28 @@ fn split_diff_id(node_id: &str) -> (Option<&str>, Option<&str>) {
     (Some(node_id), Some(node_id))
 }
 
-/// Per-node body for a structured diff entry. Dumps both sides as
-/// JSON, then runs the same unified-diff used by `/file/diff` so
-/// the frontend can render with `lang="diff"` and get colouring for
-/// free. When only one side has a path-id the body returns that
-/// side's JSON unchanged (no `+`/`-` decorations) so an "added" or
-/// "removed" node still shows useful content.
+/// Structured tree diff node content
+///
+/// Dumps both sides as JSON, then runs the same unified-diff used by
+/// `/file/diff` so the frontend can render with `lang="diff"` and get
+/// colouring for free. When only one side has a path-id the body
+/// returns that side's JSON unchanged (no `+`/`-` decorations) so an
+/// "added" or "removed" node still shows useful content.
 #[cfg(feature = "unity")]
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured-diff/node",
     tag = "diff",
-    params(StructuredDiffNodeQuery)
+    params(StructuredDiffNodeQuery),
+    responses(
+        (
+            status = 200,
+            description = "Unified diff text, or one side's JSON for added/removed nodes",
+            content_type = "text/x-diff",
+            body = String,
+        ),
+        (status = 415, description = "File has no structured representation")
+    )
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
 pub async fn manifest_file_structured_diff_node(

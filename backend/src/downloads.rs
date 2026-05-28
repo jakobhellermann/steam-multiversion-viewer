@@ -12,6 +12,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use serde::Serialize;
+#[allow(unused_imports)]
+use serde_json::json;
 use steam_depot_vfs::ChunkHash;
 use steam_depot_vfs::chunk_store::ChunkStore;
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
@@ -95,6 +97,14 @@ struct Job {
 }
 
 #[derive(Default, Clone, Debug, Serialize, ToSchema)]
+#[schema(example = json!({
+    "chunks_total": 14586,
+    "chunks_completed": 1003,
+    "chunks_failed": 0,
+    "bytes_total": 11283371566u64,
+    "bytes_completed": 993842156u64,
+    "last_error": null
+}))]
 pub struct DownloadStats {
     pub chunks_total: u64,
     pub chunks_completed: u64,
@@ -106,6 +116,7 @@ pub struct DownloadStats {
 }
 
 #[derive(Default, Debug, Serialize, ToSchema)]
+#[schema(example = json!({"enqueued_chunks": 14586, "enqueued_bytes": 11283371566u64, "already_present_chunks": 0}))]
 pub struct EnqueueSummary {
     pub enqueued_chunks: u64,
     pub enqueued_bytes: u64,

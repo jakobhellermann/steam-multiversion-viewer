@@ -9,6 +9,8 @@ use axum::extract::{Path, Query, State};
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
+use serde_json::json;
 use steam_vent::ConnectionTrait;
 use steam_vent_depot::FileKind;
 use steam_vent_proto::steammessages_player_steamclient::CPlayer_GetOwnedGames_Request;
@@ -22,13 +24,24 @@ use crate::steam::{AppId, DepotId, ManifestId};
 use super::{Result, default_branch};
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "appid": 620,
+    "name": "Portal 2",
+    "playtime_minutes": 1051
+}))]
 pub struct OwnedGame {
     pub appid: AppId,
     pub name: String,
     pub playtime_minutes: u32,
 }
 
-#[utoipa::path(get, path = "/api/library", tag = "library")]
+/// Steam library list
+#[utoipa::path(
+    get,
+    path = "/api/library",
+    tag = "library",
+    responses((status = 200, body = Vec<OwnedGame>))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn library(
     State(state): State<AppState>,
@@ -57,6 +70,32 @@ pub async fn library(
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "appid": 1145360,
+    "name": "Hades",
+    "type": "Game",
+    "developer": "Supergiant Games",
+    "publisher": "Supergiant Games",
+    "homepage": "http://www.supergiantgames.com",
+    "logo_url": "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/1145360/79416954db9fc5d5079c26839a77cd35b09e1608.jpg",
+    "icon_url": "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/1145360/8a3fca36a00883e8066263ad35dd15d77a1f9abc.jpg",
+    "branches": [
+        {"name": "public", "build_id": 10929685, "time_updated": 1681309217, "description": null}
+    ],
+    "depots": [
+        {
+            "depot_id": 1145361,
+            "oslist": "windows",
+            "osarch": null,
+            "language": "",
+            "from_app_id": null,
+            "manifests": [
+                {"branch": "public", "manifest_id": "5173085471687919135", "size": 11406885121u64, "download_size": 10694072752u64}
+            ]
+        }
+    ],
+    "private_branches": true
+}))]
 pub struct AppInfo {
     pub appid: AppId,
     pub name: String,
@@ -72,6 +111,12 @@ pub struct AppInfo {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "name": "public",
+    "build_id": 10929685,
+    "time_updated": 1681309217,
+    "description": null
+}))]
 pub struct BranchInfo {
     pub name: String,
     pub build_id: u64,
@@ -80,6 +125,16 @@ pub struct BranchInfo {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "depot_id": 1234567,
+    "oslist": "windows",
+    "osarch": null,
+    "language": "",
+    "from_app_id": null,
+    "manifests": [
+        {"branch": "public", "manifest_id": "9876543210987654321", "size": 11406885121u64, "download_size": 10694072752u64}
+    ]
+}))]
 pub struct DepotEntry {
     pub depot_id: DepotId,
     pub oslist: Option<String>,
@@ -91,6 +146,12 @@ pub struct DepotEntry {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "branch": "public",
+    "manifest_id": "9876543210987654321",
+    "size": 11406885121u64,
+    "download_size": 10694072752u64
+}))]
 pub struct DepotManifest {
     pub branch: String,
     pub manifest_id: ManifestId,
@@ -98,7 +159,13 @@ pub struct DepotManifest {
     pub download_size: u64,
 }
 
-#[utoipa::path(get, path = "/api/apps/{appid}", tag = "library")]
+/// App metadata
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}",
+    tag = "library",
+    responses((status = 200, body = AppInfo))
+)]
 #[tracing::instrument(skip_all)]
 pub async fn app_info(
     State(state): State<AppState>,
@@ -183,6 +250,14 @@ pub struct ManifestFilesQuery {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "depot_id": 1234567,
+    "manifest_id": "9876543210987654321",
+    "creation_time": 1680271331,
+    "size_uncompressed": 11406885121u64,
+    "size_compressed": 10694072752u64,
+    "file_count": 4619
+}))]
 pub struct ManifestInfo {
     pub depot_id: DepotId,
     pub manifest_id: ManifestId,
@@ -193,6 +268,16 @@ pub struct ManifestInfo {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "depot_id": 1234567,
+    "manifest_id": "9876543210987654321",
+    "files": [
+        {"path": "Data/Engine.dll",       "size": 9437184,  "kind": "file",    "chunk_count": 10, "linktarget": null},
+        {"path": "Data/example/asset.bin", "size": 62451264, "kind": "file",    "chunk_count": 61, "linktarget": null},
+        {"path": "Data/empty.txt",         "size": 0,        "kind": "file",    "chunk_count": 0,  "linktarget": null},
+        {"path": "Data/lib.so",            "size": 0,        "kind": "symlink", "chunk_count": 0,  "linktarget": "lib.so.1"}
+    ]
+}))]
 pub struct ManifestFiles {
     pub depot_id: DepotId,
     pub manifest_id: ManifestId,
@@ -200,6 +285,13 @@ pub struct ManifestFiles {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "path": "Data/example/asset.bin",
+    "size": 62451264,
+    "kind": "file",
+    "chunk_count": 61,
+    "linktarget": null
+}))]
 pub struct ManifestFile {
     pub path: String,
     pub size: u64,
@@ -226,11 +318,13 @@ impl From<FileKind> for ManifestFileKind {
     }
 }
 
+/// Manifest header
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}",
     tag = "library",
-    params(ManifestInfoQuery)
+    params(ManifestInfoQuery),
+    responses((status = 200, body = ManifestInfo))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn manifest_info(
@@ -262,11 +356,13 @@ pub async fn manifest_info(
     ))
 }
 
+/// Manifest file list
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/files",
     tag = "library",
-    params(ManifestFilesQuery)
+    params(ManifestFilesQuery),
+    responses((status = 200, body = ManifestFiles))
 )]
 #[tracing::instrument(skip_all)]
 pub async fn manifest_files(
@@ -320,6 +416,18 @@ pub struct ManifestRef {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "depot_id": 1234567,
+    "manifest_id": "9876543210987654321",
+    "error": null,
+    "chunks_total": 14586,
+    "chunks_missing": 13583,
+    "bytes_total": 11283371566u64,
+    "bytes_missing": 10289529410u64,
+    "bytes_missing_compressed": 9716479376u64,
+    "bytes_unique": 948753388u64,
+    "creation_time": 1680271331
+}))]
 pub struct ManifestStatusEntry {
     pub depot_id: DepotId,
     pub manifest_id: ManifestId,
@@ -342,16 +450,13 @@ pub struct ManifestStatusEntry {
     pub creation_time: u32,
 }
 
-/// Batch status for the listed manifests. Cached manifests are returned
-/// immediately; uncached ones get fetched from the Steam CDN, which can be
-/// slow on the first call to a fresh app but is fast on subsequent ones.
-/// The `branch` field is only used during the CDN fetch — for cached
-/// entries any value (e.g. "public") works.
+/// Manifest status batch
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/manifests/status",
     tag = "library",
-    request_body = ManifestStatusRequest
+    request_body = ManifestStatusRequest,
+    responses((status = 200, body = Vec<ManifestStatusEntry>))
 )]
 #[tracing::instrument(skip_all, fields(count = body.manifests.len()))]
 pub async fn manifest_statuses(

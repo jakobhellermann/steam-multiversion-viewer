@@ -20,15 +20,16 @@ use ::transform::structured::{NodeContent, StructuredTree};
 use super::Result;
 use super::files::FileViewQuery;
 
-/// Structured tree for the file at `q.path` in the given manifest.
-/// Returns 415 (Unsupported Media Type) when the file has no
-/// structured representation today — callers should fall back to the
-/// plain text preview / transformer in that case.
+/// Structured tree
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured",
     tag = "structured",
-    params(FileViewQuery)
+    params(FileViewQuery),
+    responses(
+        (status = 200, body = StructuredTree),
+        (status = 415, description = "File has no structured representation — fall back to the plain preview / transformer")
+    )
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
 pub async fn manifest_file_structured(
@@ -137,15 +138,20 @@ pub struct NodeContentQuery {
     #[serde(default = "crate::routes::default_branch")]
     pub branch: String,
     pub path: String,
+    /// Opaque node id from the tree's `id` field.
     pub node_id: String,
 }
 
-/// Lazy per-node content.
+/// Structured tree node content
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured/node",
     tag = "structured",
-    params(NodeContentQuery)
+    params(NodeContentQuery),
+    responses(
+        (status = 200, body = NodeContent),
+        (status = 415, description = "File has no structured representation")
+    )
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path, node_id = %q.node_id))]
 pub async fn manifest_file_structured_node(

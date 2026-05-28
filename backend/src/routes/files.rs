@@ -9,6 +9,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::header;
 use axum::response::{IntoResponse as _, Response};
 use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
+use serde_json::json;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::error::ApiError;
@@ -24,11 +26,9 @@ pub struct FileViewQuery {
     #[serde(default = "default_branch")]
     pub branch: String,
     pub path: String,
-    /// When false, skip the chunk download and inline-content fetch and
-    /// just return metadata (size, sha, kind, chunks_present). The
-    /// default is true so existing callers keep their auto-fetch
-    /// behavior. Used by the compare menu to peek at all candidate
-    /// shas without warming hundreds of files.
+    /// When false, return metadata only (size, sha, kind,
+    /// chunks_present) — skip the chunk download and inline-content
+    /// read.
     #[serde(default = "default_true")]
     pub auto_fetch: bool,
 }
@@ -38,6 +38,20 @@ fn default_true() -> bool {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "path": "Data/example/asset.bin",
+    "size": 62451264,
+    "kind": "file",
+    "chunk_count": 61,
+    "chunks_present": 61,
+    "linktarget": null,
+    "sha": "0000000000000000000000000000000000000000",
+    "content_kind": "unknown",
+    "content": null,
+    "preview_cap_bytes": 67108864,
+    "transformer": null,
+    "structured": null
+}))]
 pub struct FileView {
     pub path: String,
     pub size: u64,
@@ -112,11 +126,13 @@ fn looks_like_text(bytes: &[u8]) -> bool {
     std::str::from_utf8(bytes).is_ok()
 }
 
+/// File metadata and inline preview
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file",
     tag = "files",
-    params(FileViewQuery)
+    params(FileViewQuery),
+    responses((status = 200, body = FileView))
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
 pub async fn manifest_file(
@@ -252,11 +268,20 @@ pub(super) fn hex_encode(bytes: [u8; 20]) -> String {
     s
 }
 
+/// Raw file bytes
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/raw",
     tag = "files",
-    params(FileViewQuery)
+    params(FileViewQuery),
+    responses(
+        (
+            status = 200,
+            description = "Raw file bytes; Content-Type is sniffed from the path",
+            content_type = "application/octet-stream",
+            body = Vec<u8>,
+        )
+    )
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
 pub async fn manifest_file_raw(
@@ -316,11 +341,21 @@ pub async fn manifest_file_raw(
         .into_response())
 }
 
+/// Transformer-rendered text
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/transformed",
     tag = "files",
-    params(FileViewQuery)
+    params(FileViewQuery),
+    responses(
+        (
+            status = 200,
+            description = "Content-Type matches the transformer (e.g. text/x-csharp)",
+            content_type = "text/plain",
+            body = String,
+        ),
+        (status = 415, description = "No transformer registered, or the file is served through /file/structured instead (.NET, Unity bundles)")
+    )
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path))]
 pub async fn manifest_file_transformed(

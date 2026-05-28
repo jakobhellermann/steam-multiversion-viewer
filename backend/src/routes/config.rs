@@ -7,6 +7,8 @@ use axum::Json;
 use axum::extract::State;
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
+use serde_json::json;
 use utoipa::ToSchema;
 
 use crate::config::Config;
@@ -15,6 +17,11 @@ use crate::state::AppState;
 use super::Result;
 
 #[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "store_root": "/home/alice/.local/share/steam-multiversion-viewer/store",
+    "mountpoint": "/home/alice/steam-vfs",
+    "restart_required": false
+}))]
 pub struct ConfigDto {
     #[schema(value_type = String)]
     pub store_root: Utf8PathBuf,
@@ -43,13 +50,26 @@ fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
     }
 }
 
-#[utoipa::path(get, path = "/api/config", tag = "config")]
+/// Get persisted config
+#[utoipa::path(
+    get,
+    path = "/api/config",
+    tag = "config",
+    responses((status = 200, body = ConfigDto))
+)]
 pub async fn get_config(State(state): State<AppState>) -> Result<Json<ConfigDto>> {
     let saved = Config::load_or_default()?;
     Ok(Json(build_config_dto(&state, saved)))
 }
 
-#[utoipa::path(patch, path = "/api/config", request_body = PatchConfig, tag = "config")]
+/// Patch persisted config
+#[utoipa::path(
+    patch,
+    path = "/api/config",
+    request_body = PatchConfig,
+    tag = "config",
+    responses((status = 200, body = ConfigDto))
+)]
 pub async fn patch_config(
     State(state): State<AppState>,
     Json(body): Json<PatchConfig>,

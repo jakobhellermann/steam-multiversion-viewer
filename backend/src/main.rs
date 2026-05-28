@@ -28,7 +28,14 @@ use utoipa_axum::router::OpenApiRouter;
 use crate::state::AppState;
 
 #[derive(OpenApi)]
-#[openapi(info(title = "steam-multiversion-viewer", version = "0.1.0"))]
+#[openapi(info(
+    title = "steam-multiversion-viewer",
+    version = "0.1.0",
+    description = "
+Browse Steam depot manifests across versions, branches, and apps — \
+list owned games, inspect manifest contents, diff files between \
+manifests, and (optionally) expose the depot as a FUSE mount.",
+))]
 struct ApiDoc;
 
 async fn scalar_html() -> Html<&'static str> {

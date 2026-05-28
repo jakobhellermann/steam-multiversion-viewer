@@ -12,6 +12,8 @@
 use std::collections::BTreeMap;
 
 use serde::Serialize;
+#[allow(unused_imports)]
+use serde_json::json;
 use utoipa::ToSchema;
 
 /// One entry in a structured tree. Nodes are recursive — children
@@ -71,6 +73,10 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "is_false")]
     pub has_content: bool,
     /// Direct children. Empty for leaves.
+    // utoipa's schema collector recurses through nested ToSchema types
+    // to register their schemas; without this flag it stack-overflows
+    // on the self-referential `Node` → `Vec<Node>` cycle.
+    #[schema(no_recursion)]
     pub children: Vec<Node>,
 }
 
@@ -136,6 +142,25 @@ impl Node {
 /// shared generic renderer reads it as `"unity-serialized"` (or
 /// similar) and just shows the tree.
 #[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(example = json!({
+    "kind": "unity-serialized",
+    "root": {
+        "id": "file:level0",
+        "label": "level0",
+        "kind": "file",
+        "badge": "4 objects",
+        "children": [
+            {
+                "id": "section:hierarchy",
+                "label": "Hierarchy",
+                "kind": "section",
+                "children": [
+                    {"id": "obj:1", "label": "Player", "kind": "gameobject", "has_content": true, "children": []}
+                ]
+            }
+        ]
+    }
+}))]
 pub struct StructuredTree {
     pub kind: String,
     pub root: Node,
@@ -143,6 +168,10 @@ pub struct StructuredTree {
 
 /// Result returned by the lazy node-content endpoint.
 #[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(example = json!({
+    "mime": "application/json",
+    "text": "{\n  \"m_Name\": \"Player\"\n}"
+}))]
 pub struct NodeContent {
     /// MIME type the frontend uses to pick a syntax highlighter.
     pub mime: String,

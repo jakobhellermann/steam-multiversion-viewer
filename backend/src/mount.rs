@@ -21,6 +21,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[allow(unused_imports)]
+use serde_json::json;
+
 use steam_depot_vfs::DepotStore;
 use tokio::runtime::Handle;
 
@@ -345,6 +348,7 @@ fn register_one_with_branch(
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 #[allow(dead_code)] // Idle/Mounted only constructed on linux; kept for the wire shape.
+#[schema(example = json!({"state": "idle"}))]
 pub enum MountStatus {
     Idle,
     Mounted {
