@@ -3,10 +3,12 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import {
   downloadManifest,
   fetchAppInfo,
   fetchExtraManifests,
+  fetchGameInfo,
   fetchManifestDiff,
   fetchManifestFiles,
   fetchManifestInfo,
@@ -14,6 +16,7 @@ import {
   type AppInfo,
   type EnqueueSummary,
   type ExtraManifestEntry,
+  type GameInfo,
   type ManifestDiffStatus,
   type ManifestFile,
   type ManifestInfo,
@@ -85,6 +88,10 @@ function ManifestDetail() {
   const info = useQuery({
     queryKey: ["manifest-info", appid, depotId, manifestId, branch],
     queryFn: () => fetchManifestInfo(appid, depotId, manifestId, branch),
+  });
+  const gameInfo = useQuery({
+    queryKey: ["game-info", appid, depotId, manifestId, branch],
+    queryFn: () => fetchGameInfo(appid, depotId, manifestId, branch),
   });
   const files = useQuery({
     queryKey: ["manifest-files", appid, depotId, manifestId, branch],
@@ -165,6 +172,8 @@ function ManifestDetail() {
       {info.data && (
         <ManifestHeader
           info={info.data}
+          gameInfo={gameInfo.data}
+          gameInfoPending={gameInfo.isPending}
           branch={branch}
           onDownload={() => {
             markShowImmediately();
@@ -200,12 +209,16 @@ function ManifestDetail() {
 
 function ManifestHeader({
   info,
+  gameInfo,
+  gameInfoPending,
   onDownload,
   downloadPending,
   downloadResult,
   downloadError,
 }: {
   info: ManifestInfo;
+  gameInfo: GameInfo | undefined;
+  gameInfoPending: boolean;
   branch: string;
   onDownload: () => void;
   downloadPending: boolean;
@@ -255,6 +268,21 @@ function ManifestHeader({
         <dd className="tabular-nums">
           <Bytes value={info.size_compressed} />
         </dd>
+        {gameInfoPending ? (
+          <>
+            <dt className="text-slate-400">Engine</dt>
+            <dd className="flex items-center gap-2 text-slate-500">
+              <Loader2 size={14} className="animate-spin" />
+            </dd>
+          </>
+        ) : (
+          gameInfo?.engine?.engine === "unity" && (
+            <>
+              <dt className="text-slate-400">Engine</dt>
+              <dd>Unity {gameInfo.engine.data.version}</dd>
+            </>
+          )
+        )}
       </dl>
     </div>
   );

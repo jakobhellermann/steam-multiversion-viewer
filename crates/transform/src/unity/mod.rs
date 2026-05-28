@@ -47,6 +47,23 @@ pub fn dump_unity_serialized<C: ChunkStore + 'static>(
     Ok(out)
 }
 
+/// Read the unity version from a manifest's `globalgamemanagers`.
+/// Returns `None` if the manifest isn't a unity game (no ggm in the
+/// data dir). Synchronous for the same reason as [`dump_unity_serialized`].
+pub fn read_unity_version<C: ChunkStore + 'static>(
+    manifest_store: Arc<DepotManifestStore<C>>,
+) -> Result<Option<String>, anyhow::Error> {
+    let game_files = match SteamDepotGameFiles::new(manifest_store) {
+        Ok(gf) => gf,
+        // No `<game>_Data` dir → not a unity game.
+        Err(_) => return Ok(None),
+    };
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let env = Environment::new(game_files, &tpk);
+    let version = env.unity_version()?;
+    Ok(Some(version.to_string()))
+}
+
 /// True for unity serialized-file conventions that don't carry a
 /// dispatchable extension. Pure naming heuristic — the file's *bytes*
 /// aren't consulted.

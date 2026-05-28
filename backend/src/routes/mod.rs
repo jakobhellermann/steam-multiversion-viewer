@@ -11,6 +11,7 @@ pub mod diff;
 pub mod downloads;
 pub mod extra_manifests;
 pub mod files;
+pub mod game_info;
 pub mod library;
 pub mod mount;
 pub mod structured;
@@ -28,6 +29,7 @@ pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
         .routes(routes!(library::manifest_info))
         .routes(routes!(library::manifest_files))
         .routes(routes!(library::manifest_statuses))
+        .routes(routes!(game_info::game_info))
         .routes(routes!(files::manifest_file))
         .routes(routes!(files::manifest_file_raw))
         .routes(routes!(files::manifest_file_transformed))
