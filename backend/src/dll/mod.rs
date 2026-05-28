@@ -31,6 +31,9 @@ use crate::transform::{TempInput, TransformError, tempfile_for};
 pub mod diff;
 pub mod tree;
 
+#[cfg(test)]
+mod test;
+
 /// Where to find ilspycmd. Plain PATH lookup for now; revisit when
 /// we ship installers.
 const ILSPYCMD: &str = "ilspycmd";

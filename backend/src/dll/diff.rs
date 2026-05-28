@@ -77,7 +77,7 @@ fn map_status(s: dll_diff::Status) -> NodeStatus {
 /// status-tagged entity list. Reuses [`super::tree`]'s internal
 /// builder by exposing a small adapter: union of entities, then
 /// delegate to `tree::build_root` with our augmented `EntityEntry`s.
-fn build_root(
+pub(crate) fn build_root(
     file_label: &str,
     from: &[EntityEntry],
     to: &[EntityEntry],
