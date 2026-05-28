@@ -97,12 +97,28 @@ pub fn build_tree<C: ChunkStore + 'static>(
         BundleFileReader::from_reader(Cursor::new(raw.as_ref()), &config)?
     };
 
+    build_tree_from_bundle(&env, &bundle, path)
+}
+
+/// Walk an already-parsed bundle and produce its structured tree.
+/// Lives here so tests can build bundles in memory (no manifest store)
+/// and exercise the same orchestration the prod entrypoint uses.
+pub(crate) fn build_tree_from_bundle<R, P, T>(
+    env: &Environment<R, P>,
+    bundle: &BundleFileReader<Cursor<T>>,
+    path: &str,
+) -> Result<StructuredTree>
+where
+    R: rabex_env::resolver::EnvResolver,
+    P: rabex_env::rabex::typetree::TypeTreeProvider,
+    T: AsRef<[u8]>,
+{
     let mut children = Vec::new();
     let _walk = info_span!("walk_entries", entries = bundle.files().len()).entered();
     for entry in bundle.files() {
         let is_serialized = (entry.flags & BUNDLE_ENTRY_FLAG_SERIALIZED_FILE) != 0;
         children.push(if is_serialized {
-            build_archive_subtree(&env, &bundle, &entry.path)?
+            build_archive_subtree(env, bundle, &entry.path)?
         } else {
             blob_node(&entry.path, entry.size)
         });
@@ -296,9 +312,27 @@ pub fn build_diff<C: ChunkStore + 'static>(
 ) -> Result<StructuredTree> {
     let base = open_bundle(base_manifest, path).context("base side")?;
     let target = open_bundle(target_manifest, path).context("target side")?;
+    build_diff_from_bundles(&base.env, &base.bundle, &target.env, &target.bundle, path)
+}
 
-    let base_entries = classify_entries(&base.bundle);
-    let target_entries = classify_entries(&target.bundle);
+/// Diff two already-parsed bundles. Same role as
+/// [`build_tree_from_bundle`] — the prod entrypoint funnels through
+/// here after doing the manifest I/O; tests build bundles in memory
+/// and call us directly.
+pub(crate) fn build_diff_from_bundles<R, P, T>(
+    base_env: &Environment<R, P>,
+    base_bundle: &BundleFileReader<Cursor<T>>,
+    target_env: &Environment<R, P>,
+    target_bundle: &BundleFileReader<Cursor<T>>,
+    path: &str,
+) -> Result<StructuredTree>
+where
+    R: rabex_env::resolver::EnvResolver,
+    P: rabex_env::rabex::typetree::TypeTreeProvider,
+    T: AsRef<[u8]>,
+{
+    let base_entries = classify_entries(base_bundle);
+    let target_entries = classify_entries(target_bundle);
 
     // Index target entries by path so we can look up matches in O(1).
     let mut target_by_path: BTreeMap<&str, &BundleEntryView> = BTreeMap::new();
@@ -312,7 +346,13 @@ pub fn build_diff<C: ChunkStore + 'static>(
         match target_by_path.remove(be.path.as_str()) {
             Some(te) if be.kind == te.kind => match be.kind {
                 EntryKind::Serialized => {
-                    children.push(diff_archive_pair(&base, &target, &be.path)?);
+                    children.push(diff_archive_pair(
+                        base_env,
+                        base_bundle,
+                        target_env,
+                        target_bundle,
+                        &be.path,
+                    )?);
                 }
                 EntryKind::Blob => {
                     children.push(diff_blob_pair(&be.path, be.size, te.size));
@@ -322,11 +362,26 @@ pub fn build_diff<C: ChunkStore + 'static>(
                 // Same path, different kind — vanishingly rare in
                 // practice, but model it as remove + add so the user
                 // sees both rows.
-                children.push(one_sided_entry(&target, te, NodeStatus::Removed)?);
-                children.push(one_sided_entry(&base, be, NodeStatus::Added)?);
+                children.push(one_sided_entry(
+                    target_env,
+                    target_bundle,
+                    te,
+                    NodeStatus::Removed,
+                )?);
+                children.push(one_sided_entry(
+                    base_env,
+                    base_bundle,
+                    be,
+                    NodeStatus::Added,
+                )?);
             }
             None => {
-                children.push(one_sided_entry(&base, be, NodeStatus::Added)?);
+                children.push(one_sided_entry(
+                    base_env,
+                    base_bundle,
+                    be,
+                    NodeStatus::Added,
+                )?);
             }
         }
     }
@@ -334,7 +389,12 @@ pub fn build_diff<C: ChunkStore + 'static>(
     // Preserve the original target order for stable output.
     for te in &target_entries {
         if target_by_path.remove(te.path.as_str()).is_some() {
-            children.push(one_sided_entry(&target, te, NodeStatus::Removed)?);
+            children.push(one_sided_entry(
+                target_env,
+                target_bundle,
+                te,
+                NodeStatus::Removed,
+            )?);
         }
     }
 
@@ -365,13 +425,20 @@ pub fn build_diff<C: ChunkStore + 'static>(
 /// per-file diff machinery; the resulting subtree gets the same
 /// `archive:<entry>/` id prefix as in [`build_tree`] so the node-content
 /// endpoint can route lookups back to the right entry.
-fn diff_archive_pair<C: ChunkStore + 'static>(
-    base: &OpenedBundle<C>,
-    target: &OpenedBundle<C>,
+fn diff_archive_pair<R, P, T>(
+    base_env: &Environment<R, P>,
+    base_bundle: &BundleFileReader<Cursor<T>>,
+    target_env: &Environment<R, P>,
+    target_bundle: &BundleFileReader<Cursor<T>>,
     entry_path: &str,
-) -> Result<Node> {
-    let base_handle = insert_archive_entry(&base.env, &base.bundle, entry_path)?;
-    let target_handle = insert_archive_entry(&target.env, &target.bundle, entry_path)?;
+) -> Result<Node>
+where
+    R: rabex_env::resolver::EnvResolver,
+    P: rabex_env::rabex::typetree::TypeTreeProvider,
+    T: AsRef<[u8]>,
+{
+    let base_handle = insert_archive_entry(base_env, base_bundle, entry_path)?;
+    let target_handle = insert_archive_entry(target_env, target_bundle, entry_path)?;
     let (sections, status) = super::diff::diff_sections(&base_handle, &target_handle)?;
     let mut node = Node {
         id: format!("{ARCHIVE_ID_PREFIX}{entry_path}"),
@@ -418,14 +485,20 @@ fn diff_blob_pair(entry_path: &str, base_size: u64, target_size: u64) -> Node {
 /// that exists only on one side. SerializedFile entries get the same
 /// per-file root the non-diff bundle view builds; blob entries are a
 /// leaf with the size badge.
-fn one_sided_entry<C: ChunkStore + 'static>(
-    side: &OpenedBundle<C>,
+fn one_sided_entry<R, P, T>(
+    env: &Environment<R, P>,
+    bundle: &BundleFileReader<Cursor<T>>,
     entry: &BundleEntryView,
     status: NodeStatus,
-) -> Result<Node> {
+) -> Result<Node>
+where
+    R: rabex_env::resolver::EnvResolver,
+    P: rabex_env::rabex::typetree::TypeTreeProvider,
+    T: AsRef<[u8]>,
+{
     let mut node = match entry.kind {
         EntryKind::Serialized => {
-            let handle = insert_archive_entry(&side.env, &side.bundle, &entry.path)?;
+            let handle = insert_archive_entry(env, bundle, &entry.path)?;
             let mut subtree = build_root_node(&handle, &entry.path)?;
             subtree.id = format!("{ARCHIVE_ID_PREFIX}{}", entry.path);
             subtree.kind = "archive".to_string();
