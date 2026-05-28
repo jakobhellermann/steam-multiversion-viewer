@@ -208,7 +208,7 @@ export const HighlightedPre = memo(function HighlightedPre({
   // own padding/border/scroll behavior stays consistent.
   if (html.data) {
     const chrome = bare
-      ? "text-xs [&_pre]:m-0! [&_pre]:bg-transparent! [&_pre]:p-0!"
+      ? "text-xs [&_pre]:m-0! [&_pre]:bg-transparent! [&_pre]:p-0! [&_pre]:min-w-max"
       : "overflow-x-auto rounded border border-slate-800 text-xs [&_pre]:m-0! [&_pre]:bg-slate-950! [&_pre]:p-3!";
     const rendered = postProcess ? postProcess(html.data) : html.data;
     return (
@@ -216,8 +216,8 @@ export const HighlightedPre = memo(function HighlightedPre({
     );
   }
   const chrome = bare
-    ? "font-mono text-xs wrap-break-word whitespace-pre-wrap"
-    : "overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs wrap-break-word whitespace-pre-wrap";
+    ? "font-mono text-xs whitespace-pre"
+    : "overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 font-mono text-xs whitespace-pre";
   // Pre-shiki / too-big-for-shiki fallback. Escape first, then run
   // `postProcess` on the escaped text so `__MARK__…` sentinels are
   // already swapped for their HTML on the very first paint — without

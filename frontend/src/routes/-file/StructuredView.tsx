@@ -1102,7 +1102,12 @@ export function NodeContentPanel({
   }
   if (settled.text.length === 0) return null;
   return (
-    <div tabIndex={-1} onClick={handleClick} onKeyDown={handleKeyDown} className="outline-none">
+    <div
+      tabIndex={-1}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      className="w-max min-w-full outline-none"
+    >
       <HighlightedPre code={text} lang={langForMime(mime)} bare postProcess={postProcess} />
     </div>
   );

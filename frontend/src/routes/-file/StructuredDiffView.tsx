@@ -217,5 +217,9 @@ function DiffContentPane({ children }: { children: React.ReactNode }) {
     },
     [router],
   );
-  return <div onClick={onClick}>{children}</div>;
+  return (
+    <div onClick={onClick} className="w-max min-w-full">
+      {children}
+    </div>
+  );
 }
