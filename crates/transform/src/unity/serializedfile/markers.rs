@@ -122,3 +122,84 @@ pub fn as_path_id(v: &Value) -> Option<PathId> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(s: &str) -> Value {
+        Value::String(s.to_string())
+    }
+
+    #[test]
+    fn pptr_marker_round_trip() {
+        let m = pptr_marker("obj:5", "Player/Camera", "Camera", "depot.dll", "base");
+        // Wire shape: prefix + "pptr" + 5 sep-delimited fields.
+        assert_eq!(
+            m,
+            format!(
+                "{MARK_PREFIX}pptr{MARK_SEP}obj:5{MARK_SEP}Player/Camera{MARK_SEP}Camera{MARK_SEP}depot.dll{MARK_SEP}base",
+            )
+        );
+    }
+
+    #[test]
+    fn color_marker_uses_hex_payload() {
+        assert_eq!(
+            color_marker("#ff8800ff"),
+            format!("{MARK_PREFIX}color{MARK_SEP}#ff8800ff"),
+        );
+    }
+
+    #[test]
+    fn pptr_from_map_detects_canonical_shape() {
+        let mut map = BTreeMap::new();
+        map.insert(s("m_FileID"), Value::I32(0));
+        map.insert(s("m_PathID"), Value::I64(42));
+        let pptr = pptr_from_map(&map).unwrap();
+        assert_eq!(pptr.m_PathID, 42);
+    }
+
+    #[test]
+    fn pptr_from_map_rejects_other_shapes() {
+        let mut map = BTreeMap::new();
+        map.insert(s("m_FileID"), Value::I32(0));
+        // Missing m_PathID.
+        assert!(pptr_from_map(&map).is_none());
+
+        // Wrong types for m_FileID / m_PathID.
+        let mut map = BTreeMap::new();
+        map.insert(s("m_FileID"), Value::I64(0));
+        map.insert(s("m_PathID"), Value::I64(1));
+        assert!(pptr_from_map(&map).is_none());
+    }
+
+    #[test]
+    fn color_hex_from_map_canonical_and_clamping() {
+        // 1.0 → ff per channel; 0.0 → 00; mid → 80-ish.
+        let mut map = BTreeMap::new();
+        map.insert(s("r"), Value::F32(1.0));
+        map.insert(s("g"), Value::F32(0.0));
+        map.insert(s("b"), Value::F32(0.5));
+        map.insert(s("a"), Value::F32(1.0));
+        assert_eq!(color_hex_from_map(&map).as_deref(), Some("#ff0080ff"));
+
+        // HDR > 1.0 clamps to ff (visual hint, not faithful).
+        let mut map = BTreeMap::new();
+        map.insert(s("r"), Value::F32(3.5));
+        map.insert(s("g"), Value::F32(1.0));
+        map.insert(s("b"), Value::F32(1.0));
+        map.insert(s("a"), Value::F32(1.0));
+        assert_eq!(color_hex_from_map(&map).as_deref(), Some("#ffffffff"));
+    }
+
+    #[test]
+    fn color_hex_from_map_rejects_wrong_shape() {
+        // Three components — not a color.
+        let mut map = BTreeMap::new();
+        map.insert(s("r"), Value::F32(1.0));
+        map.insert(s("g"), Value::F32(0.0));
+        map.insert(s("b"), Value::F32(0.0));
+        assert!(color_hex_from_map(&map).is_none());
+    }
+}

@@ -71,6 +71,19 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
     let env = Environment::new(game_files, &tpk);
     let file = env.load_cached(relative)?;
+    dump_object_json_from_handle(&file, &data_dir, "", side, path_id)
+}
+
+/// Pretty-print one object from an already-opened SerializedFile. Used
+/// both by the prod manifest-store path above and by tests that
+/// assemble files in memory.
+pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    data_dir: &str,
+    local_ref_prefix: &str,
+    side: DumpSide,
+    path_id: PathId,
+) -> Result<String> {
     // Use serde_value::Value as the intermediate — unlike
     // serde_json::Value it has a Bytes variant, so non-UTF-8 string
     // fields (TextAssets that store binary blobs, savegame payloads
@@ -80,7 +93,7 @@ pub fn dump_object_json<C: ChunkStore + 'static>(
     // already does for similar cases.
     let object = file.object_at::<Value>(path_id)?;
     let mut value = object.read()?;
-    simplify_for_dump(&file, &data_dir, "", side, &mut value);
+    simplify_for_dump(file, data_dir, local_ref_prefix, side, &mut value);
     Ok(serde_json::to_string_pretty(&value)?)
 }
 

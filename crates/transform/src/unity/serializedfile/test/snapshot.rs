@@ -377,3 +377,201 @@ fn diff_identical_is_unchanged() {
           children: []
     "#);
 }
+
+// -----------------------------------------------------------------------
+// Value dump (dump_value.rs)
+// -----------------------------------------------------------------------
+
+use crate::unity::serializedfile::dump_value::{DumpSide, dump_object_json_from_handle};
+use crate::unity::serializedfile::format::{format_class_stats, format_hierarchy};
+
+#[test]
+fn dump_value_gameobject_with_components() {
+    // GameObject + Transform + MonoBehaviour → exercises the
+    // PPtr-marker rewrite (m_GameObject, m_Script, component refs).
+    let bytes = Scene::new()
+        .with_root(SceneNode::new("Player").with_script("Game.Player", "PlayerController"))
+        .write();
+    // Dump path id 1 (the first GameObject; matches the ordering in
+    // tree_small_scene where the AssetBundle takes slot 1 — here we
+    // have no AssetBundle so the GameObject lands at 1).
+    let json = with_handle(PATH, bytes, |handle| {
+        dump_object_json_from_handle(handle, "", "", DumpSide::None, 1).unwrap()
+    });
+    insta::assert_snapshot!(json, @r#"
+    {
+      "m_Component": [
+        {
+          "component": "__MARK__pptr␞obj:2␞Player␞Transform␞␞"
+        },
+        {
+          "component": "__MARK__pptr␞obj:3␞Player␞Game.Player.PlayerController␞␞"
+        }
+      ],
+      "m_IsActive": true,
+      "m_Layer": 0,
+      "m_Name": "Player",
+      "m_Tag": 0
+    }
+    "#);
+}
+
+#[test]
+fn dump_value_transform_with_pptrs() {
+    // Transform's m_GameObject + m_Father PPtrs feed the qualify_pptr
+    // path: local resolves to `__PPTR__` markers; null father stays
+    // null.
+    let bytes = Scene::new()
+        .with_root(SceneNode::new("Parent").with_child(SceneNode::new("Child")))
+        .write();
+    // Path id 2 = root Transform (Parent: GO=1, T=2 ; Child: GO=3, T=4).
+    let json = with_handle(PATH, bytes, |handle| {
+        dump_object_json_from_handle(handle, "", "", DumpSide::None, 2).unwrap()
+    });
+    insta::assert_snapshot!(json, @r#"
+    {
+      "m_Children": [
+        "__MARK__pptr␞obj:4␞Parent/Child␞Transform␞␞"
+      ],
+      "m_Father": null,
+      "m_GameObject": "__MARK__pptr␞obj:1␞Parent␞GameObject␞␞",
+      "m_LocalPosition": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "m_LocalRotation": {
+        "w": 1.0,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "m_LocalScale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      }
+    }
+    "#);
+}
+
+#[test]
+fn dump_value_assetbundle_singleton() {
+    // AssetBundle sits at path id 1 when requested. Has a
+    // BTreeMap<String, AssetInfo> container — exercises the map
+    // recursion path with empty content.
+    let bytes = Scene::new()
+        .with_root(SceneNode::new("Player"))
+        .with_asset_bundle("test_bundle")
+        .write();
+    let json = with_handle(PATH, bytes, |handle| {
+        dump_object_json_from_handle(handle, "", "", DumpSide::None, 1).unwrap()
+    });
+    insta::assert_snapshot!(json, @r#"
+    {
+      "m_AssetBundleName": "",
+      "m_Container": {},
+      "m_Dependencies": [],
+      "m_ExplicitDataLayout": 0,
+      "m_IsStreamedSceneAssetBundle": false,
+      "m_MainAsset": {
+        "asset": null,
+        "preloadIndex": 0,
+        "preloadSize": 0
+      },
+      "m_Name": "test_bundle",
+      "m_PathFlags": 7,
+      "m_PreloadTable": [],
+      "m_RuntimeCompatibility": 1,
+      "m_SceneHashes": {}
+    }
+    "#);
+}
+
+#[test]
+fn dump_value_with_side_prefix() {
+    // DumpSide::Base shows up in the `__PPTR__` marker's `side` slot.
+    let bytes = Scene::new()
+        .with_root(SceneNode::new("Player").with_script("", "Solo"))
+        .write();
+    let json = with_handle(PATH, bytes, |handle| {
+        dump_object_json_from_handle(handle, "/data", "archive:CAB-x/", DumpSide::Base, 1).unwrap()
+    });
+    insta::assert_snapshot!(json, @r#"
+    {
+      "m_Component": [
+        {
+          "component": "__MARK__pptr␞archive:CAB-x/obj:2␞Player␞Transform␞␞base"
+        },
+        {
+          "component": "__MARK__pptr␞archive:CAB-x/obj:3␞Player␞Solo␞␞base"
+        }
+      ],
+      "m_IsActive": true,
+      "m_Layer": 0,
+      "m_Name": "Player",
+      "m_Tag": 0
+    }
+    "#);
+}
+
+// -----------------------------------------------------------------------
+// Text format (format.rs)
+// -----------------------------------------------------------------------
+
+#[test]
+fn format_text_dump() {
+    // class-stats + hierarchy text rendering — covers both public
+    // entry points and the recursive `format_node` walker.
+    let bytes = Scene::new()
+        .with_root(
+            SceneNode::new("Player")
+                .with_child(SceneNode::new("Camera"))
+                .with_script("Game.Player", "PlayerController"),
+        )
+        .with_root(SceneNode::new("Light"))
+        .write();
+    let text = with_handle(PATH, bytes, |handle| {
+        let mut out = String::new();
+        format_class_stats(&mut out, handle);
+        out.push('\n');
+        format_hierarchy(&mut out, handle).unwrap();
+        out
+    });
+    insta::assert_snapshot!(text, @"
+    Class stats (8 objects):
+           3  GameObject
+           3  Transform
+           1  MonoBehaviour
+           1  MonoScript
+
+    Player [1]
+      - MonoBehaviour (3)
+      Camera [4]
+    Light [7]
+    ");
+}
+
+#[test]
+fn dump_value_unified_diff() {
+    // Pure string helper — feed two JSON-looking blobs and check the
+    // `--- target / +++ base` header + the 3-line context match the
+    // wire format the diff-content route returns.
+    let diff = crate::unity::serializedfile::dump_value::dump_object_json_unified_diff(
+        "{\n  \"m_Name\": \"Player\",\n  \"m_Layer\": 0\n}",
+        "{\n  \"m_Name\": \"Hero\",\n  \"m_Layer\": 0\n}",
+        "base-label",
+        "target-label",
+    );
+    insta::assert_snapshot!(diff, @r#"
+    --- target-label
+    +++ base-label
+    @@ -1,4 +1,4 @@
+     {
+    -  "m_Name": "Hero",
+    +  "m_Name": "Player",
+       "m_Layer": 0
+     }
+    \ No newline at end of file
+    "#);
+}
