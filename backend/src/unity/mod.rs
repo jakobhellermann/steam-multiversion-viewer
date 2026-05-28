@@ -23,6 +23,9 @@ mod format;
 mod markers;
 pub mod tree;
 
+#[cfg(test)]
+mod test;
+
 /// Dump a unity serialized-file as text
 /// Synchronous because rabex's I/O trampolines
 /// through `block_in_place`/`block_on`; callers from async context must

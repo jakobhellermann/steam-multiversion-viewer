@@ -46,6 +46,7 @@ rabex-env-steam-depot-vfs = { version = "0.1.0", git = "https://github.com/jakob
 
 [dev-dependencies]
 tracing-timetree = { git = "https://github.com/jakobhellermann/tracing-timetree" }
+insta = { version = "1", features = ["yaml"] }
 
 # FUSE mount is linux-only.
 [target.'cfg(target_os = "linux")'.dependencies]
