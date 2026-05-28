@@ -328,6 +328,75 @@ fn tree_with_monobehaviours() {
     "#);
 }
 
+/// Regression test for the `pair_by_key` indexing bug. A parent
+/// with three children that share a name (real-world example: Unity
+/// scenes that instantiate the same prefab repeatedly under one
+/// parent) is identical on both sides — the diff must therefore
+/// prune the whole subtree to `Unchanged`. The previous
+/// implementation kept a per-base nth-occurrence counter and called
+/// `iter.nth(n)` on the *already-filtered* target list, so the
+/// second occurrence on base resolved to the third unconsumed
+/// target slot instead of the second. That left some pairs
+/// matched-but-content-differs (path-ids swap), some base-only
+/// (`added`), and some target-only (`removed`).
+#[test]
+fn diff_identical_same_named_siblings_prunes_clean() {
+    let scene = || {
+        Scene::new().with_root(
+            SceneNode::new("Parent")
+                .with_child(SceneNode::new("Floor"))
+                .with_child(SceneNode::new("Floor"))
+                .with_child(SceneNode::new("Floor")),
+        )
+    };
+    let base_bytes = scene().write();
+    let target_bytes = scene().write();
+    let tree = with_handle(PATH, base_bytes, |base| {
+        with_handle(PATH, target_bytes, |target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            StructuredTree {
+                kind: TREE_KIND.to_string(),
+                root: crate::structured::Node {
+                    id: format!("file:{PATH}"),
+                    label: PATH.to_string(),
+                    kind: "file".to_string(),
+                    status: Some(status),
+                    children,
+                    ..Default::default()
+                },
+            }
+        })
+    });
+    insta::assert_yaml_snapshot!(tree, @r#"
+    kind: unity-serialized
+    root:
+      id: "file:level0"
+      label: level0
+      kind: file
+      status: unchanged
+      children:
+        - id: "section:class-stats"
+          label: Class stats
+          kind: section
+          badge: 8 objects
+          default_collapsed: true
+          status: unchanged
+          children: []
+        - id: "section:hierarchy"
+          label: Hierarchy
+          kind: section
+          badge: 1 root
+          status: unchanged
+          children: []
+        - id: "section:loose"
+          label: Loose components
+          kind: section
+          badge: 0 objects
+          status: unchanged
+          children: []
+    "#);
+}
+
 #[test]
 fn diff_identical_is_unchanged() {
     let bytes_a = small_scene().write();

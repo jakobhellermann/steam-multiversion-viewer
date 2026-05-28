@@ -417,22 +417,21 @@ where
 {
     let target_keys: Vec<K> = target.iter().map(&key).collect();
     let mut consumed: HashSet<usize> = HashSet::new();
-    let mut seen: HashMap<K, usize> = HashMap::new();
     let mut matches: Vec<(usize, Option<usize>)> = Vec::with_capacity(base.len());
     for (bi, b) in base.iter().enumerate() {
         let k = key(b);
-        let nth = {
-            let entry = seen.entry(k.clone()).or_default();
-            let n = *entry;
-            *entry += 1;
-            n
-        };
+        // Take the first still-unconsumed target with the same key.
+        // Because earlier base items have already grabbed their
+        // matches, "first unconsumed" *is* the next sibling-order
+        // occurrence — no separate nth-counter is needed (and the
+        // old `.nth(seen[k])` filter was indexing into the already-
+        // filtered list, which over-skipped after the first match
+        // for any repeated key).
         let ti = target_keys
             .iter()
             .enumerate()
-            .filter(|(ti, tk)| **tk == k && !consumed.contains(ti))
-            .map(|(ti, _)| ti)
-            .nth(nth);
+            .find(|(ti, tk)| **tk == k && !consumed.contains(ti))
+            .map(|(ti, _)| ti);
         if let Some(ti) = ti {
             consumed.insert(ti);
         }
