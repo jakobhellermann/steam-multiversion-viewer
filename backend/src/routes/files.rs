@@ -1,4 +1,6 @@
 // TODO(ai-review): review for style and correctness
+//! Per-file endpoints: metadata + inline preview, raw bytes,
+//! and text-rendered through a registered transformer.
 
 use std::sync::Arc;
 

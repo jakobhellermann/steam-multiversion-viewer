@@ -1,4 +1,5 @@
 // TODO(ai-review): review for style and correctness
+//! Steam library + per-app manifest metadata.
 
 use std::collections::HashSet;
 use std::sync::Arc;

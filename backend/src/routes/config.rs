@@ -1,4 +1,5 @@
 // TODO(ai-review): review for style and correctness
+//! Persistent config get + patch.
 
 use std::sync::Arc;
 

@@ -24,7 +24,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 
 use crate::state::AppState;
 
@@ -43,38 +42,8 @@ async fn main() -> Result<()> {
 
     let state = AppState::init().await?;
 
-    let (api_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .routes(routes!(routes::library::library))
-        .routes(routes!(routes::library::app_info))
-        .routes(routes!(routes::library::manifest_info))
-        .routes(routes!(routes::library::manifest_files))
-        .routes(routes!(routes::library::manifest_statuses))
-        .routes(routes!(routes::files::manifest_file))
-        .routes(routes!(routes::files::manifest_file_raw))
-        .routes(routes!(routes::files::manifest_file_transformed))
-        .routes(routes!(routes::structured::manifest_file_structured))
-        .routes(routes!(routes::structured::manifest_file_structured_node))
-        .routes(routes!(routes::diff::manifest_diff))
-        .routes(routes!(routes::diff::file_diff_targets))
-        .routes(routes!(routes::diff::manifest_file_diff))
-        .routes(routes!(routes::diff::manifest_file_structured_diff))
-        .routes(routes!(routes::diff::manifest_file_structured_diff_node))
-        .routes(routes!(routes::downloads::manifest_download))
-        .routes(routes!(routes::downloads::downloads_snapshot))
-        .routes(routes!(routes::downloads::downloads_cancel))
-        .routes(routes!(
-            routes::config::get_config,
-            routes::config::patch_config
-        ))
-        .routes(routes!(
-            routes::extra_manifests::get_extra_manifests,
-            routes::extra_manifests::put_extra_manifests
-        ))
-        .routes(routes!(routes::extra_manifests::delete_extra_manifest))
-        .routes(routes!(routes::mount::start))
-        .routes(routes!(routes::mount::stop))
-        .routes(routes!(routes::mount::status))
-        .split_for_parts();
+    let (api_router, openapi) =
+        routes::register(OpenApiRouter::with_openapi(ApiDoc::openapi())).split_for_parts();
 
     let app = api_router
         .route(
