@@ -355,14 +355,24 @@ function ExtrasSection({
   statuses: Map<string, ManifestStatusEntry>;
 }) {
   const queryClient = useQueryClient();
-  const [expanded, setExpanded] = useState(false);
+  // Persist the open/closed state across navigation. Without this the
+  // user clicks into a manifest, comes back, and the "Additional
+  // manifests" dropdown they had open is collapsed again. Hydrate from
+  // the query cache on mount, write through on every toggle so the
+  // next mount sees the latest value.
+  const expandedKey = useMemo(() => ["extras-expanded", appid, depotId] as const, [appid, depotId]);
+  const [expanded, setExpandedLocal] = useState<boolean>(
+    () => queryClient.getQueryData<boolean>(expandedKey) ?? false,
+  );
   const headerRef = useRef<HTMLDivElement>(null);
   const toggle = () => {
     // Only collapse shrinks the page — that's the case where scrollY
     // gets yanked, so only run pinScroll then. We measure now, before
     // React updates the DOM, and restore once the new layout is in.
     const restore = expanded ? pinScroll(headerRef.current) : null;
-    setExpanded((v) => !v);
+    const next = !expanded;
+    setExpandedLocal(next);
+    queryClient.setQueryData(expandedKey, next);
     if (restore) requestAnimationFrame(restore);
   };
   const clearAll = useMutation({
