@@ -2,6 +2,7 @@ mod config;
 mod http;
 mod routes;
 mod state;
+mod static_files;
 mod steam;
 
 use std::path::{Path, PathBuf};
@@ -60,6 +61,7 @@ async fn main() -> Result<()> {
             get(routes::downloads::downloads_events),
         )
         .route("/api/docs", get(scalar_html))
+        .fallback(static_files::serve)
         .layer(middleware::from_fn(http_log))
         .with_state(state);
 

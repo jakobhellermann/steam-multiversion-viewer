@@ -10,9 +10,6 @@
 ## View formats
 - Unity component-type-specific views (TextComponent, Texture2D, Shader)
 
-## Deployment
-- `rust-embed` the frontend
-
 ## UX
 - Login
 
