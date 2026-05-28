@@ -7,18 +7,10 @@ import {
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fetchLibrary } from "./api";
+import { createQueryClient } from "./queryClient";
 import { routeTree } from "./routeTree.gen";
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
-      staleTime: Infinity,
-      refetchOnMount: false,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+const queryClient = createQueryClient();
 
 // Always have the library warm so navigating back is instant.
 queryClient.prefetchQuery({ queryKey: ["library"], queryFn: fetchLibrary });

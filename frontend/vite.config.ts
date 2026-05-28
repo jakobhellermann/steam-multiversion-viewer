@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import { devtools } from "@tanstack/devtools-vite";
 
@@ -12,9 +13,21 @@ const config = defineConfig({
   plugins: [
     devtools(),
     tailwindcss(),
-    tanstackRouter({ target: "react", autoCodeSplitting: true }),
+    tanstackRouter({
+      target: "react",
+      autoCodeSplitting: true,
+      routeFileIgnorePattern: "\\.(test|spec)\\.[cm]?[jt]sx?$",
+    }),
     viteReact(),
   ],
+  test: {
+    environment: "happy-dom",
+    globals: true,
+    setupFiles: ["./test/setup.ts"],
+    restoreMocks: true,
+    clearMocks: true,
+    unstubGlobals: true,
+  },
 });
 
 export default config;
