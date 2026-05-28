@@ -908,7 +908,7 @@ fn hash_method_source<H: Hasher>(ms: &MethodSource, res: &Resolution<'_>, h: &mu
 
 /// Hash a method call/reference as a C#-level identity: parent type's
 /// `namespace + name`, method name, and signature shape (return type
-/// + parameter types). Doesn't distinguish whether the callee lives
+/// and parameter types). Doesn't distinguish whether the callee lives
 /// in the current DLL (`UserMethod::Definition`) or in an external
 /// assembly (`UserMethod::Reference`) — same rationale as
 /// [`hash_user_type`].

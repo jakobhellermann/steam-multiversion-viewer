@@ -583,6 +583,7 @@ fn walk_pair<R: EnvResolver, P: TypeTreeProvider>(
 /// One-side-only subtree (added on base, removed on target). Marks
 /// the whole subtree with the same status and records all path-ids
 /// as covered so loose doesn't pick them up again.
+#[allow(clippy::too_many_arguments)]
 fn subtree_one_side<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     transforms: &Transforms,
@@ -1021,7 +1022,7 @@ fn loose_label(key: &LooseKey, _item: &LooseItem) -> String {
 fn load_file<R: EnvResolver, P: TypeTreeProvider>(
     side: &OpenedSide<R, P>,
 ) -> Result<SerializedFileHandle<'_, R, P>> {
-    Ok(side.env.load_cached(&side.relative)?)
+    side.env.load_cached(&side.relative)
 }
 
 fn object_bytes<'a, R: EnvResolver, P>(

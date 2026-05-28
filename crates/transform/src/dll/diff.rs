@@ -108,6 +108,7 @@ fn union_entities(from: &[EntityEntry], to: &[EntityEntry]) -> Vec<EntityEntry> 
 /// aggregate to parents:
 ///   * any descendant changed → parent changed
 ///   * else all descendants unchanged → parent unchanged
+///
 /// Added / Removed don't propagate upward — a namespace stays
 /// `changed` when it gains/loses entries.
 fn apply_statuses(node: &mut Node, statuses: &HashMap<String, NodeStatus>) {

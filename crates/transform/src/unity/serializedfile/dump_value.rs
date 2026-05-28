@@ -263,10 +263,8 @@ pub(crate) fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
             }
         }
         Value::Newtype(inner) => simplify_for_dump(file, data_dir, local_ref_prefix, side, inner),
-        Value::Option(opt) => {
-            if let Some(inner) = opt {
-                simplify_for_dump(file, data_dir, local_ref_prefix, side, inner);
-            }
+        Value::Option(Some(inner)) => {
+            simplify_for_dump(file, data_dir, local_ref_prefix, side, inner);
         }
         _ => {}
     }
