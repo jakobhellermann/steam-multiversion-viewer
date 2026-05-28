@@ -8,23 +8,23 @@
 //! production `build_root_node` / `diff_sections` code paths run
 //! against a real rabex `SerializedFileHandle`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use rabex_env::Environment;
 use rabex_env::env::Data;
 use rabex_env::handle::SerializedFileHandle;
-use rabex_env::rabex::UnityVersion;
 use rabex_env::rabex::files::serializedfile::builder::SerializedFileBuilder;
 use rabex_env::rabex::files::serializedfile::{
-    LocalSerializedObjectIdentifier, SerializedType, build_common_offset_map,
+    Endianness, LocalSerializedObjectIdentifier, SerializedType, build_common_offset_map,
 };
 use rabex_env::rabex::objects::pptr::{FileId, PathId};
 use rabex_env::rabex::objects::{ClassId, ClassIdType, PPtr, TypedPPtr};
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
-use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
+use rabex_env::rabex::typetree::{TypeTreeNode, TypeTreeProvider};
+use rabex_env::rabex::{UnityVersion, serde_typetree};
 use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{ComponentPair, GameObject, MonoBehaviour, MonoScript, Transform};
 use serde::Serialize;
@@ -335,7 +335,7 @@ fn write_node<P: TypeTreeProvider>(
 struct AssetBundle {
     m_Name: String,
     m_PreloadTable: Vec<PPtr>,
-    m_Container: std::collections::BTreeMap<String, AssetInfo>,
+    m_Container: BTreeMap<String, AssetInfo>,
     m_MainAsset: AssetInfo,
     m_RuntimeCompatibility: u32,
     m_AssetBundleName: String,
@@ -343,7 +343,7 @@ struct AssetBundle {
     m_IsStreamedSceneAssetBundle: bool,
     m_ExplicitDataLayout: i32,
     m_PathFlags: i32,
-    m_SceneHashes: std::collections::BTreeMap<String, String>,
+    m_SceneHashes: BTreeMap<String, String>,
 }
 impl ClassIdType for AssetBundle {
     const CLASS_ID: ClassId = ClassId::AssetBundle;
@@ -370,4 +370,215 @@ pub(crate) fn with_handle<R>(
     let env = Environment::new(resolver, tpk);
     let handle = env.load_cached(path).unwrap();
     f(&handle)
+}
+
+// -----------------------------------------------------------------------
+// Engine-typed fixtures
+// -----------------------------------------------------------------------
+
+/// Serializable `LensFlare` matching the embedded TPK's typetree for
+/// `2022.3.0f1`. Used as a loose-object fixture so dump tests get to
+/// see a real `ColorRGBA { r,g,b,a:float }` come out of the
+/// `serde_typetree` deserialiser (and thus drive the
+/// `simplify_for_dump` color-marker rewrite end to end).
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+pub(crate) struct LensFlare {
+    pub m_GameObject: TypedPPtr<GameObject>,
+    pub m_Enabled: u8,
+    pub m_Flare: PPtr,
+    pub m_Color: ColorRgba,
+    pub m_Brightness: f32,
+    pub m_FadeSpeed: f32,
+    pub m_IgnoreLayers: BitField,
+    pub m_Directional: bool,
+}
+impl ClassIdType for LensFlare {
+    const CLASS_ID: ClassId = ClassId::LensFlare;
+}
+
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+pub(crate) struct ColorRgba {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+pub(crate) struct BitField {
+    pub m_Bits: u32,
+}
+
+/// Build a tiny serialized file containing one loose `LensFlare`
+/// with the given color. Returns `(bytes, path_id)` so the test can
+/// drive `dump_object_json_from_handle` against the known id.
+pub(crate) fn scene_with_lens_flare(color: ColorRgba) -> (Vec<u8>, PathId) {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    let lens = LensFlare {
+        m_GameObject: TypedPPtr::null(),
+        m_Enabled: 1,
+        m_Flare: PPtr::default(),
+        m_Color: color,
+        m_Brightness: 1.0,
+        m_FadeSpeed: 3.0,
+        m_IgnoreLayers: BitField { m_Bits: 0 },
+        m_Directional: false,
+    };
+    let path_id = sfb.add_object(&lens).unwrap();
+    (sfb.write_vec().unwrap(), path_id)
+}
+
+/// MonoBehaviour body with arbitrary appended fields. Mirrors the base
+/// MB layout (m_GameObject, m_Enabled, m_Script, m_Name) plus a
+/// ColorRGBA and an `int → int` map — picked because both shapes
+/// drive interesting branches in `simplify_for_dump`.
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+pub(crate) struct CustomMbBody {
+    pub m_GameObject: TypedPPtr<GameObject>,
+    pub m_Enabled: u8,
+    pub m_Script: TypedPPtr<MonoScript>,
+    pub m_Name: String,
+    pub m_TintColor: ColorRgba,
+    pub m_Lookup: BTreeMap<i32, i32>,
+}
+
+/// Build a leaf typetree node. Defaults are fine for serialization —
+/// the embedded TPK's MetaFlags etc. only matter at parse-time, the
+/// serializer dispatches on `m_Type` strings and walks `children`.
+// m_MetaFlag has to be Some — TypeTreeNode::hash unwraps it. 0 is fine
+// since no alignment bits matter for the simple scalar/map shapes we
+// build here.
+fn tt_leaf(ty: &str, name: &str) -> TypeTreeNode {
+    TypeTreeNode {
+        m_Type: ty.to_string(),
+        m_Name: name.to_string(),
+        m_MetaFlag: Some(0),
+        m_Index: Some(0),
+        ..Default::default()
+    }
+}
+
+fn tt_node(ty: &str, name: &str, children: Vec<TypeTreeNode>) -> TypeTreeNode {
+    TypeTreeNode {
+        m_Type: ty.to_string(),
+        m_Name: name.to_string(),
+        m_MetaFlag: Some(0),
+        m_Index: Some(0),
+        children,
+        ..Default::default()
+    }
+}
+
+/// Re-stamp `m_Level` on every node based on depth from the root.
+/// The TT serializer flattens the tree to a sequence and uses
+/// `m_Level` to recover parent/child structure when reading back.
+fn fix_levels(node: &mut TypeTreeNode, depth: u8) {
+    node.m_Level = depth;
+    for child in &mut node.children {
+        fix_levels(child, depth + 1);
+    }
+}
+
+/// Build a SerializedFile containing one MonoBehaviour with a custom
+/// typetree that appends a `ColorRGBA m_TintColor` and a
+/// `map<int,int> m_Lookup` after the standard four MB fields. Returns
+/// `(bytes, path_id)` so the dump test knows where to look.
+pub(crate) fn scene_with_custom_mb(body: CustomMbBody) -> (Vec<u8>, PathId) {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+
+    // Register a MonoScript that the MonoBehaviour can point at —
+    // gets m_ScriptTypeIndex 0 in the brand-new m_ScriptTypes.
+    let script = MonoScript {
+        m_Name: "CustomBehaviour".to_owned(),
+        m_ExecutionOrder: 0,
+        m_PropertiesHash: [0; 16],
+        m_ClassName: "CustomBehaviour".to_owned(),
+        m_Namespace: "Test".to_owned(),
+        m_AssemblyName: "Assembly-CSharp.dll".to_owned(),
+    };
+    let script_path_id = sfb.add_object(&script).unwrap();
+    let script_types = sfb.serialized.m_ScriptTypes.as_mut().unwrap();
+    let script_type_index: i16 = script_types.len().try_into().unwrap();
+    script_types.push(LocalSerializedObjectIdentifier {
+        m_LocalSerializedFileIndex: FileId::LOCAL,
+        m_LocalIdentifierInFile: script_path_id,
+    });
+
+    // Clone the base MB typetree and append our two custom fields.
+    let base_mb = sfb
+        .typetree_provider
+        .get_typetree_node(ClassId::MonoBehaviour, &unity_version)
+        .expect("embedded TPK is missing MonoBehaviour")
+        .into_owned();
+    let mut extended = base_mb;
+    extended.children.push(tt_node(
+        "ColorRGBA",
+        "m_TintColor",
+        vec![
+            tt_leaf("float", "r"),
+            tt_leaf("float", "g"),
+            tt_leaf("float", "b"),
+            tt_leaf("float", "a"),
+        ],
+    ));
+    extended.children.push(tt_node(
+        "map",
+        "m_Lookup",
+        vec![tt_node(
+            "Array",
+            "Array",
+            vec![
+                tt_leaf("int", "size"),
+                tt_node(
+                    "pair",
+                    "data",
+                    vec![tt_leaf("int", "first"), tt_leaf("int", "second")],
+                ),
+            ],
+        )],
+    ));
+    // The TT serializer encodes the tree shape via per-node `m_Level`
+    // (root=0, direct child=1, …). Our synthesized appended nodes have
+    // m_Level=0 from `Default::default()`, which would confuse the
+    // reader when it tries to recover parent/child relationships.
+    // Walk the whole TT post-append and stamp the right levels.
+    fix_levels(&mut extended, 0);
+    let mut ty = SerializedType::simple(ClassId::MonoBehaviour, Some(extended));
+    ty.m_ScriptTypeIndex = script_type_index;
+    let mb_type_id = sfb.add_type_uncached(ty);
+
+    let body = CustomMbBody {
+        m_Script: TypedPPtr::local(script_path_id),
+        ..body
+    };
+    // `add_object_with` would re-fetch the *base* MB typetree from
+    // the TPK and ignore our extended one, so the m_TintColor /
+    // m_Lookup fields wouldn't find matching TT children. Serialize
+    // directly against the extended TT we just registered, then hand
+    // the bytes off via the untyped slot.
+    let extended_tt = &sfb.serialized.m_Types[mb_type_id as usize]
+        .m_Type
+        .as_ref()
+        .expect("type tree present on m_Types entry we just added");
+    let data = serde_typetree::to_vec_endianed(&body, extended_tt, Endianness::Little).unwrap();
+    let mb_path_id = sfb.get_next_path_id();
+    sfb.add_object_untyped_with(
+        mb_path_id,
+        ClassId::MonoBehaviour,
+        mb_type_id,
+        std::borrow::Cow::Owned(data),
+    )
+    .unwrap();
+
+    (sfb.write_vec().unwrap(), mb_path_id)
 }

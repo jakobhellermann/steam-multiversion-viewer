@@ -575,3 +575,185 @@ fn dump_value_unified_diff() {
     \ No newline at end of file
     "#);
 }
+
+#[test]
+fn dump_value_rewrites_color_map_to_marker() {
+    // Color-shaped map {r,g,b,a:F32} should rewrite to a single
+    // `__MARK__color␞#rrggbbaa` string. Need any handle for the
+    // signature; PPtr resolution doesn't fire on this input.
+    use serde_value::Value;
+    use std::collections::BTreeMap;
+
+    let bytes = Scene::new().with_root(SceneNode::new("Player")).write();
+    let out = with_handle(PATH, bytes, |handle| {
+        let mut map = BTreeMap::new();
+        map.insert(Value::String("r".into()), Value::F32(1.0));
+        map.insert(Value::String("g".into()), Value::F32(0.5));
+        map.insert(Value::String("b".into()), Value::F32(0.0));
+        map.insert(Value::String("a".into()), Value::F32(1.0));
+        let mut value = Value::Map(map);
+        crate::unity::serializedfile::dump_value::simplify_for_dump(
+            handle,
+            "",
+            "",
+            DumpSide::None,
+            &mut value,
+        );
+        serde_json::to_string_pretty(&value).unwrap()
+    });
+    insta::assert_snapshot!(out, @r#""__MARK__color␞#ff8000ff""#);
+}
+
+#[test]
+fn dump_value_flattens_non_string_keyed_map() {
+    // A map with integer keys can't survive JSON serialization
+    // verbatim — `simplify_for_dump` rewrites it into a sequence of
+    // `{key, value}` pair objects.
+    use serde_value::Value;
+    use std::collections::BTreeMap;
+
+    let bytes = Scene::new().with_root(SceneNode::new("Player")).write();
+    let out = with_handle(PATH, bytes, |handle| {
+        let mut map = BTreeMap::new();
+        map.insert(Value::I32(7), Value::String("seven".into()));
+        map.insert(Value::I32(42), Value::String("answer".into()));
+        let mut value = Value::Map(map);
+        crate::unity::serializedfile::dump_value::simplify_for_dump(
+            handle,
+            "",
+            "",
+            DumpSide::None,
+            &mut value,
+        );
+        serde_json::to_string_pretty(&value).unwrap()
+    });
+    insta::assert_snapshot!(out, @r#"
+    [
+      {
+        "key": 7,
+        "value": "seven"
+      },
+      {
+        "key": 42,
+        "value": "answer"
+      }
+    ]
+    "#);
+}
+
+#[test]
+fn dump_value_unit_key_becomes_null_pptr_sentinel() {
+    // `Value::Unit` shows up as a null pptr resolved as a map key
+    // (real-world example: a map<PPtr,…> with a null entry). JSON
+    // forbids null keys, so the walker substitutes the all-empty
+    // pptr-marker string instead.
+    use serde_value::Value;
+    use std::collections::BTreeMap;
+
+    let bytes = Scene::new().with_root(SceneNode::new("Player")).write();
+    let out = with_handle(PATH, bytes, |handle| {
+        let mut map = BTreeMap::new();
+        // Pre-resolved null pptr key → Value::Unit.
+        map.insert(Value::Unit, Value::String("dangling".into()));
+        let mut value = Value::Map(map);
+        crate::unity::serializedfile::dump_value::simplify_for_dump(
+            handle,
+            "",
+            "",
+            DumpSide::None,
+            &mut value,
+        );
+        serde_json::to_string_pretty(&value).unwrap()
+    });
+    insta::assert_snapshot!(out, @r#"
+    {
+      "__MARK__pptr␞␞␞␞␞": "dangling"
+    }
+    "#);
+}
+
+#[test]
+fn dump_value_color_via_lens_flare() {
+    // Real `serde_typetree` → `serde_value` roundtrip for a LensFlare,
+    // whose `m_Color` is the float-ColorRGBA shape. Validates the
+    // hand-crafted color test above against an actual wire-format
+    // pipeline.
+    use super::fixtures::{ColorRgba, scene_with_lens_flare};
+    let (bytes, path_id) = scene_with_lens_flare(ColorRgba {
+        r: 1.0,
+        g: 0.5,
+        b: 0.0,
+        a: 1.0,
+    });
+    let json = with_handle(PATH, bytes, |handle| {
+        dump_object_json_from_handle(handle, "", "", DumpSide::None, path_id).unwrap()
+    });
+    insta::assert_snapshot!(json, @r#"
+    {
+      "m_Brightness": 1.0,
+      "m_Color": "__MARK__color␞#ff8000ff",
+      "m_Directional": false,
+      "m_Enabled": 1,
+      "m_FadeSpeed": 3.0,
+      "m_Flare": null,
+      "m_GameObject": null,
+      "m_IgnoreLayers": {
+        "m_Bits": 0
+      }
+    }
+    "#);
+}
+
+#[test]
+fn dump_value_custom_mb_with_color_and_map() {
+    // Real wire-format end-to-end: a MonoBehaviour whose typetree we
+    // hand-extend with a `ColorRGBA m_TintColor` and a
+    // `map<int,int> m_Lookup`. Serialized, parsed back through rabex,
+    // dumped — both the color marker and the non-string-key flatten
+    // fire on real data instead of a hand-built `Value::Map`.
+    use std::collections::BTreeMap;
+
+    use super::fixtures::{ColorRgba, CustomMbBody, scene_with_custom_mb};
+    use rabex_env::rabex::objects::TypedPPtr;
+
+    let mut lookup = BTreeMap::new();
+    lookup.insert(1, 100);
+    lookup.insert(2, 200);
+    let body = CustomMbBody {
+        m_GameObject: TypedPPtr::null(),
+        m_Enabled: 1,
+        // Overwritten by the fixture with the actual MonoScript pptr.
+        m_Script: TypedPPtr::null(),
+        m_Name: "demo".to_owned(),
+        m_TintColor: ColorRgba {
+            r: 0.0,
+            g: 1.0,
+            b: 0.5,
+            a: 1.0,
+        },
+        m_Lookup: lookup,
+    };
+    let (bytes, path_id) = scene_with_custom_mb(body);
+    let json = with_handle(PATH, bytes, |handle| {
+        dump_object_json_from_handle(handle, "", "", DumpSide::None, path_id).unwrap()
+    });
+    insta::assert_snapshot!(json, @r#"
+    {
+      "m_Enabled": 1,
+      "m_GameObject": null,
+      "m_Lookup": [
+        {
+          "key": 1,
+          "value": 100
+        },
+        {
+          "key": 2,
+          "value": 200
+        }
+      ],
+      "m_Name": "demo",
+      "m_Script": "__MARK__pptr␞obj:1␞CustomBehaviour␞MonoScript␞␞",
+      "m_TintColor": "__MARK__color␞#00ff80ff"
+    }
+    "#);
+}

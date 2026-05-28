@@ -194,7 +194,7 @@ pub fn dump_bundle_object_json<C: ChunkStore + 'static>(
 ///   non-string keys),
 ///
 /// in that order of priority per map node. Everything else recurses.
-fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
+pub(crate) fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     data_dir: &str,
     // Tree-id prefix for same-file pptrs ("" for bare SerializedFiles,
