@@ -313,16 +313,16 @@ fn build_loose_section<R: EnvResolver, P: TypeTreeProvider>(
 /// `MonoScript::full_name()` for MonoBehaviours so the label carries
 /// the actual script name instead of the generic `MonoBehaviour` class.
 ///
-/// `with_pathid_badge` is set for loose objects where the same class
-/// repeats across the section (need an id to tell rows apart) and
-/// cleared for components hanging under a gameobject (you rarely see
-/// the same class twice on one object — the noise outweighs the info).
+/// `loose` is set for top-level objects: they're labelled by `m_Name`
+/// and carry a type badge so the class stays recognizable (the
+/// hierarchy shows the class directly, but a loose object's name alone
+/// doesn't). Cleared for components hanging under a gameobject.
 #[tracing::instrument(level = "debug", skip_all, fields(?class_id, ?path_id))]
 fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     path_id: PathId,
     class_id: ClassId,
-    with_pathid_badge: bool,
+    loose: bool,
 ) -> Result<Node> {
     // `class` facet drives the frontend filter. For MonoBehaviours
     // that's the script name (user-mental "the class"), for everything
@@ -337,17 +337,16 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     } else {
         format!("{class_id:?}")
     };
-    // For loose objects (`with_pathid_badge`) we additionally pull
-    // `m_Name` to label assets by their author-set name — e.g. a
-    // `MonoScript` row reads `PlayerController` instead of the bare
-    // engine class. Components under a gameobject keep the class
-    // label: their m_Name is almost always empty and the position in
-    // the hierarchy already disambiguates them.
+    // For loose objects we additionally pull `m_Name` to label assets
+    // by their author-set name — e.g. a `MonoScript` row reads
+    // `PlayerController` instead of the bare engine class. Components
+    // under a gameobject keep the class label: their m_Name is almost
+    // always empty and the hierarchy position already disambiguates.
     //
     // MonoBehaviours stay on `class_label` because `full_name()` is
     // already the user-mental identity, and MB's own `m_Name` is
     // typically empty.
-    let display_label = if with_pathid_badge && !matches!(class_id, ClassId::MonoBehaviour) {
+    let display_label = if loose && !matches!(class_id, ClassId::MonoBehaviour) {
         read_m_name(file, path_id)
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| class_label.clone())
@@ -357,8 +356,8 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     let mut node = Node::leaf(format!("obj:{path_id}"), &display_label, "component")
         .with_facet("class", &class_label);
     node.has_content = true;
-    if with_pathid_badge {
-        node = node.with_badge(format!("[{path_id}]"));
+    if loose && display_label != class_label {
+        node = node.with_badge(class_label.clone());
     }
     Ok(node)
 }

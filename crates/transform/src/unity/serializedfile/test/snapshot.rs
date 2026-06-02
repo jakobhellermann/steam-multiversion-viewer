@@ -100,7 +100,7 @@ fn tree_small_scene() {
             - id: "obj:1"
               label: test_bundle
               kind: component
-              badge: "[1]"
+              badge: AssetBundle
               facets:
                 class: AssetBundle
               has_content: true
@@ -305,7 +305,7 @@ fn tree_with_monobehaviours() {
             - id: "obj:5"
               label: PlayerController
               kind: component
-              badge: "[5]"
+              badge: MonoScript
               facets:
                 class: MonoScript
               has_content: true
@@ -313,7 +313,7 @@ fn tree_with_monobehaviours() {
             - id: "obj:6"
               label: Inventory
               kind: component
-              badge: "[6]"
+              badge: MonoScript
               facets:
                 class: MonoScript
               has_content: true
