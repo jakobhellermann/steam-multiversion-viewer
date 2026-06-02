@@ -372,11 +372,33 @@ fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
     } else {
         format!("{class_id_raw:?}")
     };
-    let target = obj
-        .read()
-        .ok()
-        .map(|data| display_name(&obj, &data))
+    let data = obj.read().ok();
+    let target = data
+        .as_ref()
+        .map(|data| display_name(&obj, data))
         .unwrap_or_else(|| "(unreadable)".to_string());
+
+    // A plain `Transform` isn't listed as its own tree row — it's the
+    // hierarchy scaffolding, so the tree builder skips it (see
+    // `tree.rs`) and only the GameObject it hangs on gets a row. Point
+    // the `ref` at that GameObject's path id so the hash-jump lands
+    // somewhere. The `m_GameObject` pptr is file-local (`m_FileID == 0`)
+    // so its path id is already in the target file's id space, same as
+    // `pptr.m_PathID`. Everything else — other components (Renderer,
+    // MonoBehaviour, …, which *do* get their own rows) and loose assets
+    // — keeps its own path id. RectTransform is deliberately left out:
+    // it carries layout fields the tree doesn't surface, so it's a
+    // candidate for its own row later.
+    let ref_pid = if class_id_raw == ClassId::Transform {
+        data.as_ref()
+            .and_then(|data| lookup(data, "m_GameObject"))
+            .and_then(pptr_from_value)
+            .and_then(|p| p.optional())
+            .map(|p| p.m_PathID)
+            .unwrap_or(pptr.m_PathID)
+    } else {
+        pptr.m_PathID
+    };
 
     // `ref` always points at the target's tree-row id. Local refs get
     // the caller's prefix (`""` outside bundles, `archive:X/` inside);
@@ -384,16 +406,13 @@ fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
     // an addressables bundle (then `archive:<entry>/obj:<pathid>` so
     // the route lands on the right SerializedFile inside).
     let (file_part, ref_part) = if pptr.is_local() {
-        (
-            String::new(),
-            format!("{local_ref_prefix}obj:{}", pptr.m_PathID),
-        )
+        (String::new(), format!("{local_ref_prefix}obj:{ref_pid}"))
     } else {
         let raw_name = pptr
             .file_identifier(file.file)
             .map(|ext| ext.pathName.clone())
             .unwrap_or_default();
-        external_target(file.env, data_dir, &raw_name, pptr.m_PathID)
+        external_target(file.env, data_dir, &raw_name, ref_pid)
     };
     svalue_str(pptr_marker(&ref_part, &target, &class_id, &file_part))
 }

@@ -585,7 +585,7 @@ fn dump_value_gameobject_with_components() {
     {
       "m_Component": [
         {
-          "component": "__MARK__pptr␞obj:2␞Player␞Transform␞"
+          "component": "__MARK__pptr␞obj:1␞Player␞Transform␞"
         },
         {
           "component": "__MARK__pptr␞obj:3␞Player␞Game.Player.PlayerController␞"
@@ -616,7 +616,7 @@ fn dump_value_transform_with_pptrs() {
     insta::assert_snapshot!(json, @r#"
     {
       "m_Children": [
-        "__MARK__pptr␞obj:4␞Parent/Child␞Transform␞"
+        "__MARK__pptr␞obj:3␞Parent/Child␞Transform␞"
       ],
       "m_Father": null,
       "m_GameObject": "__MARK__pptr␞obj:1␞Parent␞GameObject␞",
