@@ -14,5 +14,9 @@ test:
     cargo test
     cd frontend && pnpm run test
 
-ai-debt:
-    rg -F 'TODO(ai-review)' -g '!justfile' -g '!CLAUDE.md' -g '!docs/plan.md'
+build:
+	cd frontend && pnpm run build
+	cargo build --release
+
+ai-debt *filter:
+    rg -F 'TODO(ai-review)' -g '!justfile' -g '!CLAUDE.md' -g '!docs/plan.md' {{ filter }}
