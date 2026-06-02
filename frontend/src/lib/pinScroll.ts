@@ -9,6 +9,7 @@ export function pinScroll(anchor: HTMLElement | null): () => void {
   const beforeScroll = window.scrollY;
   const beforeHeight = document.documentElement.scrollHeight;
   return () => {
+    const collapsedHeight = document.documentElement.scrollHeight;
     document.body.style.minHeight = `${beforeHeight}px`;
     window.scrollTo(0, beforeScroll);
     requestAnimationFrame(() => {
@@ -17,18 +18,21 @@ export function pinScroll(anchor: HTMLElement | null): () => void {
         const delta = afterOffset - beforeOffset;
         if (delta !== 0) window.scrollBy(0, delta);
       }
+      let lastScroll = window.scrollY;
       const tighten = () => {
         const currentMin = parseInt(document.body.style.minHeight || "0", 10);
         if (!currentMin) {
           window.removeEventListener("scroll", tighten);
           return;
         }
+        const scrollingUp = window.scrollY < lastScroll;
+        lastScroll = window.scrollY;
         const needed = window.scrollY + window.innerHeight;
-        if (needed < currentMin) {
-          document.body.style.minHeight = `${needed}px`;
-        } else {
+        if (needed <= collapsedHeight) {
           document.body.style.minHeight = "";
           window.removeEventListener("scroll", tighten);
+        } else if (scrollingUp && needed < currentMin) {
+          document.body.style.minHeight = `${needed}px`;
         }
       };
       window.addEventListener("scroll", tighten, { passive: true });
