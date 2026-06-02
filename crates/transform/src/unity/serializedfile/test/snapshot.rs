@@ -8,8 +8,8 @@
 
 use super::fixtures::{
     Scene, SceneNode, external_monoscript_file, external_text_asset_file,
-    loose_monobehaviour_referencing_external, preload_referencing_external,
-    preload_with_dependency, with_diff_handles, with_handle,
+    loose_monobehaviour_referencing_external, loose_monobehaviour_with_script_typetree,
+    preload_referencing_external, preload_with_dependency, with_diff_handles, with_handle,
 };
 use crate::structured::{NodeStatus, StructuredTree};
 use crate::unity::serializedfile::diff::diff_sections;
@@ -298,6 +298,35 @@ fn diff_monobehaviour_renumber_stays_changed() {
 
     assert_eq!(status, NodeStatus::Changed);
     assert_eq!(changed, 1, "the MonoBehaviour must not collapse");
+}
+
+#[test]
+fn diff_monobehaviour_renumber_with_script_typetree_is_unchanged() {
+    // Same renumber-only diff as `diff_monobehaviour_renumber_stays_changed`,
+    // but the MonoBehaviour carries a script-specific type tree (root
+    // `m_Type` is the script class, not `"MonoBehaviour"`). Now `read()`
+    // yields the full fields, the resolved-identity compare is trusted,
+    // and the pure external-script renumber collapses to unchanged.
+    let ext = "extern.assets";
+    let (status, changed) = with_diff_handles(
+        &[
+            (PATH, loose_monobehaviour_with_script_typetree(ext, 5)),
+            (ext, external_monoscript_file(5, "S")),
+        ],
+        &[
+            (PATH, loose_monobehaviour_with_script_typetree(ext, 9)),
+            (ext, external_monoscript_file(9, "S")),
+        ],
+        |base, target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            let mut labels = Vec::new();
+            collect_changed_labels(&children, &mut labels);
+            (status, labels.len())
+        },
+    );
+
+    assert_eq!(status, NodeStatus::Unchanged);
+    assert_eq!(changed, 0, "the MonoBehaviour renumber must collapse");
 }
 
 #[test]

@@ -1071,16 +1071,11 @@ fn objects_equal_modulo_pptr<R: EnvResolver, P: TypeTreeProvider>(
     ) else {
         return false;
     };
-    // MonoBehaviours often have no (script-specific) type tree, so a
-    // `read()` silently drops the script's own fields — a changed field
-    // would then compare equal. Don't risk a false "unchanged": for MBs
-    // a byte difference stays a change. `class_id()` reads `m_ClassID`
-    // off the object header, so this needs no type tree itself.
-    if base_handle.class_id() == ClassId::MonoBehaviour
-        || target_handle.class_id() == ClassId::MonoBehaviour
-    {
-        return false;
-    }
+    // `read()` always yields complete fields, including for
+    // MonoBehaviours: rabex generates the script-specific type tree on
+    // the fly when the file only embeds the generic one. If that
+    // generation fails (e.g. the assembly isn't reachable) `read()`
+    // errors, and the `else` below conservatively reports a change.
     let (Ok(base_val), Ok(target_val)) = (base_handle.read(), target_handle.read()) else {
         return false;
     };

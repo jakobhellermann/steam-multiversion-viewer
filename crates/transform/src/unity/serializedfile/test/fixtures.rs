@@ -215,11 +215,18 @@ impl ScriptRegistry {
             .as_ref()
             .expect("builder always sets m_UnityVersion")
             .clone();
-        let mb_tt = sfb
+        let mut mb_tt = sfb
             .typetree_provider
             .get_typetree_node(ClassId::MonoBehaviour, &unity_version)
-            .expect("embedded TPK is missing MonoBehaviour");
-        let mut ty = SerializedType::simple(ClassId::MonoBehaviour, Some(mb_tt.into_owned()));
+            .expect("embedded TPK is missing MonoBehaviour")
+            .into_owned();
+        // Stamp the root with the script class so `read()` treats this
+        // as a complete, script-specific tree and deserializes straight
+        // off it — otherwise the always-on typetree generator kicks in
+        // and needs an assembly + `globalgamemanagers` this in-memory
+        // fixture doesn't have.
+        mb_tt.m_Type = script.class_name.to_owned();
+        let mut ty = SerializedType::simple(ClassId::MonoBehaviour, Some(mb_tt));
         ty.m_ScriptTypeIndex = script_type_index;
         let mb_type_id = sfb.add_type_uncached(ty);
 
@@ -513,6 +520,43 @@ pub(crate) fn loose_monobehaviour_referencing_external(
     sfb.write_vec().unwrap()
 }
 
+/// Like [`loose_monobehaviour_referencing_external`], but the MB type's
+/// embedded typetree is script-specific: its root `m_Type` is the
+/// script class name rather than the generic `"MonoBehaviour"`. That's
+/// the signal `mb_fields_complete` (in `diff.rs`) keys on to decide a
+/// MonoBehaviour reads back completely, so a renumber-only diff between
+/// two of these is allowed to collapse to "unchanged".
+pub(crate) fn loose_monobehaviour_with_script_typetree(
+    ext_path: &str,
+    target_pid: PathId,
+) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    let ext_fid = sfb.get_or_insert_external(ext_path);
+    // Same shape as the base MonoBehaviour TT, but stamp the root type
+    // with the script class so it looks like a generated, script-aware
+    // tree to consumers checking `m_Type`.
+    let mut mb_tt = sfb
+        .typetree_provider
+        .get_typetree_node(ClassId::MonoBehaviour, &unity_version)
+        .expect("embedded TPK has MonoBehaviour")
+        .into_owned();
+    mb_tt.m_Type = "CustomBehaviour".to_owned();
+    let mb_type_id =
+        sfb.add_type_uncached(SerializedType::simple(ClassId::MonoBehaviour, Some(mb_tt)));
+    let mb = MonoBehaviour {
+        m_GameObject: TypedPPtr::null(),
+        m_Enabled: 1,
+        m_Script: TypedPPtr::new(ext_fid, target_pid),
+        m_Name: String::new(),
+    };
+    sfb.add_object_with(&mb, 1, ClassId::MonoBehaviour, mb_type_id)
+        .unwrap();
+    sfb.write_vec().unwrap()
+}
+
 // -----------------------------------------------------------------------
 // Engine-typed fixtures
 // -----------------------------------------------------------------------
@@ -662,6 +706,12 @@ pub(crate) fn scene_with_custom_mb(body: CustomMbBody) -> (Vec<u8>, PathId) {
         .expect("embedded TPK is missing MonoBehaviour")
         .into_owned();
     let mut extended = base_mb;
+    // Stamp the root with the script class so this reads as a complete,
+    // script-specific tree: `read()` then deserializes straight off the
+    // embedded TT instead of invoking the typetree generator (which
+    // would need an assembly + `globalgamemanagers` this in-memory
+    // fixture doesn't have).
+    extended.m_Type = "CustomBehaviour".to_owned();
     extended.children.push(tt_node(
         "ColorRGBA",
         "m_TintColor",
