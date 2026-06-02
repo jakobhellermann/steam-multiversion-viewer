@@ -6,8 +6,12 @@
 //! the resulting [`StructuredTree`]. Snapshots live next to this file
 //! under `snapshots/`.
 
-use super::fixtures::{Scene, SceneNode, with_handle};
-use crate::structured::StructuredTree;
+use super::fixtures::{
+    Scene, SceneNode, external_monoscript_file, external_text_asset_file,
+    loose_monobehaviour_referencing_external, preload_referencing_external,
+    preload_with_dependency, with_diff_handles, with_handle,
+};
+use crate::structured::{NodeStatus, StructuredTree};
 use crate::unity::serializedfile::diff::diff_sections;
 use crate::unity::serializedfile::tree::{TREE_KIND, build_root_node};
 
@@ -210,6 +214,119 @@ fn diff_added_removed_renamed() {
               has_content: true
               children: []
     "#);
+}
+
+#[test]
+fn diff_external_pptr_renumber_to_same_name_is_unchanged() {
+    // The two manifests reference the same external asset ("shared"),
+    // but it sits at a different path id in each — a renumber, not a
+    // content change. The loose PreloadData that points at it must
+    // compare equal (resolved identity matches) and prune away entirely.
+    let ext = "extern.assets";
+    let (status, children) = with_diff_handles(
+        &[
+            (PATH, preload_referencing_external(ext, 5)),
+            (ext, external_text_asset_file(5, "shared")),
+        ],
+        &[
+            (PATH, preload_referencing_external(ext, 9)),
+            (ext, external_text_asset_file(9, "shared")),
+        ],
+        |base, target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            (status, children)
+        },
+    );
+
+    assert_eq!(status, NodeStatus::Unchanged);
+    assert!(
+        children.is_empty(),
+        "expected every section pruned, got {} section(s)",
+        children.len()
+    );
+}
+
+#[test]
+fn diff_external_pptr_to_differently_named_target_is_changed() {
+    // Same shape, but now the external target has a different name on
+    // each side — a genuine reference change that must survive.
+    let ext = "extern.assets";
+    let (status, labels) = with_diff_handles(
+        &[
+            (PATH, preload_referencing_external(ext, 5)),
+            (ext, external_text_asset_file(5, "before")),
+        ],
+        &[
+            (PATH, preload_referencing_external(ext, 9)),
+            (ext, external_text_asset_file(9, "after")),
+        ],
+        |base, target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            let mut labels = Vec::new();
+            collect_changed_labels(&children, &mut labels);
+            (status, labels)
+        },
+    );
+
+    assert_eq!(status, NodeStatus::Changed);
+    assert_eq!(labels, vec!["PreloadData".to_string()]);
+}
+
+#[test]
+fn diff_monobehaviour_renumber_stays_changed() {
+    // A MonoBehaviour whose only byte difference is an external m_Script
+    // renumber to the same-named script. The resolved-identity compare
+    // *would* collapse it — but MBs often lack a complete (script-
+    // specific) type tree, so we exclude them: byte-diff stays changed.
+    let ext = "extern.assets";
+    let (status, changed) = with_diff_handles(
+        &[
+            (PATH, loose_monobehaviour_referencing_external(ext, 5)),
+            (ext, external_monoscript_file(5, "S")),
+        ],
+        &[
+            (PATH, loose_monobehaviour_referencing_external(ext, 9)),
+            (ext, external_monoscript_file(9, "S")),
+        ],
+        |base, target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            let mut labels = Vec::new();
+            collect_changed_labels(&children, &mut labels);
+            (status, labels.len())
+        },
+    );
+
+    assert_eq!(status, NodeStatus::Changed);
+    assert_eq!(changed, 1, "the MonoBehaviour must not collapse");
+}
+
+#[test]
+fn diff_non_pptr_field_change_is_changed() {
+    // Guard against over-collapse: a plain (non-PPtr) field difference
+    // of equal length — so it slips past the byte-size shortcut and goes
+    // through the deep compare — must still register as changed.
+    let (status, changed) = with_diff_handles(
+        &[(PATH, preload_with_dependency("aa"))],
+        &[(PATH, preload_with_dependency("bb"))],
+        |base, target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            let mut labels = Vec::new();
+            collect_changed_labels(&children, &mut labels);
+            (status, labels.len())
+        },
+    );
+
+    assert_eq!(status, NodeStatus::Changed);
+    assert_eq!(changed, 1);
+}
+
+fn collect_changed_labels(nodes: &[crate::structured::Node], out: &mut Vec<String>) {
+    for n in nodes {
+        if n.kind == "component" && n.status == Some(NodeStatus::Changed) {
+            out.push(n.label.clone());
+        }
+        collect_changed_labels(&n.children, out);
+    }
 }
 
 #[test]

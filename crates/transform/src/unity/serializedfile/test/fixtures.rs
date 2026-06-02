@@ -26,7 +26,9 @@ use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env::rabex::typetree::{TypeTreeNode, TypeTreeProvider};
 use rabex_env::rabex::{UnityVersion, serde_typetree};
 use rabex_env::resolver::EnvResolver;
-use rabex_env::unity::types::{ComponentPair, GameObject, MonoBehaviour, MonoScript, Transform};
+use rabex_env::unity::types::{
+    ComponentPair, GameObject, MonoBehaviour, MonoScript, PreloadData, TextAsset, Transform,
+};
 use serde::Serialize;
 
 /// Default unity version used by every fixture. Picked because the
@@ -370,6 +372,145 @@ pub(crate) fn with_handle<R>(
     let env = Environment::new(resolver, tpk);
     let handle = env.load_serialized(path).unwrap();
     f(&handle)
+}
+
+/// Build two independent in-memory envs (base + target), load the first
+/// file of each as the main handle, and hand both to `f` in a single
+/// callback. Each env may carry several files so PPtrs into other files
+/// (e.g. an external asset) resolve. Both envs outlive the closure, so
+/// the two handles stay valid simultaneously — no nested-closure dance.
+pub(crate) fn with_diff_handles<R>(
+    base_files: &[(&str, Vec<u8>)],
+    target_files: &[(&str, Vec<u8>)],
+    f: impl FnOnce(
+        &SerializedFileHandle<'_, MemResolver, TypeTreeCache<TpkTypeTreeBlob>>,
+        &SerializedFileHandle<'_, MemResolver, TypeTreeCache<TpkTypeTreeBlob>>,
+    ) -> R,
+) -> R {
+    let env = |files: &[(&str, Vec<u8>)]| {
+        let map = files
+            .iter()
+            .map(|(p, b)| (PathBuf::from(p), b.clone()))
+            .collect();
+        Environment::new(
+            MemResolver { files: map },
+            TypeTreeCache::new(TpkTypeTreeBlob::embedded()),
+        )
+    };
+    let base_env = env(base_files);
+    let target_env = env(target_files);
+    let base = base_env.load_serialized(base_files[0].0).unwrap();
+    let target = target_env.load_serialized(target_files[0].0).unwrap();
+    f(&base, &target)
+}
+
+/// A standalone external file holding a single `TextAsset` named `name`
+/// at path id `at`. Pairs with [`preload_referencing_external`] to test
+/// PPtr identity across a renumber: two manifests place "the same"
+/// asset at different path ids.
+pub(crate) fn external_text_asset_file(at: PathId, name: &str) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    sfb.add_object_at(
+        at,
+        &TextAsset {
+            m_Name: name.to_owned(),
+            m_Script: String::new(),
+        },
+    )
+    .unwrap();
+    sfb.write_vec().unwrap()
+}
+
+/// A file with one loose `PreloadData` ("preload") whose single
+/// `m_Assets` entry points at `target_pid` in the external file
+/// `ext_path`.
+pub(crate) fn preload_referencing_external(ext_path: &str, target_pid: PathId) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    let ext_fid = sfb.get_or_insert_external(ext_path);
+    sfb.add_object(&PreloadData {
+        m_Name: "preload".to_owned(),
+        m_Assets: vec![PPtr::new(ext_fid, target_pid)],
+        ..Default::default()
+    })
+    .unwrap();
+    sfb.write_vec().unwrap()
+}
+
+/// A file with one loose `PreloadData` ("preload") carrying a single
+/// non-PPtr `m_Dependencies` string. Two of these with different deps
+/// differ only in a plain (non-PPtr) field.
+pub(crate) fn preload_with_dependency(dep: &str) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    sfb.add_object(&PreloadData {
+        m_Name: "preload".to_owned(),
+        m_Dependencies: vec![dep.to_owned()],
+        ..Default::default()
+    })
+    .unwrap();
+    sfb.write_vec().unwrap()
+}
+
+/// External file holding a single `MonoScript` named `name` at `at`.
+pub(crate) fn external_monoscript_file(at: PathId, name: &str) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    sfb.add_object_at(
+        at,
+        &MonoScript {
+            m_Name: name.to_owned(),
+            m_ExecutionOrder: 0,
+            m_PropertiesHash: [0; 16],
+            m_ClassName: name.to_owned(),
+            m_Namespace: String::new(),
+            m_AssemblyName: "Assembly-CSharp.dll".to_owned(),
+        },
+    )
+    .unwrap();
+    sfb.write_vec().unwrap()
+}
+
+/// A file with one loose `MonoBehaviour` whose `m_Script` points at
+/// `target_pid` in the external file `ext_path`. Not attached to a
+/// GameObject, so it lands in the loose section.
+pub(crate) fn loose_monobehaviour_referencing_external(
+    ext_path: &str,
+    target_pid: PathId,
+) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    let ext_fid = sfb.get_or_insert_external(ext_path);
+    // The builder won't auto-create a MonoBehaviour type — register one
+    // explicitly (no script-type index needed for this fixture).
+    let mb_tt = sfb
+        .typetree_provider
+        .get_typetree_node(ClassId::MonoBehaviour, &unity_version)
+        .expect("embedded TPK has MonoBehaviour");
+    let mb_type_id = sfb.add_type_uncached(SerializedType::simple(
+        ClassId::MonoBehaviour,
+        Some(mb_tt.into_owned()),
+    ));
+    let mb = MonoBehaviour {
+        m_GameObject: TypedPPtr::null(),
+        m_Enabled: 1,
+        m_Script: TypedPPtr::new(ext_fid, target_pid),
+        m_Name: String::new(),
+    };
+    sfb.add_object_with(&mb, 1, ClassId::MonoBehaviour, mb_type_id)
+        .unwrap();
+    sfb.write_vec().unwrap()
 }
 
 // -----------------------------------------------------------------------

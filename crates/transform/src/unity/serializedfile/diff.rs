@@ -29,13 +29,15 @@ use rabex_env::Environment;
 use rabex_env::handle::SerializedFileHandle;
 use rabex_env::rabex::files::serializedfile::ObjectInfo;
 use rabex_env::rabex::objects::ClassId;
-use rabex_env::rabex::objects::pptr::PathId;
+use rabex_env::rabex::objects::pptr::{PPtr, PathId};
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
+use serde_value::Value;
 
 use crate::structured::{Node, NodeStatus, StructuredTree};
 
+use super::markers::pptr_from_map;
 use super::tree::TREE_KIND;
 
 /// Per-file index: path-id → on-disk object bytes. Built once per side
@@ -724,10 +726,14 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
 ) -> Result<Node> {
     match (base, target) {
         (Some(b), Some(t)) => {
-            let status = match (base_bodies.get(&b.path_id), target_bodies.get(&t.path_id)) {
-                (Some(bb), Some(tb)) if bb == tb => NodeStatus::Unchanged,
-                _ => NodeStatus::Changed,
-            };
+            let status = matched_status(
+                base_file,
+                target_file,
+                base_bodies,
+                target_bodies,
+                b.path_id,
+                t.path_id,
+            );
             let id = matched_pair_id(b.path_id, t.path_id);
             Ok(Node {
                 badge: if b.path_id == t.path_id {
@@ -842,10 +848,14 @@ fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
         let t = target_items.remove(&key);
         let node = match (b, t) {
             (Some(b), Some(t)) => {
-                let status = match (base_bodies.get(&b.path_id), target_bodies.get(&t.path_id)) {
-                    (Some(bb), Some(tb)) if bb == tb => NodeStatus::Unchanged,
-                    _ => NodeStatus::Changed,
-                };
+                let status = matched_status(
+                    base_file,
+                    target_file,
+                    &base_bodies,
+                    &target_bodies,
+                    b.path_id,
+                    t.path_id,
+                );
                 let id = matched_pair_id(b.path_id, t.path_id);
                 Node {
                     badge: if b.path_id == t.path_id {
@@ -1012,6 +1022,162 @@ fn object_bytes<'a, R: EnvResolver, P>(
     let start = obj.m_Offset as usize;
     let end = start + obj.m_Size as usize;
     &file.data[start..end]
+}
+
+/// Status of a matched object pair: cheap raw-byte equality first, then
+/// a PPtr-normalized deep compare only when the bytes differ — so a
+/// PathID renumber that still points at the same asset doesn't register
+/// as a change.
+fn matched_status<R: EnvResolver, P: TypeTreeProvider>(
+    base_file: &SerializedFileHandle<'_, R, P>,
+    target_file: &SerializedFileHandle<'_, R, P>,
+    base_bodies: &BodyIndex<'_>,
+    target_bodies: &BodyIndex<'_>,
+    base_pid: PathId,
+    target_pid: PathId,
+) -> NodeStatus {
+    match (base_bodies.get(&base_pid), target_bodies.get(&target_pid)) {
+        (Some(bb), Some(tb)) if bb == tb => NodeStatus::Unchanged,
+        // A pure PathID renumber can't change the serialized size (a
+        // PPtr is a fixed 12 bytes), so differing sizes always mean a
+        // real change. This both skips the deserialize for size-changing
+        // diffs and guards against a silently-dropped variable-length
+        // field collapsing two genuinely different objects.
+        (Some(bb), Some(tb))
+            if bb.len() == tb.len()
+                && objects_equal_modulo_pptr(base_file, base_pid, target_file, target_pid) =>
+        {
+            NodeStatus::Unchanged
+        }
+        _ => NodeStatus::Changed,
+    }
+}
+
+/// Second-stage comparison for a matched pair whose raw bytes already
+/// differ: deserialize both and compare, treating PPtr fields by their
+/// resolved target identity rather than the raw PathID (which renumbers
+/// freely across manifests). Only the PPtr fields that actually differ
+/// get resolved. Returns `false` on any read failure so the caller
+/// stays conservative and reports a change.
+fn objects_equal_modulo_pptr<R: EnvResolver, P: TypeTreeProvider>(
+    base_file: &SerializedFileHandle<'_, R, P>,
+    base_pid: PathId,
+    target_file: &SerializedFileHandle<'_, R, P>,
+    target_pid: PathId,
+) -> bool {
+    let (Ok(base_handle), Ok(target_handle)) = (
+        base_file.object_at::<Value>(base_pid),
+        target_file.object_at::<Value>(target_pid),
+    ) else {
+        return false;
+    };
+    // MonoBehaviours often have no (script-specific) type tree, so a
+    // `read()` silently drops the script's own fields — a changed field
+    // would then compare equal. Don't risk a false "unchanged": for MBs
+    // a byte difference stays a change. `class_id()` reads `m_ClassID`
+    // off the object header, so this needs no type tree itself.
+    if base_handle.class_id() == ClassId::MonoBehaviour
+        || target_handle.class_id() == ClassId::MonoBehaviour
+    {
+        return false;
+    }
+    let (Ok(base_val), Ok(target_val)) = (base_handle.read(), target_handle.read()) else {
+        return false;
+    };
+    values_equal_modulo_pptr(base_file, &base_val, target_file, &target_val)
+}
+
+fn values_equal_modulo_pptr<R: EnvResolver, P: TypeTreeProvider>(
+    base_file: &SerializedFileHandle<'_, R, P>,
+    base: &Value,
+    target_file: &SerializedFileHandle<'_, R, P>,
+    target: &Value,
+) -> bool {
+    // Identical subtrees need no resolution — the common case for the
+    // mostly-unchanged objects that reach this second stage.
+    if base == target {
+        return true;
+    }
+    match (base, target) {
+        (Value::Map(bm), Value::Map(tm)) => {
+            if let (Some(bp), Some(tp)) = (pptr_from_map(bm), pptr_from_map(tm)) {
+                return pptr_refs_equal(base_file, bp, target_file, tp);
+            }
+            bm.len() == tm.len()
+                && bm.iter().zip(tm).all(|((bk, bv), (tk, tv))| {
+                    bk == tk && values_equal_modulo_pptr(base_file, bv, target_file, tv)
+                })
+        }
+        (Value::Seq(bs), Value::Seq(ts)) => {
+            bs.len() == ts.len()
+                && bs
+                    .iter()
+                    .zip(ts)
+                    .all(|(bv, tv)| values_equal_modulo_pptr(base_file, bv, target_file, tv))
+        }
+        _ => false,
+    }
+}
+
+/// Two PPtrs reference "the same" object when their resolved target
+/// identities match. Null on both sides is equal; null vs non-null is a
+/// real change.
+fn pptr_refs_equal<R: EnvResolver, P: TypeTreeProvider>(
+    base_file: &SerializedFileHandle<'_, R, P>,
+    base: PPtr,
+    target_file: &SerializedFileHandle<'_, R, P>,
+    target: PPtr,
+) -> bool {
+    match (base.optional(), target.optional()) {
+        (None, None) => true,
+        (Some(b), Some(t)) => {
+            match (
+                pptr_target_identity(base_file, b),
+                pptr_target_identity(target_file, t),
+            ) {
+                (Some(bi), Some(ti)) => bi == ti,
+                // Unresolved on either side → can't claim equal.
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Stable identity of a PPtr target, independent of the renumber-prone
+/// PathID: the external file identifier plus the target's raw `m_Name`
+/// and class. Uses the raw `m_Name` (not `display_name`, which formats
+/// for display and falls back to `PathID=N`).
+///
+/// TODO(diff): only external, named targets are normalized. Local
+/// (`m_FileID == 0`) refs and unnamed/duplicate-named targets return
+/// `None` and stay "changed" (false negatives). External assets are
+/// normally uniquely named, so this is enough for now — revisit if
+/// local or unnamed renumber noise shows up.
+fn pptr_target_identity<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    pptr: PPtr,
+) -> Option<(String, String, ClassId)> {
+    if pptr.is_local() {
+        return None;
+    }
+    let file_key = pptr.file_identifier(file.file)?.pathName.clone();
+    let obj = file.deref(pptr.typed::<Value>()).ok()?;
+    let class = obj.class_id();
+    let data = obj.read().ok()?;
+    let name = value_m_name(&data)?;
+    Some((file_key, name, class))
+}
+
+/// Non-empty `m_Name` of a serialized object value, if present.
+fn value_m_name(value: &Value) -> Option<String> {
+    let Value::Map(map) = value else {
+        return None;
+    };
+    match map.get(&Value::String("m_Name".to_string()))? {
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    }
 }
 
 fn pluralize(n: usize, word: &str) -> String {
