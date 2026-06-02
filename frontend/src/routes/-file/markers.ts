@@ -45,17 +45,50 @@ export function makePostProcess(
   isLocalRefInTree: (ref: string) => boolean,
 ): (html: string) => string {
   const renderPptr = makePptrRenderer(locator, isLocalRefInTree);
+  return (html) => applyMarkers(html, renderPptr);
+}
+
+/// Diff variant: pptr links on a removed (`-`) line resolve against the
+/// `target` manifest, everything else (added `+`, context, headers)
+/// against `base`. Both diff sides emit byte-equal markers — an
+/// unchanged ref must not show up as a change — so the side isn't in
+/// the marker; we recover it per line from the unified-diff gutter.
+/// Handles both shiki HTML (markup stripped to find the gutter) and the
+/// plain pre-shiki fallback.
+export function makeDiffPostProcess(
+  base: FileLocator,
+  target: FileLocator,
+  isLocalRefInTree: (ref: string) => boolean,
+): (html: string) => string {
+  const renderBase = makePptrRenderer(base, isLocalRefInTree);
+  const renderTarget = makePptrRenderer(target, isLocalRefInTree);
   return (html) =>
-    html.replace(MARKER_RE, (whole, type, payload) => {
-      switch (type) {
-        case "pptr":
-          return renderPptr(payload);
-        case "color":
-          return renderColor(payload);
-        default:
-          return whole;
-      }
-    });
+    html
+      .split("\n")
+      .map((line) => applyMarkers(line, isRemovalLine(line) ? renderTarget : renderBase))
+      .join("\n");
+}
+
+function applyMarkers(html: string, renderPptr: (payload: string) => string): string {
+  return html.replace(MARKER_RE, (whole, type, payload) => {
+    switch (type) {
+      case "pptr":
+        return renderPptr(payload);
+      case "color":
+        return renderColor(payload);
+      default:
+        return whole;
+    }
+  });
+}
+
+/// A rendered diff line is a removal when its first visible character —
+/// past any markup shiki opened the line with — is `-`. Only the
+/// leading tags are skipped, so this stays cheap on long, span-heavy
+/// lines instead of stripping the whole line to read one char.
+const REMOVAL_LINE_RE = /^(?:<[^>]*>)*-/;
+function isRemovalLine(lineHtml: string): boolean {
+  return REMOVAL_LINE_RE.test(lineHtml);
 }
 
 function makePptrRenderer(locator: FileLocator, isLocalRefInTree: (ref: string) => boolean) {
