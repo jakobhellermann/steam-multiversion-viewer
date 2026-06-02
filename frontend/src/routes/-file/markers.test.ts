@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { describe, expect, test } from "vitest";
 
-import { makeDiffPostProcess } from "./markers";
+import { makeDiffPostProcess, makePostProcess } from "./markers";
 import type { FileLocator } from "./types";
 
 const BASE_MANIFEST = "708613018541602983";
@@ -67,5 +67,30 @@ describe("makeDiffPostProcess", () => {
     const out = makeDiffPostProcess(base, target, () => true)(diff);
     expect(out).toContain(`/manifests/${BASE_MANIFEST}/file?path=${encFile}#obj:183`);
     expect(out).not.toContain(TARGET_MANIFEST);
+  });
+});
+
+describe("makePostProcess classref", () => {
+  const DLL = "hollow_knight_Data/Managed/Assembly-CSharp.dll";
+  const classrefMarker = (fqn: string) =>
+    `"__MARK__classref${SEP}type:${fqn}${SEP}${fqn}${SEP}${DLL}"`;
+
+  test("m_ClassName links into the managed dll at the type hash", () => {
+    const html = `  "m_ClassName": ${classrefMarker("SceneManager")},`;
+    const out = makePostProcess(base, () => true)(html);
+    expect(out).toContain(
+      `/manifests/${BASE_MANIFEST}/file?path=${encodeURIComponent(DLL)}#type:SceneManager`,
+    );
+    // The on-screen label is the class name, and there's no pptr-style
+    // `(type)` suffix on a classref.
+    expect(out).toContain(">SceneManager</a>");
+    expect(out).not.toContain("(MonoScript)");
+  });
+
+  test("namespaced class keeps the dotted FQN in both label and hash", () => {
+    const html = `  "m_ClassName": ${classrefMarker("Foo.Bar.SceneManager")},`;
+    const out = makePostProcess(base, () => true)(html);
+    expect(out).toContain("#type:Foo.Bar.SceneManager");
+    expect(out).toContain(">Foo.Bar.SceneManager</a>");
   });
 });

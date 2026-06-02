@@ -22,6 +22,10 @@
 //! Currently shipped markers:
 //!
 //! - `pptr` — `__MARK__pptr␞<ref>␞<target>␞<type>␞<file>` (Unity PPtr)
+//! - `classref` — `__MARK__classref␞<ref>␞<name>␞<file>` (a managed
+//!   class reference, e.g. a `MonoScript`'s `m_ClassName` linking into
+//!   the decompiled `Managed/<Assembly>.dll`; `<ref>` is a `type:<FQN>`
+//!   hash the dll structured-view jumps to)
 //! - `color` — `__MARK__color␞#rrggbbaa` (rgba color)
 
 use std::collections::BTreeMap;
@@ -40,6 +44,7 @@ pub const MARK_PREFIX: &str = "__MARK__";
 pub const MARK_SEP: char = '\u{241e}';
 
 pub const MARK_TYPE_PPTR: &str = "pptr";
+pub const MARK_TYPE_CLASSREF: &str = "classref";
 pub const MARK_TYPE_COLOR: &str = "color";
 
 /// Build a `pptr` marker. Empty fields are allowed (a null pptr lands
@@ -55,6 +60,21 @@ pub fn pptr_marker(ref_: &str, target: &str, type_id: &str, file: &str) -> Strin
     let _ = write!(
         &mut out,
         "{MARK_PREFIX}{MARK_TYPE_PPTR}{MARK_SEP}{ref_}{MARK_SEP}{target}{MARK_SEP}{type_id}{MARK_SEP}{file}",
+    );
+    out
+}
+
+/// Build a `classref` marker — a managed class reference rendered as a
+/// link into a decompiled assembly. `ref_` is the structured-view hash
+/// to jump to (a `type:<FQN>`), `name` the on-screen label, `file` the
+/// depot-relative path of the assembly (`<DataDir>/Managed/<X>.dll`).
+pub fn classref_marker(ref_: &str, name: &str, file: &str) -> String {
+    let mut out = String::with_capacity(
+        MARK_PREFIX.len() + MARK_TYPE_CLASSREF.len() + 3 + ref_.len() + name.len() + file.len(),
+    );
+    let _ = write!(
+        &mut out,
+        "{MARK_PREFIX}{MARK_TYPE_CLASSREF}{MARK_SEP}{ref_}{MARK_SEP}{name}{MARK_SEP}{file}",
     );
     out
 }
@@ -138,6 +158,21 @@ mod tests {
             m,
             format!(
                 "{MARK_PREFIX}pptr{MARK_SEP}obj:5{MARK_SEP}Player/Camera{MARK_SEP}Camera{MARK_SEP}depot.dll",
+            )
+        );
+    }
+
+    #[test]
+    fn classref_marker_round_trip() {
+        let m = classref_marker(
+            "type:SceneManager",
+            "SceneManager",
+            "hollow_knight_Data/Managed/Assembly-CSharp.dll",
+        );
+        assert_eq!(
+            m,
+            format!(
+                "{MARK_PREFIX}classref{MARK_SEP}type:SceneManager{MARK_SEP}SceneManager{MARK_SEP}hollow_knight_Data/Managed/Assembly-CSharp.dll",
             )
         );
     }

@@ -27,7 +27,8 @@ use rabex_env::unity::types::{GameObject, MonoBehaviour};
 use serde_value::Value;
 
 use super::markers::{
-    as_file_id, as_path_id, color_hex_from_map, color_marker, pptr_from_map, pptr_marker,
+    as_file_id, as_path_id, classref_marker, color_hex_from_map, color_marker, pptr_from_map,
+    pptr_marker,
 };
 
 /// Per-call hooks that influence what a dump returns. Defaulted to
@@ -107,22 +108,24 @@ pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
     let object = file.object_at::<Value>(path_id)?;
     let class_id = object.class_id();
     let mut value = object.read()?;
-    if let Some(plain) = try_decrypt_textasset(class_id, &value, opts.spp_key) {
+    if class_id == ClassId::TextAsset
+        && let Some(plain) = try_decrypt_textasset(&value, opts.spp_key)
+    {
         return Ok((sniff_mime(&plain), plain));
     }
     simplify_for_dump(file, data_dir, local_ref_prefix, &mut value);
+    if class_id == ClassId::MonoScript {
+        link_monoscript_classname(data_dir, &mut value);
+    }
     Ok((MIME_JSON, serde_json::to_string_pretty(&value)?))
 }
 
-/// If `value` looks like a TextAsset whose `m_Script` is a base64
+/// If `value` (a TextAsset) has an `m_Script` that's a base64
 /// `SecurePlayerPrefs` blob decryptable under `key`, return the
-/// plaintext. `None` keeps the regular JSON dump path. Cheap to call
-/// on the hot path: the class-id gate skips the work for everything
-/// that isn't a TextAsset, and the rest is a base64 + AES round-trip.
-fn try_decrypt_textasset(class_id: ClassId, value: &Value, key: Option<&[u8]>) -> Option<String> {
-    if class_id != ClassId::TextAsset {
-        return None;
-    }
+/// plaintext. `None` keeps the regular JSON dump path. The `TextAsset`
+/// class-id gate lives at the call site; here it's just a base64 + AES
+/// round-trip.
+fn try_decrypt_textasset(value: &Value, key: Option<&[u8]>) -> Option<String> {
     let key = key?;
     // `m_Script` is the encrypted payload. The typetree dumps it as a
     // String when the bytes happen to be valid UTF-8 (true for base64
@@ -134,6 +137,46 @@ fn try_decrypt_textasset(class_id: ClassId, value: &Value, key: Option<&[u8]>) -
         return None;
     };
     super::super::secure_player_prefs::decrypt(key, blob)
+}
+
+/// For a `MonoScript` object, rewrite its `m_ClassName` string into a
+/// `classref` marker linking into the decompiled
+/// `<DataDir>/Managed/<Assembly>.dll`. Graceful no-op if the object
+/// doesn't carry the expected `m_ClassName` / `m_AssemblyName` string
+/// fields (corrupt dump, stripped typetree, …) so the plain string
+/// survives instead of a broken marker. The `MonoScript` class-id gate
+/// lives at the call site.
+///
+/// `value` is the already-[`simplify_for_dump`]'d map, so the three
+/// fields we read are plain `Value::String`s — we mutate `m_ClassName`
+/// in place and leave the rest of the object untouched.
+fn link_monoscript_classname(data_dir: &str, value: &mut Value) {
+    // `assembly_name()` / `full_name()` mirror rabex's `MonoScript`
+    // helpers: the assembly always carries a `.dll` suffix, and the FQN
+    // joins a non-empty namespace onto the class name.
+    let Some(class_name) = lookup_str(value, "m_ClassName") else {
+        return;
+    };
+    if class_name.is_empty() {
+        return;
+    }
+    let assembly_raw = lookup_str(value, "m_AssemblyName").unwrap_or_default();
+    let assembly = if assembly_raw.ends_with(".dll") {
+        assembly_raw
+    } else {
+        format!("{assembly_raw}.dll")
+    };
+    let namespace = lookup_str(value, "m_Namespace").unwrap_or_default();
+    let fqn = if namespace.is_empty() {
+        class_name.clone()
+    } else {
+        format!("{namespace}.{class_name}")
+    };
+
+    let Value::Map(map) = value else { return };
+    let file = format!("{data_dir}/Managed/{assembly}");
+    let marker = classref_marker(&format!("type:{fqn}"), &fqn, &file);
+    map.insert(svalue_str("m_ClassName"), svalue_str(marker));
 }
 
 /// Bundle equivalent of [`dump_object_json`]: parse `bundle_bytes`,
@@ -181,7 +224,9 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
         let object = file.object_at::<Value>(path_id)?;
         (object.class_id(), object.read()?)
     };
-    if let Some(plain) = try_decrypt_textasset(class_id, &value, opts.spp_key) {
+    if class_id == ClassId::TextAsset
+        && let Some(plain) = try_decrypt_textasset(&value, opts.spp_key)
+    {
         return Ok((sniff_mime(&plain), plain));
     }
     let value = {
@@ -189,6 +234,9 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
         let mut v = value;
         let archive_prefix = format!("archive:{archive_entry}/");
         simplify_for_dump(&file, data_dir, &archive_prefix, &mut v);
+        if class_id == ClassId::MonoScript {
+            link_monoscript_classname(data_dir, &mut v);
+        }
         v
     };
     let json = {

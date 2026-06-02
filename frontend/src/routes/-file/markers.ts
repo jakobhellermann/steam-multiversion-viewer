@@ -19,6 +19,12 @@
 //   Inside a structured-diff content body both sides emit byte-equal
 //   markers — the per-side routing is taken from the unified-diff
 //   `+`/`-` gutter, not baked into the marker shape.
+// - `classref` — `__MARK__classref␞<ref>␞<name>␞<file>` (a managed
+//   class reference, e.g. a MonoScript's `m_ClassName` linking into the
+//   decompiled `Managed/<Assembly>.dll`; `<ref>` is a `type:<FQN>` hash
+//   the dll structured-view jumps to). Always an external link, so it
+//   reuses the pptr renderer's file→`?path=` / ref→`#hash` plumbing but
+//   carries no pptr `(type)` suffix.
 // - `color` — `__MARK__color␞#rrggbbaa` (rgba color).
 
 import type { FileLocator } from "./types";
@@ -44,8 +50,8 @@ export function makePostProcess(
   locator: FileLocator,
   isLocalRefInTree: (ref: string) => boolean,
 ): (html: string) => string {
-  const renderPptr = makePptrRenderer(locator, isLocalRefInTree);
-  return (html) => applyMarkers(html, renderPptr);
+  const renderers = makeRenderers(locator, isLocalRefInTree);
+  return (html) => applyMarkers(html, renderers);
 }
 
 /// Diff variant: pptr links on a removed (`-`) line resolve against the
@@ -60,8 +66,8 @@ export function makeDiffPostProcess(
   target: FileLocator,
   isLocalRefInTree: (ref: string) => boolean,
 ): (html: string) => string {
-  const renderBase = makePptrRenderer(base, isLocalRefInTree);
-  const renderTarget = makePptrRenderer(target, isLocalRefInTree);
+  const renderBase = makeRenderers(base, isLocalRefInTree);
+  const renderTarget = makeRenderers(target, isLocalRefInTree);
   return (html) =>
     html
       .split("\n")
@@ -69,11 +75,31 @@ export function makeDiffPostProcess(
       .join("\n");
 }
 
-function applyMarkers(html: string, renderPptr: (payload: string) => string): string {
+/// The per-locator renderers a marker can dispatch to. Bundled so both
+/// the single-side and diff post-processors thread the same set through
+/// `applyMarkers`. `color` needs no locator so it stays a free function.
+type Renderers = {
+  pptr: (payload: string) => string;
+  classref: (payload: string) => string;
+};
+
+function makeRenderers(
+  locator: FileLocator,
+  isLocalRefInTree: (ref: string) => boolean,
+): Renderers {
+  return {
+    pptr: makePptrRenderer(locator, isLocalRefInTree),
+    classref: makeClassrefRenderer(locator),
+  };
+}
+
+function applyMarkers(html: string, renderers: Renderers): string {
   return html.replace(MARKER_RE, (whole, type, payload) => {
     switch (type) {
       case "pptr":
-        return renderPptr(payload);
+        return renderers.pptr(payload);
+      case "classref":
+        return renderers.classref(payload);
       case "color":
         return renderColor(payload);
       default:
@@ -91,11 +117,36 @@ function isRemovalLine(lineHtml: string): boolean {
   return REMOVAL_LINE_RE.test(lineHtml);
 }
 
-function makePptrRenderer(locator: FileLocator, isLocalRefInTree: (ref: string) => boolean) {
+/// Build the `…/file?path=<depotPath>` href (plus the non-public
+/// `&branch=` param) for one locator. Shared by the pptr and classref
+/// renderers — both link to another depot file by path.
+function makeFileHref(locator: FileLocator): (depotPath: string) => string {
   const branchParam =
     locator.branch === "public" ? "" : `&branch=${encodeURIComponent(locator.branch)}`;
-  const fileHref = (depotPath: string) =>
+  return (depotPath) =>
     `/apps/${locator.appid}/depots/${locator.depotId}/manifests/${locator.manifestId}/file?path=${encodeURIComponent(depotPath)}${branchParam}`;
+}
+
+/// A `classref` link: always external (it points into a decompiled
+/// assembly), so it goes straight through the file-href + `#type:<FQN>`
+/// hash plumbing. The click handler keys off `data-pptr-file="1"` to
+/// route external links through tanstack-router, same as an external
+/// pptr — no separate handler needed.
+function makeClassrefRenderer(locator: FileLocator): (payload: string) => string {
+  const fileHref = makeFileHref(locator);
+  return (payload: string): string => {
+    const [ref = "", name = "", file = ""] = payload.split(MARK_SEP);
+    const label = escHTML(name);
+    if (!ref || !file) {
+      return `<span class="text-slate-400">${label}</span>`;
+    }
+    const href = `${escHTML(fileHref(file))}#${escHTML(ref)}`;
+    return `<a href="${href}" data-pptr-ref="${escHTML(ref)}" data-pptr-file="1" class="cursor-pointer text-sky-400 underline decoration-sky-700 hover:decoration-sky-400 hover:text-sky-200">${label}</a>`;
+  };
+}
+
+function makePptrRenderer(locator: FileLocator, isLocalRefInTree: (ref: string) => boolean) {
+  const fileHref = makeFileHref(locator);
   // Only show the file's basename in the link label — the full depot
   // path (the `<Game>_Data/StreamingAssets/aa/StandaloneWindows64/…`
   // mouthful for addressables bundles) belongs in the `href` hover,

@@ -874,3 +874,44 @@ fn dump_value_custom_mb_with_color_and_map() {
     }
     "#);
 }
+
+#[test]
+fn dump_value_monoscript_classname_links_into_managed_dll() {
+    // A MonoScript's m_ClassName is rewritten into a `classref` marker
+    // pointing at the decompiled `<DataDir>/Managed/<Assembly>.dll`,
+    // jumping to the `type:<FQN>` node. The fixture's MonoScript has an
+    // empty namespace, so the FQN is the bare class name.
+    let bytes = external_monoscript_file(7, "SceneManager");
+    let json = with_handle(PATH, bytes, |handle| {
+        dump_object_json_from_handle(handle, "hollow_knight_Data", "", 7, Default::default())
+            .unwrap()
+            .1
+    });
+    insta::assert_snapshot!(json, @r#"
+    {
+      "m_AssemblyName": "Assembly-CSharp.dll",
+      "m_ClassName": "__MARK__classref␞type:SceneManager␞SceneManager␞hollow_knight_Data/Managed/Assembly-CSharp.dll",
+      "m_ExecutionOrder": 0,
+      "m_Name": "SceneManager",
+      "m_Namespace": "",
+      "m_PropertiesHash": {
+        "bytes[0]": 0,
+        "bytes[10]": 0,
+        "bytes[11]": 0,
+        "bytes[12]": 0,
+        "bytes[13]": 0,
+        "bytes[14]": 0,
+        "bytes[15]": 0,
+        "bytes[1]": 0,
+        "bytes[2]": 0,
+        "bytes[3]": 0,
+        "bytes[4]": 0,
+        "bytes[5]": 0,
+        "bytes[6]": 0,
+        "bytes[7]": 0,
+        "bytes[8]": 0,
+        "bytes[9]": 0
+      }
+    }
+    "#);
+}
