@@ -1,8 +1,13 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useElementScrollRestoration,
+  useNavigate,
+  useRouter,
+  useSearch,
+} from "@tanstack/react-router";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   fetchFileStructured,
@@ -367,6 +372,14 @@ export function Tree({
   // Stable prefix so each row's DOM id is unique across multiple
   // structured views on the same page (and across remounts).
   const treeUid = useId();
+  // Scroll-restoration ids for the two panes. Stable per file (keyed on
+  // `mountKey`) so router scroll restoration can match them after a
+  // remount — e.g. clicking a pptr link to another file and going back.
+  const treeScrollId = `tree:${mountKey}`;
+  const previewScrollId = `preview:${mountKey}`;
+  const treeScrollEntry = useElementScrollRestoration({ id: treeScrollId });
+  const previewScrollEntry = useElementScrollRestoration({ id: previewScrollId });
+  const previewRef = useRef<HTMLDivElement | null>(null);
   // Virtualize so a fully-expanded scene (≈8k rows) doesn't try to
   // mount every <div role=treeitem> on each toggle. Row size is fixed
   // by `leading-6` on TreeRow (24px); we don't bother measuring.
@@ -375,16 +388,69 @@ export function Tree({
     getScrollElement: () => treeRef.current,
     estimateSize: () => 24,
     overscan: 12,
+    // Seed the virtualizer at the restored offset so the right rows
+    // render immediately on a back/forward remount.
+    initialOffset: treeScrollEntry?.scrollY,
   });
 
-  // Bring the focused row into view when arrow-keys move it.
   const focusedIdx = useMemo(
     () => visibleRows.findIndex((r) => r.node.id === focusedId),
     [visibleRows, focusedId],
   );
+  // Keep the focused row in view. `align: "auto"` only scrolls when the
+  // row is off screen, so this doubles as scroll-into-view-when-needed
+  // (deep-link target, arrow-key nav). The very first run is skipped:
+  // focus starts on the root and a `#obj:N` hash then snaps it onto the
+  // real target, so that initial settling must not clobber a restored
+  // scroll offset on a back/forward remount.
+  const initialFocusSettled = useRef(false);
   useEffect(() => {
-    if (focusedIdx >= 0) virtualizer.scrollToIndex(focusedIdx, { align: "auto" });
+    if (focusedIdx < 0) return;
+    if (!initialFocusSettled.current) {
+      initialFocusSettled.current = true;
+      return;
+    }
+    // `scrollToIndex` brings the row into the rendered range, but it
+    // works in the virtualizer's estimated coordinate space and ignores
+    // the container's padding, so it can land a few px short. Once the
+    // row is actually in the DOM, let the browser's native, padding-aware
+    // "scroll into view if needed" nail the final position — a no-op when
+    // the row is already visible, so a restored scroll offset survives.
+    // We poll a few frames because the row only mounts after the
+    // scroll-induced virtualizer re-render commits.
+    virtualizer.scrollToIndex(focusedIdx, { align: "auto" });
+    let raf = 0;
+    let tries = 0;
+    const settle = () => {
+      const el = treeRef.current?.querySelector(`[data-index="${focusedIdx}"]`);
+      if (el) {
+        el.scrollIntoView({ block: "nearest" });
+      } else if (tries++ < 10) {
+        raf = requestAnimationFrame(settle);
+      }
+    };
+    raf = requestAnimationFrame(settle);
+    return () => cancelAnimationFrame(raf);
   }, [focusedIdx, virtualizer]);
+
+  // Restore the preview pane's scroll after a back/forward remount.
+  // Router scroll restoration can't reach this element — its built-in
+  // pass runs a `querySelector` before React has mounted this route's
+  // DOM — so we re-apply the cached offset ourselves. The content is
+  // laid out to full height by now (cached, or the full-text fallback),
+  // so one application restores it; a single deferred retry covers a
+  // height still settling right after first paint.
+  useLayoutEffect(() => {
+    const el = previewRef.current;
+    const target = previewScrollEntry?.scrollY;
+    if (!el || !target) return;
+    el.scrollTop = target;
+    if (Math.abs(el.scrollTop - target) <= 1) return;
+    const raf = requestAnimationFrame(() => {
+      el.scrollTop = target;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [previewScrollEntry, mountKey]);
 
   // Move keyboard focus to the tree container as soon as it mounts so
   // arrow keys drive navigation instead of scrolling the page.
@@ -600,6 +666,7 @@ export function Tree({
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div
           ref={treeRef}
+          data-scroll-restoration-id={treeScrollId}
           role="tree"
           aria-label="Structured file contents"
           // Container holds focus; rows are addressed via
@@ -643,7 +710,11 @@ export function Tree({
             })}
           </div>
         </div>
-        <div className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-3">
+        <div
+          ref={previewRef}
+          data-scroll-restoration-id={previewScrollId}
+          className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-3"
+        >
           {selectedNode ? (
             renderContent({
               node: selectedNode,
