@@ -256,9 +256,7 @@ fn build_gameobject_node<R: EnvResolver, P: TypeTreeProvider>(
     });
 
     // Gameobject label is just the name — the path id is rarely
-    // useful at a glance and is in the node id anyway. Components
-    // keep their `[pid]` suffix because the class name alone often
-    // repeats within a scene.
+    // useful at a glance and is in the node id anyway.
     Ok(Node {
         id: format!("obj:{go_path_id}"),
         label: if go.m_Name.is_empty() {
@@ -268,7 +266,10 @@ fn build_gameobject_node<R: EnvResolver, P: TypeTreeProvider>(
         },
         kind: "gameobject".to_string(),
         badge,
-        default_collapsed: false,
+        // Collapsed by default so the hierarchy opens as a root list to
+        // drill into, not a fully-expanded scene. Search still expands
+        // matches via the frontend.
+        default_collapsed: true,
         // Searching for a gameobject usually means "show me everything
         // about it" — its components + child gameobjects too. The
         // frontend uses this flag to splice descendants into the

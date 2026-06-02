@@ -67,12 +67,16 @@ fn make_node(
     // a per-node body the diff content endpoint can render; section
     // / class-stat aggregates don't.
     let has_content = matches!(kind.as_str(), "gameobject" | "component");
+    // Match the non-diff tree: collapse gameobjects so the hierarchy
+    // opens as a drill-in list rather than fully expanded.
+    let default_collapsed = kind == "gameobject";
     Node {
         id: id.into(),
         label: label.into(),
         kind,
         status: Some(status),
         has_content,
+        default_collapsed,
         ..Default::default()
     }
 }

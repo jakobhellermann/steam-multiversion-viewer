@@ -61,6 +61,7 @@ fn bundle_tree_one_sf_one_blob() {
                 - id: "archive:CAB-scene/obj:1"
                   label: Player
                   kind: gameobject
+                  default_collapsed: true
                   include_descendants_on_match: true
                   has_content: true
                   children: []
@@ -122,12 +123,14 @@ fn bundle_diff_added_changed_unchanged() {
                 - id: "archive:CAB-scene/base:obj:1"
                   label: Player
                   kind: gameobject
+                  default_collapsed: true
                   status: added
                   has_content: true
                   children: []
                 - id: "archive:CAB-scene/target:obj:1"
                   label: PlayerV2
                   kind: gameobject
+                  default_collapsed: true
                   status: removed
                   has_content: true
                   children: []

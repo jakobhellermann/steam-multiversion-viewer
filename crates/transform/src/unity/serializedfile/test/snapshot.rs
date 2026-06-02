@@ -71,24 +71,28 @@ fn tree_small_scene() {
             - id: "obj:2"
               label: Player
               kind: gameobject
+              default_collapsed: true
               include_descendants_on_match: true
               has_content: true
               children:
                 - id: "obj:4"
                   label: Camera
                   kind: gameobject
+                  default_collapsed: true
                   include_descendants_on_match: true
                   has_content: true
                   children: []
                 - id: "obj:6"
                   label: Weapon
                   kind: gameobject
+                  default_collapsed: true
                   include_descendants_on_match: true
                   has_content: true
                   children: []
             - id: "obj:8"
               label: Light
               kind: gameobject
+              default_collapsed: true
               include_descendants_on_match: true
               has_content: true
               children: []
@@ -158,30 +162,35 @@ fn diff_added_removed_renamed() {
             - id: "obj:2"
               label: Player
               kind: gameobject
+              default_collapsed: true
               status: changed
               has_content: true
               children:
                 - id: "base:obj:4"
                   label: Camera
                   kind: gameobject
+                  default_collapsed: true
                   status: added
                   has_content: true
                   children: []
                 - id: "base:obj:6"
                   label: Weapon
                   kind: gameobject
+                  default_collapsed: true
                   status: added
                   has_content: true
                   children: []
                 - id: "target:obj:4"
                   label: Sword
                   kind: gameobject
+                  default_collapsed: true
                   status: removed
                   has_content: true
                   children: []
                 - id: "target:obj:6"
                   label: Hat
                   kind: gameobject
+                  default_collapsed: true
                   status: removed
                   has_content: true
                   children: []
@@ -266,6 +275,7 @@ fn tree_with_monobehaviours() {
               label: Player
               kind: gameobject
               badge: 2 components
+              default_collapsed: true
               include_descendants_on_match: true
               has_content: true
               children:
@@ -287,6 +297,7 @@ fn tree_with_monobehaviours() {
               label: Enemy
               kind: gameobject
               badge: 1 component
+              default_collapsed: true
               include_descendants_on_match: true
               has_content: true
               children:
