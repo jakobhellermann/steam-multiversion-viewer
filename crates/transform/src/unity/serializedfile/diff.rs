@@ -366,7 +366,15 @@ fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
         ))
     };
 
-    let pruned = prune_unchanged(children);
+    let mut pruned = prune_unchanged(children);
+    // Single-root hierarchy on both sides: open its single-child chain by
+    // default. With several roots we leave everything collapsed rather
+    // than spotlight one chain.
+    if base_root_count == 1 && target_root_count == 1 {
+        for root in &mut pruned {
+            super::expand_single_child_chains(root);
+        }
+    }
     let status = aggregate_status(&pruned);
 
     Ok((

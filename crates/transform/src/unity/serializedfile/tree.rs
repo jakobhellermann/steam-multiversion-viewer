@@ -185,6 +185,12 @@ fn build_hierarchy_section<R: EnvResolver, P: TypeTreeProvider>(
     }
 
     let root_count = roots.len();
+    // A hierarchy with a single root has no sibling to choose between,
+    // so open its single-child chain by default. With several roots we
+    // leave everything collapsed rather than spotlight one chain.
+    if let [only] = roots.as_mut_slice() {
+        super::expand_single_child_chains(only);
+    }
     Ok(HierarchySection {
         node: Node {
             id: "section:hierarchy".to_string(),
