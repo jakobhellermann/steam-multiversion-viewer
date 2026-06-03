@@ -493,7 +493,7 @@ fn walk_pair<R: EnvResolver, P: TypeTreeProvider>(
     let base_components = collect_components(base_file, b_go, b_tid, &mut covered.base)?;
     let target_components = collect_components(target_file, t_go, t_tid, &mut covered.target)?;
 
-    let mut keys: BTreeMap<ComponentKey, ()> = BTreeMap::new();
+    let mut keys: BTreeMap<(ComponentKey, usize), ()> = BTreeMap::new();
     for k in base_components.keys().chain(target_components.keys()) {
         keys.insert(k.clone(), ());
     }
@@ -505,7 +505,7 @@ fn walk_pair<R: EnvResolver, P: TypeTreeProvider>(
             target_file,
             base_bodies,
             target_bodies,
-            key,
+            &key.0,
             b,
             t,
         )?);
@@ -597,7 +597,7 @@ fn subtree_one_side<R: EnvResolver, P: TypeTreeProvider>(
     // Components show up as same-status leaves; component-key lookup
     // would be wasted work since there's nothing to match against.
     let components = collect_components(file, go, transform_path_id, covered)?;
-    for (key, comp) in &components {
+    for ((key, _occurrence), comp) in &components {
         children.push(Node {
             badge: Some(format!("[{}]", comp.path_id)),
             facets: [("class".to_string(), key.to_string())]
@@ -686,14 +686,22 @@ struct Component {
     path_id: PathId,
 }
 
+/// Components keyed by `(ComponentKey, occurrence)`. The occurrence
+/// index disambiguates several components that share a key — a
+/// GameObject can carry many of the same script (e.g. multiple
+/// PlayMakerFSM) or engine class. Without it they collapse onto one
+/// `BTreeMap` slot and the surplus is silently dropped (and the pair
+/// walk would mismatch counts). The n-th of a key on one side pairs
+/// with the n-th on the other.
 fn collect_components<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     go: &GameObject,
     self_transform_pid: PathId,
     covered: &mut HashSet<PathId>,
-) -> Result<BTreeMap<ComponentKey, Component>> {
+) -> Result<BTreeMap<(ComponentKey, usize), Component>> {
     use serde_value::Value;
-    let mut out: BTreeMap<ComponentKey, Component> = BTreeMap::new();
+    let mut out: BTreeMap<(ComponentKey, usize), Component> = BTreeMap::new();
+    let mut occurrences: BTreeMap<ComponentKey, usize> = BTreeMap::new();
     for component in &go.m_Component {
         let component_ref = component
             .component
@@ -718,7 +726,9 @@ fn collect_components<R: EnvResolver, P: TypeTreeProvider>(
         } else {
             ComponentKey::ClassId(class_id)
         };
-        out.insert(key, Component { path_id });
+        let occ = occurrences.entry(key.clone()).or_insert(0);
+        out.insert((key, *occ), Component { path_id });
+        *occ += 1;
     }
     Ok(out)
 }

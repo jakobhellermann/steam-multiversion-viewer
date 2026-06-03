@@ -405,6 +405,102 @@ fn diff_non_pptr_field_change_is_changed() {
     assert_eq!(changed, 1);
 }
 
+/// First node with `label` anywhere in the forest.
+fn find_node<'a>(
+    nodes: &'a [crate::structured::Node],
+    label: &str,
+) -> Option<&'a crate::structured::Node> {
+    for n in nodes {
+        if n.label == label {
+            return Some(n);
+        }
+        if let Some(found) = find_node(&n.children, label) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+#[test]
+fn diff_keeps_duplicate_same_script_components() {
+    // A GameObject can carry several components of the same script
+    // (e.g. three PlayMakerFSM). Each must get its own node — keying
+    // components by script name alone silently collapses them onto one.
+    let base_bytes = Scene::new()
+        .with_root(
+            SceneNode::new("RestBench")
+                .with_script("", "PlayMakerFSM")
+                .with_script("", "PlayMakerFSM")
+                .with_script("", "PlayMakerFSM"),
+        )
+        .write();
+    // Target lacks RestBench, so it diffs as a one-sided "added" subtree
+    // — exercising the subtree_one_side / collect_components path.
+    let target_bytes = Scene::new().with_root(SceneNode::new("Other")).write();
+
+    let count = with_diff_handles(
+        &[(PATH, base_bytes)],
+        &[(PATH, target_bytes)],
+        |base, target| {
+            let (children, _status) = diff_sections(base, target).unwrap();
+            let rest = find_node(&children, "RestBench").expect("RestBench node present");
+            rest.children
+                .iter()
+                .filter(|c| c.kind == "component")
+                .count()
+        },
+    );
+
+    assert_eq!(
+        count, 3,
+        "all three PlayMakerFSM components must appear, not collapse to one"
+    );
+}
+
+#[test]
+fn diff_keeps_duplicate_components_on_matched_gameobject() {
+    // A matched GameObject that dropped one of several same-script
+    // components must reflect that as a removed/added component, not
+    // vanish: keying by script name collapses base's 3 PlayMakerFSM and
+    // target's 2 each to one, the pair looks unchanged, and the whole
+    // GameObject is wrongly pruned as identical.
+    let base_bytes = Scene::new()
+        .with_root(
+            SceneNode::new("RestBench")
+                .with_script("", "PlayMakerFSM")
+                .with_script("", "PlayMakerFSM")
+                .with_script("", "PlayMakerFSM"),
+        )
+        .write();
+    let target_bytes = Scene::new()
+        .with_root(
+            SceneNode::new("RestBench")
+                .with_script("", "PlayMakerFSM")
+                .with_script("", "PlayMakerFSM"),
+        )
+        .write();
+
+    let desc = with_diff_handles(
+        &[(PATH, base_bytes)],
+        &[(PATH, target_bytes)],
+        |base, target| {
+            let (children, _status) = diff_sections(base, target).unwrap();
+            match find_node(&children, "RestBench") {
+                None => "RestBench absent (collapsed away)".to_string(),
+                Some(rest) => rest
+                    .children
+                    .iter()
+                    .filter(|c| c.kind == "component")
+                    .map(|c| format!("{}:{:?}", c.label, c.status))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            }
+        },
+    );
+    // base has one more PlayMakerFSM than target → it shows up as Added.
+    assert_eq!(desc, "PlayMakerFSM:Some(Added)");
+}
+
 fn collect_changed_labels(nodes: &[crate::structured::Node], out: &mut Vec<String>) {
     for n in nodes {
         if n.kind == "component" && n.status == Some(NodeStatus::Changed) {
