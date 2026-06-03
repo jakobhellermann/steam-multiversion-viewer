@@ -762,43 +762,74 @@ pub async fn manifest_file_structured_diff(
     crate::http::ImmutableCache,
     Json<transform::structured::StructuredTree>,
 )> {
+    match build_structured_diff_tree(
+        &state,
+        appid,
+        depot_id,
+        manifest_id,
+        &q.branch,
+        q.target_depot_id,
+        q.target_manifest_id,
+        &q.target_branch,
+        &q.path,
+    )
+    .await?
+    {
+        Some(tree) => Ok((crate::http::ImmutableCache, Json(tree))),
+        None => Err(ApiError::unsupported_media_type(format!(
+            "structured diff not supported for: {}",
+            q.path
+        ))),
+    }
+}
+
+/// Build the structured-diff tree for one file across two manifests, or
+/// `None` when the file type has no structured-diff builder. Downloads
+/// both sides' chunks and runs the per-format differ. Shared by the
+/// single-file endpoint and the deep manifest filter.
+#[allow(clippy::too_many_arguments)]
+async fn build_structured_diff_tree(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    branch: &str,
+    target_depot_id: DepotId,
+    target_manifest_id: ManifestId,
+    target_branch: &str,
+    path: &str,
+) -> Result<Option<transform::structured::StructuredTree>> {
     use transform::Transformer;
 
-    let kind = transform::tools::transformer_for(&q.path);
+    let kind = transform::tools::transformer_for(path);
 
     // Open both manifests + pre-download the file's chunks on each
     // side in parallel — both passes are needed before we can hand the
     // pair to the blocking diff builder.
     let (base, target) = tokio::try_join!(
-        prepare_structured_side(&state, appid, depot_id, manifest_id, &q.path, &q.branch),
+        prepare_structured_side(state, appid, depot_id, manifest_id, path, branch),
         prepare_structured_side(
-            &state,
+            state,
             appid,
-            q.target_depot_id,
-            q.target_manifest_id,
-            &q.path,
-            &q.target_branch,
+            target_depot_id,
+            target_manifest_id,
+            path,
+            target_branch,
         ),
     )?;
 
     let diff = match kind {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
-            let path = q.path.clone();
-            let (base_env, base_data_dir) = unity_side(
-                &state,
-                appid,
-                depot_id,
-                manifest_id,
-                &q.branch,
-                base.clone(),
-            )?;
+            let path = path.to_owned();
+            let (base_env, base_data_dir) =
+                unity_side(state, appid, depot_id, manifest_id, branch, base.clone())?;
             let (target_env, target_data_dir) = unity_side(
-                &state,
+                state,
                 appid,
-                q.target_depot_id,
-                q.target_manifest_id,
-                &q.target_branch,
+                target_depot_id,
+                target_manifest_id,
+                target_branch,
                 target.clone(),
             )?;
             tokio::task::spawn_blocking(move || {
@@ -817,21 +848,15 @@ pub async fn manifest_file_structured_diff(
         #[cfg(feature = "unity")]
         Some(Transformer::UnityBundle) => {
             use rabex_env::resolver::EnvResolver;
-            let path = q.path.clone();
-            let (base_env, base_data_dir) = unity_side(
-                &state,
-                appid,
-                depot_id,
-                manifest_id,
-                &q.branch,
-                base.clone(),
-            )?;
+            let path = path.to_owned();
+            let (base_env, base_data_dir) =
+                unity_side(state, appid, depot_id, manifest_id, branch, base.clone())?;
             let (target_env, target_data_dir) = unity_side(
-                &state,
+                state,
                 appid,
-                q.target_depot_id,
-                q.target_manifest_id,
-                &q.target_branch,
+                target_depot_id,
+                target_manifest_id,
+                target_branch,
                 target.clone(),
             )?;
             tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
@@ -868,15 +893,15 @@ pub async fn manifest_file_structured_diff(
             // `compare_to=` manifest. Aligning frontend semantics
             // (Added = in current view) with dll-diff means
             // `from = target` and `to = base`.
-            let (to_bytes, to_sha) = dll_side_bytes(&base, &q.path).await?;
-            let (from_bytes, from_sha) = dll_side_bytes(&target, &q.path).await?;
+            let (to_bytes, to_sha) = dll_side_bytes(&base, path).await?;
+            let (from_bytes, from_sha) = dll_side_bytes(&target, path).await?;
             let tree = transform::dll::diff::build_tree(
                 &store_root,
                 &from_sha,
                 &from_bytes,
                 &to_sha,
                 &to_bytes,
-                &q.path,
+                path,
             )
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -888,15 +913,183 @@ pub async fn manifest_file_structured_diff(
             transform::dll::warm_full_decompile(&store_root, to_sha, to_bytes);
             tree
         }
-        _ => {
-            return Err(ApiError::unsupported_media_type(format!(
-                "structured diff not supported for: {}",
-                q.path
-            )));
-        }
+        _ => return Ok(None),
     };
 
-    Ok((crate::http::ImmutableCache, Json(diff)))
+    Ok(Some(diff))
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct DeepDiffQuery {
+    /// Branch of the base manifest. Defaults to `public`.
+    #[serde(default = "default_branch")]
+    pub branch: String,
+    pub target_depot_id: DepotId,
+    pub target_manifest_id: ManifestId,
+    #[serde(default = "default_branch")]
+    pub target_branch: String,
+}
+
+/// Which file types the deep filter actually structural-diffs. Limited
+/// to Unity serialized files + bundles for now — DLLs go through an
+/// expensive ilspy decompile, so they're left in the list as plain
+/// `changed` (fingerprint-level) like any non-structured file.
+fn is_deep_comparable(path: &str) -> bool {
+    #[cfg(feature = "unity")]
+    {
+        matches!(
+            transform::tools::transformer_for(path),
+            Some(transform::Transformer::UnitySerialized | transform::Transformer::UnityBundle)
+        )
+    }
+    #[cfg(not(feature = "unity"))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// True when a structured diff carries no actual difference — an
+/// unchanged root with everything pruned away. Mirrors the frontend's
+/// "No structured differences" condition.
+fn structured_diff_is_empty(tree: &transform::structured::StructuredTree) -> bool {
+    tree.root.children.is_empty()
+        && matches!(
+            tree.root.status,
+            None | Some(transform::structured::NodeStatus::Unchanged)
+        )
+}
+
+/// Deep manifest diff
+///
+/// Like [`manifest_diff`] (1:1 against a single target), but a changed
+/// Unity serialized file / bundle is only reported when its *structured*
+/// diff is non-empty — files that differ only in ways the builder
+/// normalises away (e.g. PPtr renumbering) are dropped. Everything else
+/// (`added` files, DLLs, text, …) is reported unconditionally; DLLs are
+/// excluded because their structured diff means an expensive decompile.
+/// This downloads both sides of every Unity candidate, so it is far
+/// more expensive than the metadata-only `manifest_diff`.
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/structured-diff-filter",
+    tag = "diff",
+    params(DeepDiffQuery),
+    responses((status = 200, body = ManifestDiffResponse))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn manifest_diff_deep(
+    State(state): State<AppState>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
+    Query(q): Query<DeepDiffQuery>,
+) -> Result<Json<ManifestDiffResponse>> {
+    let base_snap = state
+        .open_manifest(appid, depot_id, manifest_id, &q.branch)
+        .await?;
+    let target_snap = state
+        .open_manifest(
+            appid,
+            q.target_depot_id,
+            q.target_manifest_id,
+            &q.target_branch,
+        )
+        .await?;
+
+    fn fp(f: &DepotFile) -> (FileKind, u64, Option<[u8; 20]>, Option<&str>) {
+        (f.kind, f.size, f.sha, f.linktarget.as_deref())
+    }
+
+    let target = target_snap.manifest();
+    let mut target_by_path: HashMap<&str, &DepotFile> = HashMap::with_capacity(target.files.len());
+    for f in &target.files {
+        if matches!(f.kind, FileKind::Directory) {
+            continue;
+        }
+        target_by_path.insert(f.path.as_str(), f);
+    }
+
+    let base = base_snap.manifest();
+    let mut added: Vec<String> = Vec::new();
+    let mut changed_candidates: Vec<String> = Vec::new();
+    for f in &base.files {
+        if matches!(f.kind, FileKind::Directory) {
+            continue;
+        }
+        match target_by_path.get(f.path.as_str()) {
+            None => added.push(f.path.clone()),
+            Some(tf) if fp(f) != fp(tf) => changed_candidates.push(f.path.clone()),
+            Some(_) => {}
+        }
+    }
+
+    // Deep-check each changed candidate in parallel. A file with no
+    // structured builder is kept as-is (no download); a structured file
+    // is kept only when its structured diff is non-empty. On any error
+    // we keep the file — better a spurious row than a hidden change.
+    let started = std::time::Instant::now();
+    let total_changed = changed_candidates.len();
+    let sem = Arc::new(Semaphore::new(8));
+    let mut fu = FuturesUnordered::new();
+    for path in changed_candidates {
+        let state = &state;
+        let sem = sem.clone();
+        let branch = q.branch.clone();
+        let target_branch = q.target_branch.clone();
+        let target_depot_id = q.target_depot_id;
+        let target_manifest_id = q.target_manifest_id;
+        fu.push(async move {
+            let _permit = sem.acquire().await.expect("semaphore not closed");
+            if !is_deep_comparable(&path) {
+                return Some(path);
+            }
+            match build_structured_diff_tree(
+                state,
+                appid,
+                depot_id,
+                manifest_id,
+                &branch,
+                target_depot_id,
+                target_manifest_id,
+                &target_branch,
+                &path,
+            )
+            .await
+            {
+                Ok(Some(tree)) if structured_diff_is_empty(&tree) => None,
+                Ok(_) => Some(path),
+                Err(err) => {
+                    tracing::warn!(%path, reason = ?err, "deep diff: structured diff failed; keeping");
+                    Some(path)
+                }
+            }
+        });
+    }
+
+    let mut entries: Vec<ManifestDiffEntry> = Vec::new();
+    for path in added {
+        entries.push(ManifestDiffEntry {
+            path,
+            status: ManifestDiffStatus::Added,
+        });
+    }
+    let mut kept_changed = 0usize;
+    while let Some(result) = fu.next().await {
+        if let Some(path) = result {
+            kept_changed += 1;
+            entries.push(ManifestDiffEntry {
+                path,
+                status: ManifestDiffStatus::Changed,
+            });
+        }
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    tracing::info!(
+        total_changed,
+        kept_changed,
+        elapsed = ?started.elapsed(),
+        "deep diff filter done"
+    );
+    Ok(Json(ManifestDiffResponse { entries }))
 }
 
 /// Read a file's content + manifest-recorded sha1 from one side of

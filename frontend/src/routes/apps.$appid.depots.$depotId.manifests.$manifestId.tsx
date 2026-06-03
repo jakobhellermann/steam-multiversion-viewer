@@ -10,6 +10,7 @@ import {
   fetchExtraManifests,
   fetchGameInfo,
   fetchManifestDiff,
+  fetchManifestDiffDeep,
   fetchManifestFiles,
   fetchManifestInfo,
   fetchManifestStatuses,
@@ -44,6 +45,10 @@ type Search = {
   /// without leading dots. Empty = no filter. URL form for the same
   /// reason as `compare_to`.
   ext?: string;
+  /// Deep-compare toggle. In the URL so it survives the round-trip to a
+  /// file/diff page and back (local state would reset on remount).
+  /// Omitted when off.
+  deep?: boolean;
 };
 
 export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$manifestId")({
@@ -53,6 +58,7 @@ export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$ma
     compare_to:
       typeof search.compare_to === "string" && search.compare_to ? search.compare_to : undefined,
     ext: typeof search.ext === "string" && search.ext ? search.ext : undefined,
+    deep: search.deep === true || search.deep === "true" ? true : undefined,
   }),
   component: ManifestDetail,
 });
@@ -619,17 +625,55 @@ function FilesPanel({
     // the tree doesn't flash back to "all files" in between.
     placeholderData: (prev) => prev,
   });
+  // Deep compare: a 1:1 diff that structural-diffs each changed file and
+  // drops the ones with no structured difference. Gated on a single
+  // compare target. Slow (downloads both sides of every changed file)
+  // and recomputed on each load for now — the cheap fingerprint list
+  // above stays visible until this lands, then the tree narrows.
+  const deepCompare = search.deep ?? false;
+  const setDeepCompare = useCallback(
+    (next: boolean) => {
+      navigate({
+        search: (prev) => ({ ...prev, deep: next ? true : undefined }),
+        replace: true,
+      });
+    },
+    [navigate],
+  );
+  const deepTarget = diffRefs.length === 1 ? diffRefs[0] : undefined;
+  const deepQuery = useQuery({
+    queryKey: [
+      "manifest-diff-deep",
+      appid,
+      depotId,
+      manifestId,
+      branch,
+      deepTarget ? `${deepTarget.depot_id}/${deepTarget.manifest_id}` : "",
+    ],
+    queryFn: () =>
+      fetchManifestDiffDeep(
+        Number(appid),
+        { depot_id: Number(depotId), manifest_id: manifestId, branch },
+        deepTarget!,
+      ),
+    enabled: deepCompare && deepTarget != null,
+    staleTime: Infinity,
+    gcTime: 10 * 60 * 1000,
+  });
   // Per-path diff status from the backend. `null` when no compare
   // target is active (or the query hasn't landed yet) — callers treat
   // that as "no diff filter". `has(path)` mirrors the old Set API,
-  // and `get(path)` gives the colour (added/changed) for the row.
+  // and `get(path)` gives the colour (added/changed) for the row. Deep
+  // results replace the fingerprint ones once available; until then the
+  // fingerprint list shows so there's an immediate result.
   const diffStatus = useMemo<Map<string, ManifestDiffStatus> | null>(() => {
     if (diffTargets.size === 0) return null;
-    if (!diffQuery.data) return null;
+    const source = deepCompare && deepQuery.data ? deepQuery.data : diffQuery.data;
+    if (!source) return null;
     const m = new Map<string, ManifestDiffStatus>();
-    for (const e of diffQuery.data) m.set(e.path, e.status);
+    for (const e of source) m.set(e.path, e.status);
     return m;
-  }, [diffTargets, diffQuery.data]);
+  }, [diffTargets, diffQuery.data, deepQuery.data, deepCompare]);
   // `initialData` (not `?? new Set()`) so the cache entry's reference is
   // stable across renders — otherwise the `flattenTree` useMemo below
   // would re-run on every render because its `expanded`/`collapsed`
@@ -826,6 +870,23 @@ function FilesPanel({
             </button>
           )}
         </div>
+        {deepTarget && (
+          <label
+            className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 select-none"
+            title="Download and structural-diff every changed file, hiding those with no structured difference"
+          >
+            <input
+              type="checkbox"
+              checked={deepCompare}
+              onChange={(e) => setDeepCompare(e.target.checked)}
+              className="accent-sky-500"
+            />
+            Deep compare
+            {deepCompare && deepQuery.isFetching && (
+              <Loader2 size={13} className="animate-spin text-slate-500" />
+            )}
+          </label>
+        )}
         {appInfo && (
           <CompareMenu
             appInfo={appInfo}

@@ -175,6 +175,28 @@ export async function fetchManifestDiff(
   return body.entries;
 }
 
+/// Deep variant of `fetchManifestDiff`: 1:1 against a single target,
+/// and `changed` files whose *structured* diff is empty are dropped.
+/// Far slower — the backend downloads both sides of every changed file.
+export async function fetchManifestDiffDeep(
+  appid: AppId,
+  base: ManifestRef,
+  target: ManifestRef,
+): Promise<ManifestDiffEntry[]> {
+  const qs = new URLSearchParams({
+    branch: base.branch,
+    target_depot_id: String(target.depot_id),
+    target_manifest_id: target.manifest_id,
+    target_branch: target.branch,
+  });
+  const r = await fetch(
+    `/api/apps/${appid}/depots/${base.depot_id}/manifests/${base.manifest_id}/structured-diff-filter?${qs}`,
+  );
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  const body: { entries: ManifestDiffEntry[] } = await r.json();
+  return body.entries;
+}
+
 /// `{depot_id, manifest_id}` of a target whose at-least-one-path-
 /// matching-query differs from base. Returned by
 /// `/manifests/diff-targets` (see [`fetchManifestDiffTargets`]).
