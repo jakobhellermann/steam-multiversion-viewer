@@ -171,6 +171,37 @@ export function Tree({
   }, [root]);
   const selectedNode = selectedId ? (nodeById.get(selectedId) ?? null) : null;
 
+  // Per-side `[archive:X/]<path-id>` → real node id, so a pptr ref
+  // resolves to its diff node even when that node carries a
+  // `base:`/`target:`/`mod:` prefix the bare ref can't know. Keyed by
+  // side because base and target may reuse a path id for different
+  // objects; the dump-side carried on the ref disambiguates.
+  const refIndex = useMemo(() => {
+    const base = new Map<string, string>();
+    const target = new Map<string, string>();
+    walk(root, (n) => {
+      for (const { side, key } of pptrNodeKeys(n.id)) {
+        const map = side === "base" ? base : target;
+        // A path id is unique within one side's file, so first writer
+        // wins without contention.
+        if (!map.has(key)) map.set(key, n.id);
+      }
+    });
+    return { base, target };
+  }, [root]);
+  const resolveRef = useCallback(
+    (ref: string): string | null => {
+      if (nodeById.has(ref)) return ref;
+      const parsed = parsePptrRef(ref);
+      if (!parsed) return null;
+      if (parsed.side === "base") return refIndex.base.get(parsed.key) ?? null;
+      if (parsed.side === "target") return refIndex.target.get(parsed.key) ?? null;
+      // Bare ref, no side hint: prefer base, then target.
+      return refIndex.base.get(parsed.key) ?? refIndex.target.get(parsed.key) ?? null;
+    },
+    [nodeById, refIndex],
+  );
+
   // --- Search + facet filter -------------------------------------------------
   // `strict: false` lets us pull search params without binding to a
   // specific route — same component is mounted from the file route
@@ -339,10 +370,7 @@ export function Tree({
   // Stable across renders so memoised consumers (e.g. `makePostProcess`
   // in the preview pane) don't get a fresh function reference every
   // time the tree state ticks.
-  const isInTree = useCallback(
-    (id: string) => id === root.id || parentById.has(id),
-    [root.id, parentById],
-  );
+  const isInTree = useCallback((id: string) => resolveRef(id) != null, [resolveRef]);
 
   const setExpanded = useCallback(
     (id: string, next: boolean) => {
@@ -464,7 +492,11 @@ export function Tree({
   // update `location.hash` via `history.replaceState` and therefore
   // never fire `hashchange` themselves.
   const jumpToHashTarget = useCallback(
-    (id: string) => {
+    (rawId: string) => {
+      // The hash carries the bare pptr ref; map it onto the real node
+      // id (which may carry a diff side prefix) before we focus it.
+      const id = resolveRef(rawId);
+      if (id == null) return;
       // Track the target so `visibleSet` keeps it (and its ancestors)
       // visible even if a filter would normally hide it.
       setHashTarget(id);
@@ -480,7 +512,7 @@ export function Tree({
       });
       setFocusedId(id);
     },
-    [parentById],
+    [parentById, resolveRef],
   );
 
   // Honor `#obj:<path-id>` hash links — the unity object dump turns
@@ -488,24 +520,22 @@ export function Tree({
   // updates `location.hash`. Listen and snap focus onto the target,
   // expanding ancestors as needed.
   useEffect(() => {
-    const idsInTree = new Set<string>();
-    walk(root, (n) => idsInTree.add(n.id));
     // Track whether we've ever observed a non-empty hash for this
     // mount — that lets us tell apart "page just loaded without a hash"
     // (do nothing) from "user navigated back from a #obj:N entry"
     // (snap to root so the preview clears).
     let everSawHash = false;
     const onHashChange = () => {
-      const id = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-      if (!id) {
+      const ref = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+      if (!ref) {
         if (!everSawHash) return;
         setHashTarget(null);
         setFocusedId(root.id);
         return;
       }
       everSawHash = true;
-      if (!idsInTree.has(id)) return;
-      jumpToHashTarget(id);
+      // `jumpToHashTarget` no-ops on a ref that resolves to nothing.
+      jumpToHashTarget(ref);
     };
     onHashChange();
     window.addEventListener("hashchange", onHashChange);
@@ -776,6 +806,60 @@ export function treeKeyAction(key: string, state: TreeNavState): TreeNavAction |
 function walk(node: StructuredNode, visit: (n: StructuredNode) => void) {
   visit(node);
   for (const c of node.children) walk(c, visit);
+}
+
+/// Split a node id / ref into its bundle `archive:<entry>/` prefix (or
+/// `""` outside bundles) and the inner part.
+function splitArchivePrefix(id: string): [string, string] {
+  if (id.startsWith("archive:")) {
+    const slash = id.indexOf("/");
+    if (slash >= 0) return [id.slice(0, slash + 1), id.slice(slash + 1)];
+  }
+  return ["", id];
+}
+
+/// The (side, path-id key) entries this node id should be indexed under.
+/// A pptr ref carries the diff side it was dumped from but only a bare
+/// path id; the node carries the pairing-derived prefix. Indexing per
+/// side by `[archive:X/]<path-id>` lets [`resolveRef`] bridge them
+/// without the bare-`obj:N` ambiguity (a path id is unique within one
+/// side's file). Non-object rows (sections, class-stats, blobs) yield
+/// nothing.
+export function pptrNodeKeys(id: string): Array<{ side: "base" | "target"; key: string }> {
+  const [prefix, inner] = splitArchivePrefix(id);
+  let m: RegExpExecArray | null;
+  if ((m = /^(obj:\d+)$/.exec(inner))) {
+    // Matched on both sides with the same path id — answers to either.
+    const key = prefix + m[1];
+    return [
+      { side: "base", key },
+      { side: "target", key },
+    ];
+  }
+  if ((m = /^base:(obj:\d+)$/.exec(inner))) return [{ side: "base", key: prefix + m[1] }];
+  if ((m = /^target:(obj:\d+)$/.exec(inner))) return [{ side: "target", key: prefix + m[1] }];
+  if ((m = /^mod:(obj:\d+),(obj:\d+)$/.exec(inner))) {
+    // `mod:obj:<base>,obj:<target>` — each side keys under its own id.
+    return [
+      { side: "base", key: prefix + m[1] },
+      { side: "target", key: prefix + m[2] },
+    ];
+  }
+  return [];
+}
+
+/// Parse an incoming pptr ref into the index side + key to look up.
+/// `"either"` is a bare `obj:N` with no side hint (single-file view, or
+/// a hand-typed hash) — callers fall back across both sides.
+export function parsePptrRef(
+  ref: string,
+): { side: "base" | "target" | "either"; key: string } | null {
+  const [prefix, inner] = splitArchivePrefix(ref);
+  let m: RegExpExecArray | null;
+  if ((m = /^base:(obj:\d+)$/.exec(inner))) return { side: "base", key: prefix + m[1] };
+  if ((m = /^target:(obj:\d+)$/.exec(inner))) return { side: "target", key: prefix + m[1] };
+  if ((m = /^(obj:\d+)$/.exec(inner))) return { side: "either", key: prefix + m[1] };
+  return null;
 }
 
 function walkVisible(

@@ -5,7 +5,7 @@ import { useCallback, useRef } from "react";
 
 import { fetchStructuredDiff, fetchStructuredDiffNode, type StructuredNode } from "../../api";
 import { HighlightedPre } from "./FilePreview";
-import { makeDiffPostProcess } from "./markers";
+import { makeDiffPostProcess, makePostProcess } from "./markers";
 import { Tree } from "./StructuredView";
 import type { FileLocator } from "./types";
 
@@ -190,7 +190,17 @@ function DiffNodeBody({
     branch: target.branch,
     path,
   };
-  const postProcess = makeDiffPostProcess(baseLocator, targetLocator, () => true);
+  // A two-sided body (`diff`) carries the side per line in its `+`/`-`
+  // gutter. A one-sided body (added/removed node → plain json/csharp)
+  // has no gutter, so the whole dump belongs to one side: a removed
+  // node is target-only, everything else base. Tag accordingly and
+  // resolve external refs against that side's manifest.
+  const postProcess =
+    settled.lang === "diff"
+      ? makeDiffPostProcess(baseLocator, targetLocator, () => true)
+      : node.status === "removed"
+        ? makePostProcess(targetLocator, () => true, "target")
+        : makePostProcess(baseLocator, () => true, "base");
   return (
     <DiffContentPane>
       <HighlightedPre code={settled.text} lang={settled.lang} bare postProcess={postProcess} />

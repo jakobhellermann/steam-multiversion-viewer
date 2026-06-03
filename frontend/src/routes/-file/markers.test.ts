@@ -70,6 +70,29 @@ describe("makeDiffPostProcess", () => {
   });
 });
 
+describe("makePostProcess local-ref side tagging", () => {
+  // A same-file (local) pptr: no file part, so it's an in-page hash jump.
+  const localMarker = (pathId: number) =>
+    `"__MARK__pptr${SEP}obj:${pathId}${SEP}PathID=${pathId}${SEP}Transform${SEP}"`;
+
+  test("one-sided removed body tags refs target", () => {
+    const out = makePostProcess(target, () => true, "target")(`  "component": ${localMarker(42)}`);
+    expect(out).toContain('href="#target:obj:42"');
+    expect(out).toContain('data-pptr-ref="target:obj:42"');
+  });
+
+  test("one-sided added body tags refs base", () => {
+    const out = makePostProcess(base, () => true, "base")(`  "component": ${localMarker(42)}`);
+    expect(out).toContain('href="#base:obj:42"');
+  });
+
+  test("single-file view (no side) leaves refs bare", () => {
+    const out = makePostProcess(base, () => true)(`  "component": ${localMarker(42)}`);
+    expect(out).toContain('href="#obj:42"');
+    expect(out).not.toContain("base:obj:42");
+  });
+});
+
 describe("makePostProcess classref", () => {
   const DLL = "hollow_knight_Data/Managed/Assembly-CSharp.dll";
   const classrefMarker = (fqn: string) =>

@@ -49,8 +49,13 @@ const MARKER_RE = new RegExp(`"${MARK_PREFIX}([a-z]+)${MARK_SEP}([^"]*)"`, "g");
 export function makePostProcess(
   locator: FileLocator,
   isLocalRefInTree: (ref: string) => boolean,
+  /// Diff side to tag local refs with. Set for a one-sided diff body
+  /// (an added/removed node has no `+`/`-` gutter to read the side off,
+  /// so the whole body belongs to one side). `undefined` in the
+  /// single-file view, where refs carry no side.
+  side?: "base" | "target",
 ): (html: string) => string {
-  const renderers = makeRenderers(locator, isLocalRefInTree);
+  const renderers = makeRenderers(locator, isLocalRefInTree, side);
   return (html) => applyMarkers(html, renderers);
 }
 
@@ -66,8 +71,12 @@ export function makeDiffPostProcess(
   target: FileLocator,
   isLocalRefInTree: (ref: string) => boolean,
 ): (html: string) => string {
-  const renderBase = makeRenderers(base, isLocalRefInTree);
-  const renderTarget = makeRenderers(target, isLocalRefInTree);
+  // Tag local refs with the side they were dumped from. A bare `obj:N`
+  // is ambiguous when base and target reuse a path id for different
+  // objects; the side lets the tree resolve to the right node id
+  // (`base:`/`target:`/`mod:`) instead of guessing.
+  const renderBase = makeRenderers(base, isLocalRefInTree, "base");
+  const renderTarget = makeRenderers(target, isLocalRefInTree, "target");
   return (html) =>
     html
       .split("\n")
@@ -86,11 +95,26 @@ type Renderers = {
 function makeRenderers(
   locator: FileLocator,
   isLocalRefInTree: (ref: string) => boolean,
+  /// Diff side this set renders for. Set only by the diff post-processor;
+  /// `undefined` in the single-file view, where refs need no side.
+  side?: "base" | "target",
 ): Renderers {
   return {
-    pptr: makePptrRenderer(locator, isLocalRefInTree),
+    pptr: makePptrRenderer(locator, isLocalRefInTree, side),
     classref: makeClassrefRenderer(locator),
   };
+}
+
+/// Glue the diff side into a local ref so it matches a side-prefixed
+/// tree node id. The side goes on the inner part, after any bundle
+/// `archive:<entry>/` prefix: `archive:X/obj:5` → `archive:X/base:obj:5`.
+function withSide(ref: string, side: "base" | "target" | undefined): string {
+  if (!side) return ref;
+  if (ref.startsWith("archive:")) {
+    const slash = ref.indexOf("/");
+    if (slash >= 0) return `${ref.slice(0, slash + 1)}${side}:${ref.slice(slash + 1)}`;
+  }
+  return `${side}:${ref}`;
 }
 
 function applyMarkers(html: string, renderers: Renderers): string {
@@ -145,7 +169,11 @@ function makeClassrefRenderer(locator: FileLocator): (payload: string) => string
   };
 }
 
-function makePptrRenderer(locator: FileLocator, isLocalRefInTree: (ref: string) => boolean) {
+function makePptrRenderer(
+  locator: FileLocator,
+  isLocalRefInTree: (ref: string) => boolean,
+  side?: "base" | "target",
+) {
   const fileHref = makeFileHref(locator);
   // Only show the file's basename in the link label — the full depot
   // path (the `<Game>_Data/StreamingAssets/aa/StandaloneWindows64/…`
@@ -202,9 +230,10 @@ function makePptrRenderer(locator: FileLocator, isLocalRefInTree: (ref: string) 
     // click handler tells them apart via `data-pptr-file`: same-file
     // refs go through the in-page hash logic, external refs through
     // tanstack-router.
+    const localRef = escHTML(withSide(ref, side));
     const linkAttrs = file
       ? `href="${escHTML(fileHref(file))}#${escHTML(ref)}" data-pptr-ref="${escHTML(ref)}" data-pptr-file="1"`
-      : `href="#${escHTML(ref)}" data-pptr-ref="${escHTML(ref)}"`;
+      : `href="#${localRef}" data-pptr-ref="${localRef}"`;
     return `<a ${linkAttrs} class="cursor-pointer text-sky-400 underline decoration-sky-700 hover:decoration-sky-400 hover:text-sky-200">${label}</a>${suffix}`;
   };
 }
