@@ -145,6 +145,13 @@ function ManifestDetail() {
   const downloadAll = useMutation({
     mutationFn: () => downloadManifest(appid, depotId, manifestId, { branch }),
   });
+  // This manifest's own cache status, pulled out of the batch we already
+  // fetch for the compare menu. Drives the download button so a manifest
+  // that's fully on disk doesn't offer a pointless "Download all".
+  const selfStatus = useMemo(
+    () => statusQuery.data?.find((s) => s.depot_id === depotId && s.manifest_id === manifestId),
+    [statusQuery.data, depotId, manifestId],
+  );
 
   return (
     <div className="mx-auto max-w-6xl p-8">
@@ -182,6 +189,7 @@ function ManifestDetail() {
           downloadPending={downloadAll.isPending}
           downloadResult={downloadAll.data}
           downloadError={downloadAll.error as Error | null}
+          cachedStatus={selfStatus}
         />
       )}
 
@@ -215,6 +223,7 @@ function ManifestHeader({
   downloadPending,
   downloadResult,
   downloadError,
+  cachedStatus,
 }: {
   info: ManifestInfo;
   gameInfo: GameInfo | undefined;
@@ -224,20 +233,35 @@ function ManifestHeader({
   downloadPending: boolean;
   downloadResult: EnqueueSummary | undefined;
   downloadError: Error | null;
+  cachedStatus: ManifestStatusEntry | undefined;
 }) {
+  // Every chunk already on disk → nothing to download. `chunks_total > 0`
+  // guards against the not-yet-loaded / errored status (both report 0).
+  const fullyCached =
+    cachedStatus != null &&
+    cachedStatus.error == null &&
+    cachedStatus.chunks_total > 0 &&
+    cachedStatus.chunks_missing === 0;
   return (
     <div>
       <div className="flex items-start gap-4">
         <h1 className="text-2xl font-bold">Manifest</h1>
-        <button
-          type="button"
-          onClick={onDownload}
-          disabled={downloadPending}
-          className="ml-auto rounded border border-sky-700 bg-sky-950/40 px-3 py-1.5 text-sm hover:bg-sky-900/40 disabled:opacity-50"
-        >
-          {downloadPending ? "Enqueuing…" : "Download all"}
-        </button>
+        {!fullyCached && (
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={downloadPending}
+            className="ml-auto rounded border border-sky-700 bg-sky-950/40 px-3 py-1.5 text-sm hover:bg-sky-900/40 disabled:opacity-50"
+          >
+            {downloadPending ? "Enqueuing…" : "Download all"}
+          </button>
+        )}
       </div>
+      {!downloadResult && fullyCached && cachedStatus && (
+        <p className="mt-2 text-xs text-slate-400">
+          Everything is already cached. {cachedStatus.chunks_total.toLocaleString()} chunks on disk.
+        </p>
+      )}
       {downloadResult && (
         <p className="mt-2 text-xs text-slate-400">
           {downloadResult.enqueued_chunks > 0
