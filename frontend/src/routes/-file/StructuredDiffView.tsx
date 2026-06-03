@@ -6,6 +6,7 @@ import { useCallback, useRef } from "react";
 import { fetchStructuredDiff, fetchStructuredDiffNode, type StructuredNode } from "../../api";
 import { HighlightedPre } from "./FilePreview";
 import { makeDiffPostProcess, makePostProcess } from "./markers";
+import { focusUnlessSelecting, scopeSelectAll } from "./selection";
 import { Tree } from "./StructuredView";
 import type { FileLocator } from "./types";
 
@@ -216,6 +217,8 @@ function DiffContentPane({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const onClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      // Focus the pane so a following ⌘A is scoped to it, not the page.
+      focusUnlessSelecting(e.currentTarget, window.getSelection());
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
       const a = (e.target as HTMLElement | null)?.closest(
         "a[data-pptr-file]",
@@ -228,8 +231,16 @@ function DiffContentPane({ children }: { children: React.ReactNode }) {
     },
     [router],
   );
+  const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    scopeSelectAll(e, window.getSelection());
+  }, []);
   return (
-    <div onClick={onClick} className="w-max min-w-full">
+    <div
+      tabIndex={-1}
+      onClick={onClick}
+      onKeyDown={onKeyDown}
+      className="w-max min-w-full outline-none"
+    >
       {children}
     </div>
   );

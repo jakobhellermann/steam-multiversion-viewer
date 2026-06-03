@@ -18,6 +18,7 @@ import {
 import { langForMime } from "../../lib/syntax";
 import { HighlightedPre } from "./FilePreview";
 import { makePostProcess } from "./markers";
+import { focusUnlessSelecting, scopeSelectAll } from "./selection";
 import type { FileLocator } from "./types";
 
 /// Render the backend-built structured tree for a file. Lazy: each
@@ -1263,21 +1264,12 @@ export function NodeContentPanel({
   // receive focus + keyboard events; the click handler grabs focus on
   // any interaction inside the preview.
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === "a") {
-      e.preventDefault();
-      window.getSelection()?.selectAllChildren(e.currentTarget);
-    }
+    scopeSelectAll(e, window.getSelection());
   }, []);
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      // Focus the wrapper so the next ⌘A lands in our keydown handler;
-      // `preventScroll` keeps clicks from jumping the long preview.
-      // Skip if the user just made a text selection — in Firefox,
-      // `element.focus()` collapses the live selection, so clicks that
-      // end a drag-select would lose what was just highlighted.
-      const sel = window.getSelection();
-      const isSelecting = sel != null && !sel.isCollapsed && sel.toString().length > 0;
-      if (!isSelecting) e.currentTarget.focus({ preventScroll: true });
+      // Focus the wrapper so the next ⌘A lands in our keydown handler.
+      focusUnlessSelecting(e.currentTarget, window.getSelection());
       onClick(e);
     },
     [onClick],
