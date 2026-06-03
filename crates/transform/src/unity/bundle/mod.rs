@@ -105,6 +105,12 @@ where
     let bytes = bundle
         .read_at(entry_path)?
         .with_context(|| format!("entry {entry_path} unexpectedly absent"))?;
-    let sf = SerializedFile::from_reader(&mut Cursor::new(bytes.as_slice()))?;
+    let mut sf = SerializedFile::from_reader(&mut Cursor::new(bytes.as_slice()))?;
+    // Bundle entry SerializedFiles omit the unity version (it lives at
+    // the bundle level); backfill from the env so file-version-dependent
+    // reads (e.g. GameObject::path) resolve instead of erroring.
+    if sf.m_UnityVersion.is_none() {
+        sf.m_UnityVersion = Some(env.unity_version()?.clone());
+    }
     Ok(env.insert_cache(entry_path.into(), sf, Data::InMemory(bytes)))
 }

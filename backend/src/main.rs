@@ -94,7 +94,7 @@ fn setup_logging() -> Result<PathBuf> {
     let stdout_filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
             format!(
-                "{}=debug,steam_vent_depot=info,steam_depot_vfs=info,tower_http=info",
+                "{}=debug,transform=debug,steam_vent_depot=info,steam_depot_vfs=info,tower_http=info",
                 env!("CARGO_CRATE_NAME")
             )
             .into()
@@ -119,7 +119,7 @@ fn setup_logging() -> Result<PathBuf> {
     let log_path = log_dir.join(&file_name);
     let file = std::fs::File::create(&log_path)?;
     let file_filter = tracing_subscriber::EnvFilter::new(
-        "steam_multiversion_viewer=debug,steam_vent=debug,steam_vent_depot=debug,steam_depot_vfs=debug,tower_http=info",
+        "steam_multiversion_viewer=debug,transform=debug,steam_vent=debug,steam_vent_depot=debug,steam_depot_vfs=debug,tower_http=info",
     );
     let file_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::sync::Mutex::new(file))

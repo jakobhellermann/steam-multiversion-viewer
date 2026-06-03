@@ -207,17 +207,24 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
         let _span = tracing::info_span!("parse_bundle_header").entered();
         BundleFileReader::from_reader(
             Cursor::new(bundle_bytes.as_ref()),
-            &ExtractionConfig::default().with_fallback_unity_version(unity_version),
+            &ExtractionConfig::default().with_fallback_unity_version(unity_version.clone()),
         )?
     };
     let entry_bytes = bundle
         .read_at(archive_entry)?
         .ok_or_else(|| anyhow::anyhow!("entry {archive_entry} not found in bundle"))?;
-    let sf = {
+    let mut sf = {
         let _span =
             tracing::info_span!("parse_serializedfile", bytes = entry_bytes.len()).entered();
         SerializedFile::from_reader(&mut Cursor::new(entry_bytes.as_slice()))?
     };
+    // Bundle entry SerializedFiles usually omit the unity version (it
+    // lives at the bundle level), but `path()`/typetree reads resolve
+    // against the file's *own* version — without it they fail and a
+    // component's label degrades to a bare PathID. Backfill from the env.
+    if sf.m_UnityVersion.is_none() {
+        sf.m_UnityVersion = Some(unity_version.clone());
+    }
     let file = env.insert_cache(archive_entry.into(), sf, Data::InMemory(entry_bytes));
     let (class_id, value) = {
         let _span = tracing::info_span!("read_object").entered();
@@ -501,17 +508,33 @@ fn display_name<R: EnvResolver, P: TypeTreeProvider>(
 ) -> String {
     use std::fmt::Write as _;
     let m_name = lookup_str(val, "m_Name").unwrap_or_default();
+    // Resolve the owning gameobject's hierarchy path. Each failure here
+    // silently degrades a component's label to a bare PathID, so log
+    // where it breaks instead of swallowing (transform crate must be in
+    // the tracing filter to see it).
     let go_path = lookup(val, "m_GameObject")
         .and_then(pptr_from_value)
         .and_then(|p| p.optional())
         .and_then(|p| {
-            object
-                .file
-                .deref_optional(p.typed::<GameObject>())
-                .ok()
-                .flatten()
+            match object.file.deref_optional(p.typed::<GameObject>()) {
+                Ok(Some(go)) => Some(go),
+                Ok(None) => {
+                    tracing::warn!(path_id = ?object.path_id(), "display_name: m_GameObject deref returned None");
+                    None
+                }
+                Err(err) => {
+                    tracing::warn!(path_id = ?object.path_id(), reason = format!("{err:#}"), "display_name: m_GameObject deref failed");
+                    None
+                }
+            }
         })
-        .and_then(|go| go.path().ok());
+        .and_then(|go| match go.path() {
+            Ok(path) => Some(path),
+            Err(err) => {
+                tracing::warn!(path_id = ?object.path_id(), reason = format!("{err:#}"), "display_name: gameobject path() failed");
+                None
+            }
+        });
 
     let mut out = String::new();
     match (m_name.is_empty(), go_path) {
