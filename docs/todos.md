@@ -1,6 +1,19 @@
 # TODOs
 
 ## Bugs
+- Body-diff (right panel) doesn't apply pptr identity-normalization, only
+  the tree status does. So a genuinely-changed node shows its pure
+  pptr-renumber fields as `-`/`+` noise alongside the real change. The
+  tree prunes renumber-only nodes correctly (`pptr_target_identity`), but
+  `unity_serialized_node_body` dumps each side's raw JSON (markers carry
+  the raw PathID in `ref`) and text-diffs them, so renumbers reappear.
+   - Repro: http://localhost:6555/apps/367520/depots/367523/manifests/708613018541602983/diff?path=hollow_knight_Data%2Flevel100&target_depot_id=367523&target_manifest_id=5829533265112705522&target_branch=1.5.78.11833#mod:obj:5445,obj:5417
+   - Open questions before fixing: should a renumber-only line vanish
+     entirely or show identity-normalized-but-unchanged? And the jump
+     link's `ref` still needs the real PathID (`#obj:5445`) — so identity
+     for *comparison* and PathID for *navigation* must be separable
+     (likely a separate marker field, or normalize only at diff time
+     while keeping the original markers for render).
 - Reconnect steam-vent after failure, idle connection, laptop suspend
    - "Also: there's an upstream bug — steam-vent's read-side logs
      `ConnectionReset` but doesn't mark the connection dead, so the writer
