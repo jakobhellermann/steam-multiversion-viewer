@@ -501,6 +501,41 @@ fn diff_keeps_duplicate_components_on_matched_gameobject() {
     assert_eq!(desc, "PlayMakerFSM:Some(Added)");
 }
 
+#[test]
+fn diff_auto_expands_the_single_changed_root() {
+    // The scene has several roots but only one changed, so the diff
+    // shows just that root — its single-child chain should open by
+    // default even though the scene as a whole has many roots.
+    let base = Scene::new()
+        .with_root(SceneNode::new("Keep"))
+        .with_root(
+            SceneNode::new("Whole").with_child(SceneNode::new("Inner").with_script("", "Foo")),
+        )
+        .write();
+    let target = Scene::new()
+        .with_root(SceneNode::new("Keep"))
+        .with_root(SceneNode::new("Whole").with_child(SceneNode::new("Inner")))
+        .write();
+
+    let (whole_collapsed, keep_present) = with_handle(PATH, base, |b| {
+        with_handle(PATH, target, |t| {
+            let (children, _status) = diff_sections(b, t).unwrap();
+            let whole = find_node(&children, "Whole").expect("changed root present");
+            (
+                whole.default_collapsed,
+                find_node(&children, "Keep").is_some(),
+            )
+        })
+    });
+    // Keep is unchanged → pruned, leaving Whole as the only visible root,
+    // which therefore auto-expands.
+    assert!(!keep_present, "unchanged root should be pruned");
+    assert!(
+        !whole_collapsed,
+        "the single visible root should auto-expand"
+    );
+}
+
 fn collect_changed_labels(nodes: &[crate::structured::Node], out: &mut Vec<String>) {
     for n in nodes {
         if n.kind == "component" && n.status == Some(NodeStatus::Changed) {

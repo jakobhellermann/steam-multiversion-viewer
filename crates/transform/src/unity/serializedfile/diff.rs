@@ -367,13 +367,13 @@ fn diff_hierarchy<R: EnvResolver, P: TypeTreeProvider>(
     };
 
     let mut pruned = prune_unchanged(children);
-    // Single-root hierarchy on both sides: open its single-child chain by
-    // default. With several roots we leave everything collapsed rather
-    // than spotlight one chain.
-    if base_root_count == 1 && target_root_count == 1 {
-        for root in &mut pruned {
-            super::expand_single_child_chains(root);
-        }
+    // Exactly one root visible in the diff (the others pruned as
+    // unchanged): open its single-child chain by default. With several
+    // changed roots on screen we leave them collapsed rather than
+    // spotlight one. Gates on the *visible* count, not the scene's total
+    // roots, so a lone changed root in a big scene still opens.
+    if pruned.len() == 1 {
+        super::expand_single_child_chains(&mut pruned[0]);
     }
     let status = aggregate_status(&pruned);
 
