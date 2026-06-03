@@ -7,9 +7,10 @@
 //! under `snapshots/`.
 
 use super::fixtures::{
-    Scene, SceneNode, external_monoscript_file, external_text_asset_file,
-    loose_monobehaviour_referencing_external, loose_monobehaviour_with_script_typetree,
-    preload_referencing_external, preload_with_dependency, with_diff_handles, with_handle,
+    Scene, SceneNode, external_gameobject_with_transform, external_monoscript_file,
+    external_text_asset_file, loose_monobehaviour_referencing_external,
+    loose_monobehaviour_with_script_typetree, preload_referencing_external,
+    preload_with_dependency, with_diff_handles, with_handle,
 };
 use crate::structured::{NodeStatus, StructuredTree};
 use crate::unity::serializedfile::diff::diff_sections;
@@ -231,6 +232,37 @@ fn diff_external_pptr_renumber_to_same_name_is_unchanged() {
         &[
             (PATH, preload_referencing_external(ext, 9)),
             (ext, external_text_asset_file(9, "shared")),
+        ],
+        |base, target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            (status, children)
+        },
+    );
+
+    assert_eq!(status, NodeStatus::Unchanged);
+    assert!(
+        children.is_empty(),
+        "expected every section pruned, got {} section(s)",
+        children.len()
+    );
+}
+
+#[test]
+fn diff_external_pptr_to_nameless_component_renumber_is_unchanged() {
+    // The PreloadData points at a Transform in an external file. A
+    // Transform has no `m_Name`, so its identity has to come from the
+    // GameObject it hangs on. Across the two manifests the transform
+    // (and its gameobject) renumber, but the gameobject name stays
+    // "Bench" — a pure renumber that must collapse to unchanged.
+    let ext = "extern.assets";
+    let (status, children) = with_diff_handles(
+        &[
+            (PATH, preload_referencing_external(ext, 5)),
+            (ext, external_gameobject_with_transform(5, "Bench")),
+        ],
+        &[
+            (PATH, preload_referencing_external(ext, 9)),
+            (ext, external_gameobject_with_transform(9, "Bench")),
         ],
         |base, target| {
             let (children, status) = diff_sections(base, target).unwrap();

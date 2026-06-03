@@ -1140,14 +1140,18 @@ fn pptr_refs_equal<R: EnvResolver, P: TypeTreeProvider>(
 }
 
 /// Stable identity of a PPtr target, independent of the renumber-prone
-/// PathID: the external file identifier plus the target's raw `m_Name`
-/// and class. Uses the raw `m_Name` (not `display_name`, which formats
-/// for display and falls back to `PathID=N`).
+/// PathID: the external file identifier plus a renumber-stable name and
+/// the target's class. The name is the target's own `m_Name`, or — for
+/// components that have none (Transform, AudioSource, … which only the
+/// owning GameObject names) — the `m_Name` of its `m_GameObject`. Uses
+/// raw names (not `display_name`, which formats for display and falls
+/// back to `PathID=N`).
 ///
-/// TODO(diff): only external, named targets are normalized. Local
-/// (`m_FileID == 0`) refs and unnamed/duplicate-named targets return
-/// `None` and stay "changed" (false negatives). External assets are
-/// normally uniquely named, so this is enough for now — revisit if
+/// TODO(diff): only external targets are normalized. Local
+/// (`m_FileID == 0`) refs and targets we can't name (no `m_Name`, no
+/// named GameObject) return `None` and stay "changed" (false
+/// positives — a pure renumber reported as a change). External assets
+/// are normally uniquely named, so this is enough for now — revisit if
 /// local or unnamed renumber noise shows up.
 fn pptr_target_identity<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
@@ -1160,8 +1164,32 @@ fn pptr_target_identity<R: EnvResolver, P: TypeTreeProvider>(
     let obj = file.deref(pptr.typed::<Value>()).ok()?;
     let class = obj.class_id();
     let data = obj.read().ok()?;
-    let name = value_m_name(&data)?;
+    // Resolve a missing `m_Name` through the owning GameObject. The
+    // component's `m_GameObject` is local to *its* file (`m_FileID == 0`
+    // means "same file as the component", which for an external target
+    // is the external file, not `file`), so dereference against the
+    // resolved object's own handle.
+    let name = value_m_name(&data).or_else(|| gameobject_name(&obj.file, &data))?;
     Some((file_key, name, class))
+}
+
+/// `m_Name` of the GameObject a component hangs on, resolved through
+/// the component's `m_GameObject` pptr in the same file. Lets nameless
+/// components (Transform, AudioSource, …) borrow a renumber-stable
+/// identity from their owner instead of falling out as "changed".
+fn gameobject_name<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    component: &Value,
+) -> Option<String> {
+    let Value::Map(map) = component else {
+        return None;
+    };
+    let Value::Map(go_map) = map.get(&Value::String("m_GameObject".to_string()))? else {
+        return None;
+    };
+    let go_pptr = pptr_from_map(go_map)?;
+    let go = file.deref(go_pptr.typed::<Value>()).ok()?.read().ok()?;
+    value_m_name(&go)
 }
 
 /// Non-empty `m_Name` of a serialized object value, if present.

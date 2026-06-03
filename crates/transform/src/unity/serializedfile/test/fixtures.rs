@@ -466,6 +466,45 @@ pub(crate) fn preload_with_dependency(dep: &str) -> Vec<u8> {
     sfb.write_vec().unwrap()
 }
 
+/// External file holding a named `GameObject` and its (nameless)
+/// `Transform`. The transform sits at `transform_at`, the gameobject at
+/// `transform_at + 1`, and the gameobject's `m_Name` is `go_name`. Used
+/// to exercise pptr identity for component targets that carry no
+/// `m_Name` of their own — the diff has to borrow the owner's name.
+pub(crate) fn external_gameobject_with_transform(transform_at: PathId, go_name: &str) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    let go_at = transform_at + 1;
+    sfb.add_object_at(
+        go_at,
+        &GameObject {
+            m_Component: vec![ComponentPair {
+                component: PPtr::local(transform_at),
+            }],
+            m_Layer: 0,
+            m_Name: go_name.to_owned(),
+            m_Tag: 0,
+            m_IsActive: true,
+        },
+    )
+    .unwrap();
+    sfb.add_object_at(
+        transform_at,
+        &Transform {
+            m_GameObject: TypedPPtr::local(go_at),
+            m_LocalRotation: (0.0, 0.0, 0.0, 1.0),
+            m_LocalPosition: (0.0, 0.0, 0.0),
+            m_LocalScale: (1.0, 1.0, 1.0),
+            m_Children: Vec::new(),
+            m_Father: TypedPPtr::null(),
+        },
+    )
+    .unwrap();
+    sfb.write_vec().unwrap()
+}
+
 /// External file holding a single `MonoScript` named `name` at `at`.
 pub(crate) fn external_monoscript_file(at: PathId, name: &str) -> Vec<u8> {
     let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
