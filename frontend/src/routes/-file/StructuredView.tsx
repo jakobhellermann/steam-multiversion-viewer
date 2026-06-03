@@ -514,58 +514,22 @@ export function Tree({
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      // Follow the WAI-ARIA tree keyboard pattern:
-      // https://www.w3.org/WAI/ARIA/apg/patterns/treeview/
-      const idx = focusedIdx;
-      if (idx < 0) return;
-      const row = visibleRows[idx];
-      const hasChildren = row.hasVisibleChildren;
-      // Treat filter-auto-expanded rows as expanded for nav purposes
-      // (arrow-right moves to child instead of opening). Collapsing
-      // while a filter is active is a no-op — clear the filter to
-      // explore structure.
-      const expanded = effectiveExpanded.has(row.node.id);
-      switch (e.key) {
-        case "ArrowDown": {
-          if (idx + 1 < visibleRows.length) setFocusedId(visibleRows[idx + 1].node.id);
-          break;
-        }
-        case "ArrowUp": {
-          if (idx > 0) setFocusedId(visibleRows[idx - 1].node.id);
-          break;
-        }
-        case "ArrowRight": {
-          if (hasChildren && !expanded) {
-            setExpanded(row.node.id, true);
-          } else if (hasChildren && expanded && idx + 1 < visibleRows.length) {
-            setFocusedId(visibleRows[idx + 1].node.id);
-          }
-          break;
-        }
-        case "ArrowLeft": {
-          if (hasChildren && expanded) {
-            setExpanded(row.node.id, false);
-          } else {
-            const parent = parentById.get(row.node.id);
-            if (parent) setFocusedId(parent);
-          }
-          break;
-        }
-        case "Home": {
-          setFocusedId(visibleRows[0].node.id);
-          break;
-        }
-        case "End": {
-          setFocusedId(visibleRows[visibleRows.length - 1].node.id);
-          break;
-        }
-        case "Enter":
-        case " ": {
-          if (hasChildren) setExpanded(row.node.id, !expanded);
-          break;
-        }
-        default:
-          return;
+      // All navigation lives in the pure `treeKeyAction`; the handler
+      // just dispatches the resulting action. `effectiveExpanded` folds
+      // in filter auto-expansion so arrow-right descends instead of
+      // re-opening. Collapsing while a filter is active is still a
+      // no-op for the user — clear the filter to explore structure.
+      const action = treeKeyAction(e.key, {
+        visibleRows,
+        focusedIdx,
+        expandedIds: effectiveExpanded,
+        parentById,
+      });
+      if (!action) return;
+      if (action.type === "focus") {
+        setFocusedId(action.id);
+      } else {
+        setExpanded(action.id, action.open);
       }
       e.preventDefault();
     },
@@ -730,7 +694,7 @@ export function Tree({
   );
 }
 
-type VisibleRow = {
+export type VisibleRow = {
   node: StructuredNode;
   depth: number;
   /// True iff *at least one* child of `node` survives the current
@@ -740,6 +704,74 @@ type VisibleRow = {
   /// type whose nested members are hidden) get a leaf-style chevron.
   hasVisibleChildren: boolean;
 };
+
+/// The slice of tree state the keyboard navigation reads. Kept as a
+/// plain value (no React) so [`treeKeyAction`] is a pure function the
+/// unit tests can drive directly.
+export type TreeNavState = {
+  visibleRows: VisibleRow[];
+  /// Index into `visibleRows` of the focused row, or < 0 if none.
+  focusedIdx: number;
+  /// Effective-expanded ids (filter auto-expansion already folded in).
+  expandedIds: Set<string>;
+  /// child id → parent id, for sibling/parent lookups.
+  parentById: Map<string, string>;
+};
+
+/// What a key press resolves to: move focus to a node, or open/close
+/// one. `null` means "no-op" (the component then doesn't preventDefault
+/// either). Pure output so the handler stays a thin dispatch.
+export type TreeNavAction =
+  | { type: "focus"; id: string }
+  | { type: "expand"; id: string; open: boolean };
+
+/// Pure keyboard navigation following the WAI-ARIA tree pattern
+/// (https://www.w3.org/WAI/ARIA/apg/patterns/treeview/), with one
+/// extension: ArrowRight on a node with nothing to expand or descend
+/// into jumps to the next sibling instead of being a dead key.
+export function treeKeyAction(key: string, state: TreeNavState): TreeNavAction | null {
+  const { visibleRows, focusedIdx: idx, expandedIds } = state;
+  if (idx < 0 || idx >= visibleRows.length) return null;
+  const row = visibleRows[idx];
+  const hasChildren = row.hasVisibleChildren;
+  const expanded = expandedIds.has(row.node.id);
+
+  switch (key) {
+    case "ArrowDown":
+      return idx + 1 < visibleRows.length
+        ? { type: "focus", id: visibleRows[idx + 1].node.id }
+        : null;
+    case "ArrowUp":
+      return idx > 0 ? { type: "focus", id: visibleRows[idx - 1].node.id } : null;
+    case "ArrowRight": {
+      if (hasChildren && !expanded) return { type: "expand", id: row.node.id, open: true };
+      if (hasChildren && expanded && idx + 1 < visibleRows.length) {
+        return { type: "focus", id: visibleRows[idx + 1].node.id };
+      }
+      // Nothing to expand or descend into (a leaf). Move to the next
+      // visible row, which is never a descendant of a leaf — so this
+      // lands on the next sibling, or on an ancestor's next sibling when
+      // the leaf is the last child all the way up (A → A1 → A2 → B).
+      return idx + 1 < visibleRows.length
+        ? { type: "focus", id: visibleRows[idx + 1].node.id }
+        : null;
+    }
+    case "ArrowLeft": {
+      if (hasChildren && expanded) return { type: "expand", id: row.node.id, open: false };
+      const parent = state.parentById.get(row.node.id);
+      return parent ? { type: "focus", id: parent } : null;
+    }
+    case "Home":
+      return { type: "focus", id: visibleRows[0].node.id };
+    case "End":
+      return { type: "focus", id: visibleRows[visibleRows.length - 1].node.id };
+    case "Enter":
+    case " ":
+      return hasChildren ? { type: "expand", id: row.node.id, open: !expanded } : null;
+    default:
+      return null;
+  }
+}
 
 function walk(node: StructuredNode, visit: (n: StructuredNode) => void) {
   visit(node);
