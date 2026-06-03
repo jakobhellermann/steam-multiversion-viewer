@@ -433,7 +433,9 @@ function flattenTree(
       const ad = a.file == null;
       const bd = b.file == null;
       if (ad !== bd) return ad ? -1 : 1;
-      return a.name.localeCompare(b.name);
+      // Numeric-aware so `level24` sorts before `level231` instead of
+      // lexicographically after it.
+      return a.name.localeCompare(b.name, undefined, { numeric: true });
     });
 
     if (!isRoot) {
