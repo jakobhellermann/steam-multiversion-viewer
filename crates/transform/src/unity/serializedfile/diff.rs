@@ -1140,27 +1140,29 @@ fn pptr_refs_equal<R: EnvResolver, P: TypeTreeProvider>(
 }
 
 /// Stable identity of a PPtr target, independent of the renumber-prone
-/// PathID: the external file identifier plus a renumber-stable name and
-/// the target's class. The name is the target's own `m_Name`, or — for
-/// components that have none (Transform, AudioSource, … which only the
-/// owning GameObject names) — the `m_Name` of its `m_GameObject`. Uses
-/// raw names (not `display_name`, which formats for display and falls
-/// back to `PathID=N`).
+/// PathID: a file key plus a renumber-stable name and the target's
+/// class. The file key is the external file identifier, or `""` for a
+/// local (`m_FileID == 0`) target — both sides of a local renumber
+/// resolve in their own file, so an empty key just means "same file".
+/// The name is the target's own `m_Name`, or — for components that have
+/// none (Transform, AudioSource, … which only the owning GameObject
+/// names) — the `m_Name` of its `m_GameObject`. Uses raw names (not
+/// `display_name`, which formats for display and falls back to
+/// `PathID=N`).
 ///
-/// TODO(diff): only external targets are normalized. Local
-/// (`m_FileID == 0`) refs and targets we can't name (no `m_Name`, no
-/// named GameObject) return `None` and stay "changed" (false
-/// positives — a pure renumber reported as a change). External assets
-/// are normally uniquely named, so this is enough for now — revisit if
-/// local or unnamed renumber noise shows up.
+/// TODO(diff): targets we can't name (no `m_Name`, no named GameObject)
+/// still return `None` and stay "changed" (false positives — a pure
+/// renumber reported as a change). Most renumber noise is named, so
+/// this is enough for now.
 fn pptr_target_identity<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     pptr: PPtr,
 ) -> Option<(String, String, ClassId)> {
-    if pptr.is_local() {
-        return None;
-    }
-    let file_key = pptr.file_identifier(file.file)?.pathName.clone();
+    let file_key = if pptr.is_local() {
+        String::new()
+    } else {
+        pptr.file_identifier(file.file)?.pathName.clone()
+    };
     let obj = file.deref(pptr.typed::<Value>()).ok()?;
     let class = obj.class_id();
     let data = obj.read().ok()?;

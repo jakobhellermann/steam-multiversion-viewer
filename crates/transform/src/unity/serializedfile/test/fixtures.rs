@@ -449,6 +449,36 @@ pub(crate) fn preload_referencing_external(ext_path: &str, target_pid: PathId) -
     sfb.write_vec().unwrap()
 }
 
+/// A file with a named `GameObject` ("Bench") at `go_at` plus a loose
+/// `PreloadData` ("preload") whose `m_Assets` points at it with a
+/// *local* PPtr (`m_FileID == 0`). Two of these with the gameobject at
+/// different path ids are a pure local renumber — the PreloadData
+/// should compare equal once local pptr identity is resolved.
+pub(crate) fn preload_referencing_local(go_at: PathId) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    sfb.add_object_at(
+        go_at,
+        &GameObject {
+            m_Component: Vec::new(),
+            m_Layer: 0,
+            m_Name: "Bench".to_owned(),
+            m_Tag: 0,
+            m_IsActive: true,
+        },
+    )
+    .unwrap();
+    sfb.add_object(&PreloadData {
+        m_Name: "preload".to_owned(),
+        m_Assets: vec![PPtr::local(go_at)],
+        ..Default::default()
+    })
+    .unwrap();
+    sfb.write_vec().unwrap()
+}
+
 /// A file with one loose `PreloadData` ("preload") carrying a single
 /// non-PPtr `m_Dependencies` string. Two of these with different deps
 /// differ only in a plain (non-PPtr) field.

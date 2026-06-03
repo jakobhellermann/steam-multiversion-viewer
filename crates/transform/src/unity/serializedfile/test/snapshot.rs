@@ -10,7 +10,7 @@ use super::fixtures::{
     Scene, SceneNode, external_gameobject_with_transform, external_monoscript_file,
     external_text_asset_file, loose_monobehaviour_referencing_external,
     loose_monobehaviour_with_script_typetree, preload_referencing_external,
-    preload_with_dependency, with_diff_handles, with_handle,
+    preload_referencing_local, preload_with_dependency, with_diff_handles, with_handle,
 };
 use crate::structured::{NodeStatus, StructuredTree};
 use crate::unity::serializedfile::diff::diff_sections;
@@ -264,6 +264,30 @@ fn diff_external_pptr_to_nameless_component_renumber_is_unchanged() {
             (PATH, preload_referencing_external(ext, 9)),
             (ext, external_gameobject_with_transform(9, "Bench")),
         ],
+        |base, target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            (status, children)
+        },
+    );
+
+    assert_eq!(status, NodeStatus::Unchanged);
+    assert!(
+        children.is_empty(),
+        "expected every section pruned, got {} section(s)",
+        children.len()
+    );
+}
+
+#[test]
+fn diff_local_pptr_renumber_to_same_name_is_unchanged() {
+    // Both manifests hold a "Bench" GameObject + a loose PreloadData
+    // pointing at it with a *local* pptr (m_FileID == 0). The gameobject
+    // sits at a different path id on each side — a pure local renumber.
+    // The PreloadData must compare equal once local pptr identity is
+    // resolved, leaving nothing to show.
+    let (status, children) = with_diff_handles(
+        &[(PATH, preload_referencing_local(5))],
+        &[(PATH, preload_referencing_local(9))],
         |base, target| {
             let (children, status) = diff_sections(base, target).unwrap();
             (status, children)
