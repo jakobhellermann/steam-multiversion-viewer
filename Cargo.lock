@@ -2267,7 +2267,7 @@ dependencies = [
 [[package]]
 name = "rabex-env"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#055beea8dbdbce3719e74358102ad33ae2c12a6f"
+source = "git+https://github.com/jakobhellermann/rabex-env#1998b0a72f202bb8f5314040d63821e3e18ecd17"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -2288,7 +2288,7 @@ dependencies = [
 [[package]]
 name = "rabex-env-steam-depot-vfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#055beea8dbdbce3719e74358102ad33ae2c12a6f"
+source = "git+https://github.com/jakobhellermann/rabex-env#1998b0a72f202bb8f5314040d63821e3e18ecd17"
 dependencies = [
  "anyhow",
  "rabex-env",
