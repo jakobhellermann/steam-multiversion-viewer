@@ -4,16 +4,15 @@
 //! `SerializedFileBuilder` lets us assemble tiny scenes (a handful of
 //! GameObjects + Transforms, optionally an AssetBundle) without
 //! touching any depot / disk. Each fixture is written to a `Vec<u8>`
-//! and then re-opened via a minimal in-memory [`EnvResolver`] so the
-//! production `build_root_node` / `diff_sections` code paths run
-//! against a real rabex `SerializedFileHandle`.
+//! and then re-opened via rabex-env's builtin in-memory
+//! [`MemResolver`] so the production `build_root_node` /
+//! `diff_sections` code paths run against a real rabex
+//! `SerializedFileHandle`.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use rabex_env::Environment;
-use rabex_env::env::Data;
 use rabex_env::handle::SerializedFileHandle;
 use rabex_env::rabex::files::serializedfile::builder::SerializedFileBuilder;
 use rabex_env::rabex::files::serializedfile::{
@@ -25,7 +24,6 @@ use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env::rabex::typetree::{TypeTreeNode, TypeTreeProvider};
 use rabex_env::rabex::{UnityVersion, serde_typetree};
-use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{
     ComponentPair, GameObject, MonoBehaviour, MonoScript, PreloadData, TextAsset, Transform,
 };
@@ -36,49 +34,7 @@ use serde::Serialize;
 /// builder example uses.
 pub(crate) const TEST_UNITY_VERSION: &str = "2022.3.0f1";
 
-/// Tiny in-memory [`EnvResolver`]. One path → one byte buffer; no
-/// listing semantics beyond the fixture set.
-pub(crate) struct MemResolver {
-    files: HashMap<PathBuf, Vec<u8>>,
-}
-
-impl MemResolver {
-    pub(crate) fn single(path: &str, bytes: Vec<u8>) -> Self {
-        let mut files = HashMap::new();
-        files.insert(PathBuf::from(path), bytes);
-        Self { files }
-    }
-}
-
-impl EnvResolver for MemResolver {
-    type Reader<'a>
-        = Cursor<&'a [u8]>
-    where
-        Self: 'a;
-
-    fn read_path(&self, path: &Path) -> Result<Data, std::io::Error> {
-        self.files
-            .get(path)
-            .cloned()
-            .map(Data::InMemory)
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::NotFound, format!("{}", path.display()))
-            })
-    }
-
-    fn open_path(&self, path: &Path) -> Result<Self::Reader<'_>, std::io::Error> {
-        self.files
-            .get(path)
-            .map(|v| Cursor::new(v.as_slice()))
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::NotFound, format!("{}", path.display()))
-            })
-    }
-
-    fn all_files(&self) -> Result<Vec<PathBuf>, std::io::Error> {
-        Ok(self.files.keys().cloned().collect())
-    }
-}
+pub(crate) use rabex_env::resolver::MemResolver;
 
 /// Declarative scene description — one gameobject per entry, optional
 /// child list. Build with [`Scene::root`] / [`Scene::child`] for
@@ -395,14 +351,11 @@ pub(crate) fn with_diff_handles<R>(
     ) -> R,
 ) -> R {
     let env = |files: &[(&str, Vec<u8>)]| {
-        let map = files
+        let resolver: MemResolver = files
             .iter()
             .map(|(p, b)| (PathBuf::from(p), b.clone()))
             .collect();
-        Environment::new(
-            MemResolver { files: map },
-            TypeTreeCache::new(TpkTypeTreeBlob::embedded()),
-        )
+        Environment::new(resolver, TypeTreeCache::new(TpkTypeTreeBlob::embedded()))
     };
     let base_env = env(base_files);
     let target_env = env(target_files);
