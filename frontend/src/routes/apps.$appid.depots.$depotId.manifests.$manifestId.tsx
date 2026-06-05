@@ -187,6 +187,7 @@ function ManifestDetail() {
           info={info.data}
           gameInfo={gameInfo.data}
           gameInfoPending={gameInfo.isPending}
+          gameInfoError={gameInfo.error as Error | null}
           branch={branch}
           onDownload={() => {
             markShowImmediately();
@@ -225,6 +226,7 @@ function ManifestHeader({
   info,
   gameInfo,
   gameInfoPending,
+  gameInfoError,
   onDownload,
   downloadPending,
   downloadResult,
@@ -234,6 +236,7 @@ function ManifestHeader({
   info: ManifestInfo;
   gameInfo: GameInfo | undefined;
   gameInfoPending: boolean;
+  gameInfoError: Error | null;
   branch: string;
   onDownload: () => void;
   downloadPending: boolean;
@@ -303,6 +306,13 @@ function ManifestHeader({
             <dt className="text-slate-400">Engine</dt>
             <dd className="flex items-center gap-2 text-slate-500">
               <Loader2 size={14} className="animate-spin" />
+            </dd>
+          </>
+        ) : gameInfoError ? (
+          <>
+            <dt className="text-slate-400">Engine</dt>
+            <dd className="text-red-400" title={gameInfoError.message}>
+              Failed to detect
             </dd>
           </>
         ) : (
