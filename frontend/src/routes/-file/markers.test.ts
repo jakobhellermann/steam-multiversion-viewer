@@ -117,3 +117,23 @@ describe("makePostProcess classref", () => {
     expect(out).toContain(">Foo.Bar.SceneManager</a>");
   });
 });
+
+describe("makePostProcess shape", () => {
+  test("renders one polygon per shape with a count tooltip", () => {
+    const html = `  "m_PhysicsShape": "__MARK__shape${SEP}0,0;1,0;0,1|2,2;3,3",`;
+    const out = makePostProcess(base, () => true)(html);
+    expect(out).toContain("<svg");
+    expect((out.match(/<polygon/g) ?? []).length).toBe(2);
+    expect(out).toContain("<title>2 polygons, 5 pts</title>");
+    // The JSON comma after the value survives (the marker only replaces
+    // the quoted string).
+    expect(out.trimEnd().endsWith(",")).toBe(true);
+  });
+
+  test("rejects a payload with non-numeric junk", () => {
+    const html = `  "x": "__MARK__shape${SEP}<script>",`;
+    const out = makePostProcess(base, () => true)(html);
+    expect(out).not.toContain("<svg");
+    expect(out).not.toContain("<script>");
+  });
+});

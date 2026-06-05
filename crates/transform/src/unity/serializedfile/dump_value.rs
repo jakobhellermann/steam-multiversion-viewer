@@ -28,7 +28,7 @@ use serde_value::Value;
 
 use super::markers::{
     as_file_id, as_path_id, classref_marker, color_hex_from_map, color_marker, pptr_from_map,
-    pptr_marker,
+    pptr_marker, shape_marker,
 };
 
 /// Per-call hooks that influence what a dump returns. Defaulted to
@@ -367,6 +367,14 @@ pub(crate) fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
             let mut any_non_string = false;
             for (mut k, mut v) in taken {
                 simplify_for_dump(file, data_dir, local_ref_prefix, &mut k);
+                // A sprite's `m_PhysicsShape` (list of polygons of 2D
+                // points) becomes a `shape` marker the frontend draws as
+                // a small outline preview.
+                if matches!(&k, Value::String(s) if s == "m_PhysicsShape")
+                    && let Some(marker) = physics_shape_marker(&v)
+                {
+                    v = svalue_str(marker);
+                }
                 // Null pptr keys land here as `Value::Unit`; JSON
                 // object keys can't be null, so swap in an explicit
                 // sentinel that matches the regular pptr null shape.
@@ -646,4 +654,72 @@ fn pptr_from_value(v: &Value) -> Option<PPtr> {
 
 fn svalue_str(s: impl Into<String>) -> Value {
     Value::String(s.into())
+}
+
+/// Build a `shape` marker from a `m_PhysicsShape` value (a list of
+/// polygons, each a list of `{x, y}` points). `None` when the value
+/// isn't that shape or is empty, leaving the field as-is.
+fn physics_shape_marker(value: &Value) -> Option<String> {
+    let Value::Seq(polygons) = value else {
+        return None;
+    };
+    let polygons: Option<Vec<Vec<(f32, f32)>>> = polygons
+        .iter()
+        .map(|poly| match poly {
+            Value::Seq(points) => points.iter().map(point_xy).collect(),
+            _ => None,
+        })
+        .collect();
+    let polygons = polygons?;
+    if polygons.iter().all(Vec::is_empty) {
+        return None;
+    }
+    Some(shape_marker(&polygons))
+}
+
+fn point_xy(v: &Value) -> Option<(f32, f32)> {
+    let Value::Map(map) = v else { return None };
+    let x = as_f32(map.get(&svalue_str("x"))?)?;
+    let y = as_f32(map.get(&svalue_str("y"))?)?;
+    Some((x, y))
+}
+
+fn as_f32(v: &Value) -> Option<f32> {
+    match v {
+        Value::F32(f) => Some(*f),
+        Value::F64(f) => Some(*f as f32),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn point(x: f32, y: f32) -> Value {
+        let mut m = BTreeMap::new();
+        m.insert(svalue_str("x"), Value::F32(x));
+        m.insert(svalue_str("y"), Value::F32(y));
+        Value::Map(m)
+    }
+
+    #[test]
+    fn physics_shape_marker_from_polygons() {
+        let shape = Value::Seq(vec![Value::Seq(vec![point(0.0, 1.0), point(2.0, 3.0)])]);
+        assert_eq!(
+            physics_shape_marker(&shape).as_deref(),
+            Some("__MARK__shape\u{241e}0,1;2,3")
+        );
+    }
+
+    #[test]
+    fn physics_shape_marker_rejects_empty_and_wrong_shapes() {
+        assert!(physics_shape_marker(&Value::Seq(vec![])).is_none());
+        assert!(physics_shape_marker(&Value::Seq(vec![Value::Seq(vec![])])).is_none());
+        assert!(physics_shape_marker(&svalue_str("nope")).is_none());
+        // A list of non-point maps is not a shape.
+        let mut m = BTreeMap::new();
+        m.insert(svalue_str("foo"), Value::F32(1.0));
+        assert!(physics_shape_marker(&Value::Seq(vec![Value::Seq(vec![Value::Map(m)])])).is_none());
+    }
 }

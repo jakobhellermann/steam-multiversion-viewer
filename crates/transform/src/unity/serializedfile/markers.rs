@@ -46,6 +46,24 @@ pub const MARK_SEP: char = '\u{241e}';
 pub const MARK_TYPE_PPTR: &str = "pptr";
 pub const MARK_TYPE_CLASSREF: &str = "classref";
 pub const MARK_TYPE_COLOR: &str = "color";
+pub const MARK_TYPE_SHAPE: &str = "shape";
+
+/// Build a `shape` marker for a 2D outline (a list of polygons, each a
+/// list of points). Payload: polygons `|`-joined, points `;`-joined,
+/// each point `x,y`. The frontend renders it as a small inline SVG.
+pub fn shape_marker(polygons: &[Vec<(f32, f32)>]) -> String {
+    let body = polygons
+        .iter()
+        .map(|poly| {
+            poly.iter()
+                .map(|(x, y)| format!("{x},{y}"))
+                .collect::<Vec<_>>()
+                .join(";")
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    format!("{MARK_PREFIX}{MARK_TYPE_SHAPE}{MARK_SEP}{body}")
+}
 
 /// Build a `pptr` marker. Empty fields are allowed (a null pptr lands
 /// in a map key as the all-empty variant; see the walker).
@@ -183,6 +201,12 @@ mod tests {
             color_marker("#ff8800ff"),
             format!("{MARK_PREFIX}color{MARK_SEP}#ff8800ff"),
         );
+    }
+
+    #[test]
+    fn shape_marker_encodes_polygons() {
+        let m = shape_marker(&[vec![(0.0, 1.0), (2.5, -3.0)], vec![(4.0, 5.0)]]);
+        assert_eq!(m, format!("{MARK_PREFIX}shape{MARK_SEP}0,1;2.5,-3|4,5"));
     }
 
     #[test]

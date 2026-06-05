@@ -126,6 +126,8 @@ function applyMarkers(html: string, renderers: Renderers): string {
         return renderers.classref(payload);
       case "color":
         return renderColor(payload);
+      case "shape":
+        return renderShape(payload);
       default:
         return whole;
     }
@@ -246,6 +248,49 @@ function renderColor(payload: string): string {
     return `<span class="text-slate-400">${escHTML(payload)}</span>`;
   }
   return `<span class="inline-block h-[0.9em] w-[0.9em] mr-1 rounded-sm border border-slate-700/60" style="background-color: ${payload}; vertical-align: -0.08em"></span><span class="text-slate-300">${payload}</span>`;
+}
+
+/// Render a `shape` marker (a sprite's 2D physics outline) as a small
+/// inline SVG. Payload: polygons `|`-joined, points `;`-joined, each
+/// `x,y`. We reject anything outside that numeric grammar so a
+/// malformed marker can't inject markup into the SVG.
+function renderShape(payload: string): string {
+  if (!/^[-0-9.,;|eE]+$/.test(payload)) {
+    return `<span class="text-slate-400">${escHTML(payload)}</span>`;
+  }
+  const polygons = payload
+    .split("|")
+    .map((poly) =>
+      poly
+        .split(";")
+        .map((pt) => pt.split(",").map(Number))
+        .filter((p) => p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1])),
+    )
+    .filter((poly) => poly.length > 0);
+  const points = polygons.flat();
+  if (points.length === 0) return `<span class="text-slate-400">(empty shape)</span>`;
+
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const [minX, maxX] = [Math.min(...xs), Math.max(...xs)];
+  const [minY, maxY] = [Math.min(...ys), Math.max(...ys)];
+  const w = maxX - minX || 1;
+  const h = maxY - minY || 1;
+  const pad = 4;
+  const scale = (72 - 2 * pad) / Math.max(w, h);
+  // Flip Y: Unity sprite space is y-up, SVG is y-down.
+  const sx = (x: number) => (pad + (x - minX) * scale).toFixed(1);
+  const sy = (y: number) => (pad + (maxY - y) * scale).toFixed(1);
+  const svgW = (pad * 2 + w * scale).toFixed(0);
+  const svgH = (pad * 2 + h * scale).toFixed(0);
+  const polys = polygons
+    .map(
+      (poly) =>
+        `<polygon points="${poly.map(([x, y]) => `${sx(x)},${sy(y)}`).join(" ")}" fill="rgba(56,189,248,0.15)" stroke="#38bdf8" stroke-width="1" />`,
+    )
+    .join("");
+  const summary = `${polygons.length} ${polygons.length === 1 ? "polygon" : "polygons"}, ${points.length} pts`;
+  return `<svg width="${svgW}" height="${svgH}" class="inline-block align-middle rounded-sm border border-slate-700/60 bg-slate-900/40"><title>${summary}</title>${polys}</svg>`;
 }
 
 export function escHTML(s: string): string {
