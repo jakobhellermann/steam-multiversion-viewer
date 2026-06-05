@@ -62,7 +62,12 @@ impl UnityScratch {
     /// stripping from manifest-relative paths before handing them to
     /// `env.load_serialized`, which works in data-dir-relative paths.
     pub fn data_dir(&self) -> String {
-        self.env.game_files.data_dir().display().to_string()
+        self.env
+            .game_files
+            .data_dir()
+            .to_str() // TODO: keep as Path throughout
+            .expect("data_dir is not valid UTF-8")
+            .to_owned()
     }
 
     /// Lazy-extract the SecurePlayerPrefs AES key from this manifest's
