@@ -13,6 +13,7 @@ use axum::extract::{MatchedPath, Request};
 use axum::middleware::{self, Next};
 use axum::response::{Html, Response};
 use axum::routing::get;
+use clap::Parser;
 use directories::ProjectDirs;
 use std::time::Instant;
 use tracing_subscriber::Layer;
@@ -34,12 +35,20 @@ manifests, and (optionally) expose the depot as a FUSE mount.",
 ))]
 struct ApiDoc;
 
+#[derive(Parser)]
+struct Args {
+    /// Open the frontend in the default browser after starting
+    #[arg(long)]
+    open: bool,
+}
+
 async fn scalar_html() -> Html<&'static str> {
     Html(include_str!("../static/scalar.html"))
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
     let log_path = setup_logging()?;
     tracing::info!(log_file = %log_path.display(), "Starting...");
 
@@ -66,7 +75,18 @@ async fn main() -> Result<()> {
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:6556").await?;
-    tracing::info!("listening on http://{}", listener.local_addr()?);
+    let addr = listener.local_addr()?;
+    tracing::info!("listening on http://{}", addr);
+
+    if args.open {
+        let url = format!("http://{addr}");
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = open::that(&url) {
+                tracing::warn!("failed to open browser: {e}");
+            }
+        });
+    }
+
     axum::serve(listener, app).await?;
 
     Ok(())

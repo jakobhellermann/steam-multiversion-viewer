@@ -48,6 +48,8 @@ time = { version = "0.3.47", features = ["formatting", "macros"] }
 rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = ["tracing-instrument"] }
 rabex-env-steam-depot-vfs = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = ["tracing-instrument"] }
 rust-embed = "8"
+clap = { version = "4", features = ["derive"] }
+open = "5"
 
 [dev-dependencies]
 tracing-timetree = { git = "https://github.com/jakobhellermann/tracing-timetree" }
