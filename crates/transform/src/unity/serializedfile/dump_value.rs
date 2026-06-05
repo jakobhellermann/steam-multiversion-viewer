@@ -113,11 +113,48 @@ pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
     {
         return Ok((sniff_mime(&plain), plain));
     }
+    if class_id == ClassId::Shader
+        && let Some(json) = dump_shader(file, data_dir, local_ref_prefix, &mut value)
+    {
+        return Ok((MIME_JSON, json));
+    }
     simplify_for_dump(file, data_dir, local_ref_prefix, &mut value);
     if class_id == ClassId::MonoScript {
         link_monoscript_classname(data_dir, &mut value);
     }
     Ok((MIME_JSON, serde_json::to_string_pretty(&value)?))
+}
+
+/// Replace a `Shader`'s opaque program blob with decoded per-platform
+/// source (see [`super::shader`]). The raw blob fields are dropped, the
+/// rest of the object goes through [`simplify_for_dump`] as usual, and
+/// the decoded programs are spliced back in under `$programs` (the `$`
+/// marks it as synthetic, not an original typetree field).
+/// `None` when the object has no decodable blob, so the caller falls
+/// back to the plain JSON dump.
+fn dump_shader<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    data_dir: &str,
+    local_ref_prefix: &str,
+    value: &mut Value,
+) -> Option<String> {
+    let version = file.env.unity_version().ok()?.version_tuple();
+    let programs = super::shader::decode_shader(value, version)?;
+    if let Value::Map(map) = value {
+        for key in [
+            "compressedBlob",
+            "offsets",
+            "compressedLengths",
+            "decompressedLengths",
+        ] {
+            map.remove(&svalue_str(key));
+        }
+    }
+    simplify_for_dump(file, data_dir, local_ref_prefix, value);
+    if let Value::Map(map) = value {
+        map.insert(svalue_str("$programs"), programs);
+    }
+    serde_json::to_string_pretty(value).ok()
 }
 
 /// If `value` (a TextAsset) has an `m_Script` that's a base64
@@ -236,16 +273,20 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
     {
         return Ok((sniff_mime(&plain), plain));
     }
-    let value = {
+    let archive_prefix = format!("archive:{archive_entry}/");
+    let mut value = value;
+    if class_id == ClassId::Shader
+        && let Some(json) = dump_shader(&file, data_dir, &archive_prefix, &mut value)
+    {
+        return Ok((MIME_JSON, json));
+    }
+    {
         let _span = tracing::info_span!("simplify_for_dump").entered();
-        let mut v = value;
-        let archive_prefix = format!("archive:{archive_entry}/");
-        simplify_for_dump(&file, data_dir, &archive_prefix, &mut v);
+        simplify_for_dump(&file, data_dir, &archive_prefix, &mut value);
         if class_id == ClassId::MonoScript {
-            link_monoscript_classname(data_dir, &mut v);
+            link_monoscript_classname(data_dir, &mut value);
         }
-        v
-    };
+    }
     let json = {
         let _span = tracing::info_span!("serialize_json").entered();
         serde_json::to_string_pretty(&value)?

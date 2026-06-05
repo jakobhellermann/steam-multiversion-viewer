@@ -7,7 +7,7 @@ edition = "2024"
 default = ["unity"]
 # Optional unity-asset support — serializedfile / bundle handling via
 # rabex. Disable to drop the rabex dep entirely.
-unity = ["dep:rabex-env", "dep:aes", "dep:ecb", "dep:base64"]
+unity = ["dep:rabex-env", "dep:aes", "dep:ecb", "dep:base64", "dep:lz4_flex"]
 
 [dependencies]
 anyhow = "1.0"
@@ -28,6 +28,7 @@ rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex
 aes = { version = "0.8", optional = true }
 ecb = { version = "0.1", features = ["std"], optional = true }
 base64 = { version = "0.22", optional = true }
+lz4_flex = { version = "0.13", optional = true }
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
