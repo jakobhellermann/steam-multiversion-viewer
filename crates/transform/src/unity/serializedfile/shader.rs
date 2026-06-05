@@ -48,6 +48,15 @@ pub(crate) struct ProgramRef {
     pub keywords: Vec<String>,
 }
 
+/// The shader's display name (`m_ParsedForm.m_Name`) — the top-level
+/// `m_Name` is empty on shaders.
+pub(crate) fn parsed_form_name(value: &Value) -> Option<String> {
+    match get(get(Some(value), "m_ParsedForm"), "m_Name") {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    }
+}
+
 /// Enumerate the sub-programs straight from `m_ParsedForm` (no
 /// decompression), grouped platform → pass. Each variant's
 /// `m_BlobIndex` is assigned to the platform its `m_GpuProgramType`

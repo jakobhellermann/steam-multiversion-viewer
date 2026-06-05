@@ -353,7 +353,7 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     // MonoBehaviours stay on `class_label` because `full_name()` is
     // already the user-mental identity, and MB's own `m_Name` is
     // typically empty.
-    let display_label = if loose && !matches!(class_id, ClassId::MonoBehaviour) {
+    let display_label = if loose && !matches!(class_id, ClassId::MonoBehaviour | ClassId::Shader) {
         read_m_name(file, path_id)
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| class_label.clone())
@@ -366,27 +366,22 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     if loose && display_label != class_label {
         node = node.with_badge(class_label.clone());
     }
-    if matches!(class_id, ClassId::Shader) {
-        node.children = shader_children(file, path_id);
+    // Shaders carry their name in `m_ParsedForm.m_Name` (top-level
+    // `m_Name` is empty) and expand into a per-platform program subtree.
+    // One read covers both.
+    if matches!(class_id, ClassId::Shader)
+        && let Ok(value) = file
+            .object_at::<serde_value::Value>(path_id)
+            .and_then(|h| h.read())
+    {
+        if let Some(name) = super::shader::parsed_form_name(&value) {
+            node.label = name;
+            node.badge = Some(class_label.clone());
+        }
+        node.children = shader_nodes(path_id, super::shader::program_groups(&value));
         node.default_collapsed = true;
     }
     Ok(node)
-}
-
-/// Per-platform → per-program child nodes for a `Shader`, from
-/// `m_ParsedForm` (no blob decompression). Each program leaf's source is
-/// served lazily by the content endpoint via its `prog:` id. Best-effort
-/// — an unreadable shader just gets no children.
-fn shader_children<R: EnvResolver, P: TypeTreeProvider>(
-    file: &SerializedFileHandle<'_, R, P>,
-    path_id: PathId,
-) -> Vec<Node> {
-    use serde_value::Value;
-
-    let Ok(value) = file.object_at::<Value>(path_id).and_then(|h| h.read()) else {
-        return Vec::new();
-    };
-    shader_nodes(path_id, super::shader::program_groups(&value))
 }
 
 /// Assemble the platform → (pass →) program node tree from decoded
