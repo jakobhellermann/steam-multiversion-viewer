@@ -725,6 +725,7 @@ dependencies = [
 [[package]]
 name = "dotnetdll"
 version = "0.1.3"
+source = "git+https://github.com/jakobhellermann/dotnetdll?branch=wip#da923fbb43a97ecb2d62599b597a8ffde6e17f5c"
 dependencies = [
  "bitfield",
  "bitvec",
@@ -742,6 +743,7 @@ dependencies = [
 [[package]]
 name = "dotnetdll-macros"
 version = "0.1.0"
+source = "git+https://github.com/jakobhellermann/dotnetdll?branch=wip#da923fbb43a97ecb2d62599b597a8ffde6e17f5c"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -2872,6 +2874,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "steam-depot-mount"
 version = "0.1.0"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#4e4a8c94da79fa16bfac1e774490040427f65781"
 dependencies = [
  "bytes",
  "fuser",
@@ -2887,6 +2890,7 @@ dependencies = [
 [[package]]
 name = "steam-depot-vfs"
 version = "0.1.0"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#4e4a8c94da79fa16bfac1e774490040427f65781"
 dependencies = [
  "bytes",
  "directories 6.0.0",
