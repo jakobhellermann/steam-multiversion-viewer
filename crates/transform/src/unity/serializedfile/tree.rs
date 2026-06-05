@@ -380,6 +380,11 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
         }
         node.children = shader_nodes(path_id, super::shader::program_groups(&value));
         node.default_collapsed = true;
+        // Searching for a shader by name should reveal its whole program
+        // subtree — the platform/pass/program children don't carry the
+        // name, so without this the frontend prunes them and only the
+        // bare shader node survives the filter.
+        node.include_descendants_on_match = true;
     }
     Ok(node)
 }
