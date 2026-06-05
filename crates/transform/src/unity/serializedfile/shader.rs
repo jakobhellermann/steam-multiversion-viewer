@@ -1,6 +1,9 @@
 // TODO(ai-review): review for style and correctness
-//! Decode a `Shader`'s `compressedBlob` into per-platform program source
-//! for the JSON dump (USCSandbox).
+//! Decode a `Shader`'s `compressedBlob` for the structured view:
+//! [`program_groups`] enumerates the per-platform sub-programs from
+//! `m_ParsedForm` (no decompression, for the tree), and
+//! [`decode_one_program`] decompresses and decodes a single program's
+//! source on demand (USCSandbox layout).
 //!
 //! Per platform the blob holds LZ4 segments that concatenate into a
 //! `ShaderSubProgramBlob` (`count` + entry index). Entries are
@@ -9,7 +12,7 @@
 //! sub-program's code is GLSL text, a `0xF00DCAFE` MSL container (Metal),
 //! or bytecode (DXBC / SPIR-V).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde_value::Value;
 
@@ -18,69 +21,162 @@ type Version = (u16, u16, u16);
 /// Metal program code wraps its MSL in a `0xF00DCAFE`-tagged container.
 const METAL_MAGIC: [u8; 4] = [0xfe, 0xca, 0x0d, 0xf0];
 
-/// `None` when the blob fields are absent (pre-5.5 shader, …); the
-/// caller then falls back to the plain JSON dump.
-pub(crate) fn decode_shader(value: &Value, version: Version) -> Option<Value> {
-    let parsed = get(Some(value), "m_ParsedForm")?;
-    let blob = as_bytes(get(Some(value), "compressedBlob")?)?;
+/// `(m_ParsedForm field, label)` for the six pass program stages.
+const STAGES: [(&str, &str); 6] = [
+    ("progVertex", "vertex"),
+    ("progFragment", "fragment"),
+    ("progGeometry", "geometry"),
+    ("progHull", "hull"),
+    ("progDomain", "domain"),
+    ("progRayTracing", "raytracing"),
+];
+
+pub(crate) struct PlatformPrograms {
+    pub platform: u32,
+    pub passes: Vec<PassPrograms>,
+}
+
+pub(crate) struct PassPrograms {
+    pub label: String,
+    pub programs: Vec<ProgramRef>,
+}
+
+pub(crate) struct ProgramRef {
+    pub blob_index: u32,
+    pub type_name: &'static str,
+    pub stage: &'static str,
+    pub keywords: Vec<String>,
+}
+
+/// Enumerate the sub-programs straight from `m_ParsedForm` (no
+/// decompression), grouped platform → pass. Each variant's
+/// `m_BlobIndex` is assigned to the platform its `m_GpuProgramType`
+/// belongs to and labelled with its stage + keyword set; the pass label
+/// disambiguates otherwise-identical variants across passes.
+pub(crate) fn program_groups(value: &Value) -> Vec<PlatformPrograms> {
+    let parsed = get(Some(value), "m_ParsedForm");
+    let keyword_names: Vec<&str> = seq(get(parsed, "m_KeywordNames"))
+        .iter()
+        .map(|v| match v {
+            Value::String(s) => s.as_str(),
+            _ => "",
+        })
+        .collect();
+
+    let subshaders = seq(get(parsed, "m_SubShaders"));
+    let multi_subshader = subshaders.len() > 1;
+
+    let mut platforms: BTreeMap<u32, Vec<PassPrograms>> = BTreeMap::new();
+    for (si, subshader) in subshaders.iter().enumerate() {
+        for (pi, pass) in seq(get(Some(subshader), "m_Passes")).iter().enumerate() {
+            let label = pass_label(pass, si, pi, multi_subshader);
+            let mut per_platform: BTreeMap<u32, Vec<ProgramRef>> = BTreeMap::new();
+            for (field, stage) in STAGES {
+                let prog = get(Some(pass), field);
+                for tier in seq(get(prog, "m_PlayerSubPrograms")) {
+                    for variant in seq(Some(tier)) {
+                        let gpu = as_i64(get(Some(variant), "m_GpuProgramType")).unwrap_or(-1);
+                        let (Some(platform), Some(blob_index)) =
+                            (gpu_platform(gpu), as_u32(get(Some(variant), "m_BlobIndex")))
+                        else {
+                            continue;
+                        };
+                        let keywords = seq(get(Some(variant), "m_KeywordIndices"))
+                            .iter()
+                            .filter_map(|k| as_u32(Some(k)))
+                            .filter_map(|i| keyword_names.get(i as usize).copied())
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
+                            .collect();
+                        per_platform.entry(platform).or_default().push(ProgramRef {
+                            blob_index,
+                            type_name: gpu_type_name(gpu as i32),
+                            stage,
+                            keywords,
+                        });
+                    }
+                }
+            }
+            for (platform, mut programs) in per_platform {
+                programs.sort_by_key(|p| p.blob_index);
+                programs.dedup_by_key(|p| p.blob_index);
+                platforms.entry(platform).or_default().push(PassPrograms {
+                    label: label.clone(),
+                    programs,
+                });
+            }
+        }
+    }
+
+    platforms
+        .into_iter()
+        .map(|(platform, passes)| PlatformPrograms { platform, passes })
+        .collect()
+}
+
+fn pass_label(pass: &Value, subshader: usize, pass_index: usize, multi_subshader: bool) -> String {
+    let base = if multi_subshader {
+        format!("SubShader {subshader} Pass {pass_index}")
+    } else {
+        format!("Pass {pass_index}")
+    };
+    let name = ["m_Name", "m_UseName"]
+        .into_iter()
+        .find_map(|k| match get(Some(pass), k) {
+            Some(Value::String(s)) if !s.is_empty() => Some(s.as_str()),
+            _ => None,
+        });
+    match name {
+        Some(name) => format!("{base} ({name})"),
+        None => base,
+    }
+}
+
+/// Decompress and decode a single sub-program's source — the lazy
+/// per-program node content. `(mime, source)`; `None` on missing fields.
+pub(crate) fn decode_one_program(
+    value: &Value,
+    platform: u32,
+    blob_index: u32,
+    version: Version,
+) -> Option<(&'static str, String)> {
     let platforms = as_u32_seq(get(Some(value), "platforms")?)?;
+    let p = platforms.iter().position(|&x| x == platform)?;
+    let blob = as_bytes(get(Some(value), "compressedBlob")?)?;
     let offsets = nested(get(Some(value), "offsets")?)?;
     let comp_lengths = nested(get(Some(value), "compressedLengths")?)?;
     let decomp_lengths = nested(get(Some(value), "decompressedLengths")?)?;
 
-    let mut out = Vec::with_capacity(platforms.len());
-    for (p, &platform) in platforms.iter().enumerate() {
-        let decompressed = decompress_platform(
-            &blob,
-            offsets.get(p)?,
-            comp_lengths.get(p)?,
-            decomp_lengths.get(p)?,
-        )?;
-        let entries = blob_entries(&decompressed, version)?;
-
-        let indices = subprogram_indices(parsed, platform);
-        let mut programs = Vec::with_capacity(indices.len());
-        for index in indices {
-            let bytes = entries.get(index as usize)?;
-            let sub = parse_subprogram(bytes, version)?;
-            programs.push(program_value(index, sub.program_type, sub.program_data));
-        }
-
-        let mut entry = BTreeMap::new();
-        entry.insert(svalue_str("platform"), Value::U32(platform));
-        entry.insert(
-            svalue_str("platformName"),
-            svalue_str(platform_name(platform)),
-        );
-        entry.insert(svalue_str("programs"), Value::Seq(programs));
-        out.push(Value::Map(entry));
-    }
-    Some(Value::Seq(out))
+    let decompressed = decompress_platform(
+        &blob,
+        offsets.get(p)?,
+        comp_lengths.get(p)?,
+        decomp_lengths.get(p)?,
+    )?;
+    let entries = blob_entries(&decompressed, version)?;
+    let sub = parse_subprogram(entries.get(blob_index as usize)?, version)?;
+    Some(render_source(sub.program_type, sub.program_data))
 }
 
-fn program_value(index: u32, program_type: i32, data: &[u8]) -> Value {
-    let mut map = BTreeMap::new();
-    map.insert(svalue_str("blobIndex"), Value::U32(index));
-    map.insert(svalue_str("type"), svalue_str(gpu_type_name(program_type)));
-
-    let source = match program_type {
-        1..=8 => Some(String::from_utf8_lossy(data).into_owned()),
-        23 | 24 => unwrap_metal(data).map(|msl| String::from_utf8_lossy(msl).into_owned()),
-        _ => None,
-    };
-    match source {
-        Some(source) => {
-            map.insert(svalue_str("source"), svalue_str(source));
-        }
-        None => {
-            map.insert(
-                svalue_str("note"),
-                svalue_str(format!("TODO: {} bytecode", bytecode_format(program_type))),
-            );
-            map.insert(svalue_str("bytes"), Value::U64(data.len() as u64));
-        }
+fn render_source(program_type: i32, data: &[u8]) -> (&'static str, String) {
+    match program_type {
+        1..=8 => ("text/x-glsl", String::from_utf8_lossy(data).into_owned()),
+        23 | 24 => match unwrap_metal(data) {
+            Some(msl) => ("text/x-metal", String::from_utf8_lossy(msl).into_owned()),
+            None => (
+                "text/plain",
+                format!("// Metal container, {} bytes", data.len()),
+            ),
+        },
+        _ => (
+            "text/plain",
+            format!(
+                "// TODO: {} bytecode, {} bytes (disassembly not implemented)",
+                bytecode_format(program_type),
+                data.len()
+            ),
+        ),
     }
-    Value::Map(map)
 }
 
 fn decompress_platform(blob: &[u8], offs: &[u32], clens: &[u32], dlens: &[u32]) -> Option<Vec<u8>> {
@@ -114,36 +210,6 @@ fn blob_entries(blob: &[u8], version: Version) -> Option<Vec<&[u8]>> {
         .into_iter()
         .map(|(off, len)| blob.get(off..off + len))
         .collect()
-}
-
-/// Blob indices that are sub-programs for `platform`, filtered via each
-/// variant's `m_GpuProgramType`.
-fn subprogram_indices(parsed: &Value, platform: u32) -> BTreeSet<u32> {
-    const STAGES: [&str; 6] = [
-        "progVertex",
-        "progFragment",
-        "progGeometry",
-        "progHull",
-        "progDomain",
-        "progRayTracing",
-    ];
-    let mut indices = BTreeSet::new();
-    for subshader in seq(get(Some(parsed), "m_SubShaders")) {
-        for pass in seq(get(Some(subshader), "m_Passes")) {
-            for stage in STAGES {
-                let prog = get(Some(pass), stage);
-                for tier in seq(get(prog, "m_PlayerSubPrograms")) {
-                    for variant in seq(Some(tier)) {
-                        let gpu = as_i64(get(Some(variant), "m_GpuProgramType")).unwrap_or(-1);
-                        if gpu_platform(gpu) == Some(platform) {
-                            indices.extend(as_u32(get(Some(variant), "m_BlobIndex")));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    indices
 }
 
 struct SubProgram<'a> {
@@ -261,7 +327,7 @@ fn bytecode_format(program_type: i32) -> &'static str {
     }
 }
 
-fn platform_name(platform: u32) -> &'static str {
+pub(crate) fn platform_name(platform: u32) -> &'static str {
     match platform {
         4 => "D3D11",
         14 => "Metal",
@@ -269,10 +335,6 @@ fn platform_name(platform: u32) -> &'static str {
         18 => "Vulkan",
         _ => "Unknown",
     }
-}
-
-fn svalue_str(s: impl Into<String>) -> Value {
-    Value::String(s.into())
 }
 
 fn get<'a>(v: Option<&'a Value>, key: &str) -> Option<&'a Value> {
@@ -375,5 +437,163 @@ impl<'a> Reader<'a> {
         let v = self.bytes(n)?;
         self.align();
         Some(v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Unity 2022.3: tempReg present (>= 5.5), local keywords absent
+    // (outside 2019.1–2021.2) — matches the games we target.
+    const V: Version = (2022, 3, 0);
+
+    fn i32le(buf: &mut Vec<u8>, v: i32) {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+
+    /// A `ShaderSubProgram` for version `V`: header, zero keywords, then
+    /// the length-prefixed (4-aligned) program code.
+    fn make_subprogram(program_type: i32, code: &[u8]) -> Vec<u8> {
+        let mut b = Vec::new();
+        i32le(&mut b, 0x0C0A_75BA); // blob version
+        i32le(&mut b, program_type);
+        i32le(&mut b, 0); // stats: ALU
+        i32le(&mut b, 0); // stats: TEX
+        i32le(&mut b, 0); // stats: flow
+        i32le(&mut b, 0); // stats: temp registers (>= 5.5)
+        i32le(&mut b, 0); // global keyword count
+        i32le(&mut b, code.len() as i32);
+        b.extend_from_slice(code);
+        while b.len() % 4 != 0 {
+            b.push(0);
+        }
+        b
+    }
+
+    /// A `ShaderSubProgramBlob` holding a single entry.
+    fn make_blob(sub: &[u8]) -> Vec<u8> {
+        let mut b = Vec::new();
+        i32le(&mut b, 1); // count
+        i32le(&mut b, 16); // offset = 4 (count) + 12 (one entry)
+        i32le(&mut b, sub.len() as i32); // length
+        i32le(&mut b, 0); // segment
+        b.extend_from_slice(sub);
+        b
+    }
+
+    fn smap(pairs: &[(&str, Value)]) -> Value {
+        Value::Map(
+            pairs
+                .iter()
+                .map(|(k, v)| (Value::String(k.to_string()), v.clone()))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn gpu_platform_and_type_names() {
+        assert_eq!(gpu_platform(6), Some(15)); // GLCore32 → OpenGLCore
+        assert_eq!(gpu_platform(15), Some(4)); // DX11VertexSM40 → D3D11
+        assert_eq!(gpu_platform(24), Some(14)); // MetalFS → Metal
+        assert_eq!(gpu_platform(25), Some(18)); // SPIRV → Vulkan
+        assert_eq!(gpu_platform(31), None); // RayTracing → unsupported
+        assert_eq!(gpu_type_name(6), "GLCore32");
+        assert_eq!(gpu_type_name(25), "SPIRV");
+    }
+
+    #[test]
+    fn unwrap_metal_extracts_msl() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&METAL_MAGIC);
+        i32le(&mut data, 8); // offset past the 8-byte header
+        data.extend_from_slice(b"xlatMtlMain\0");
+        data.extend_from_slice(b"#include <metal_stdlib>");
+        assert_eq!(unwrap_metal(&data), Some(&b"#include <metal_stdlib>"[..]));
+        assert_eq!(unwrap_metal(b"not metal"), None);
+    }
+
+    #[test]
+    fn parse_subprogram_reaches_program_code() {
+        let sub = make_subprogram(6, b"#version 150\nvoid main(){}");
+        let parsed = parse_subprogram(&sub, V).unwrap();
+        assert_eq!(parsed.program_type, 6);
+        assert_eq!(parsed.program_data, b"#version 150\nvoid main(){}");
+    }
+
+    #[test]
+    fn blob_entries_splits_by_index() {
+        let sub = make_subprogram(6, b"abc");
+        let blob = make_blob(&sub);
+        let entries = blob_entries(&blob, V).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0], sub.as_slice());
+    }
+
+    #[test]
+    fn decode_one_program_roundtrips_glsl() {
+        let sub = make_subprogram(6, b"#version 150\nvoid main(){}");
+        let decompressed = make_blob(&sub);
+        let compressed = lz4_flex::block::compress(&decompressed);
+        let value = smap(&[
+            ("platforms", Value::Seq(vec![Value::U32(15)])),
+            ("compressedBlob", Value::Bytes(compressed.clone())),
+            ("offsets", Value::Seq(vec![Value::Seq(vec![Value::U32(0)])])),
+            (
+                "compressedLengths",
+                Value::Seq(vec![Value::Seq(vec![Value::U32(compressed.len() as u32)])]),
+            ),
+            (
+                "decompressedLengths",
+                Value::Seq(vec![Value::Seq(vec![
+                    Value::U32(decompressed.len() as u32),
+                ])]),
+            ),
+        ]);
+        let (mime, source) = decode_one_program(&value, 15, 0, V).unwrap();
+        assert_eq!(mime, "text/x-glsl");
+        assert!(source.contains("#version 150"));
+    }
+
+    #[test]
+    fn program_groups_labels_stage_and_keywords() {
+        let variant = smap(&[
+            ("m_GpuProgramType", Value::I8(6)), // GLCore32 → platform 15
+            ("m_BlobIndex", Value::U32(0)),
+            ("m_KeywordIndices", Value::Seq(vec![Value::U16(0)])),
+        ]);
+        let pass = smap(&[
+            ("m_Name", Value::String(String::new())),
+            (
+                "progVertex",
+                smap(&[(
+                    "m_PlayerSubPrograms",
+                    Value::Seq(vec![Value::Seq(vec![variant])]),
+                )]),
+            ),
+        ]);
+        let parsed_form = smap(&[
+            (
+                "m_KeywordNames",
+                Value::Seq(vec![Value::String("USE_MASK".into())]),
+            ),
+            (
+                "m_SubShaders",
+                Value::Seq(vec![smap(&[("m_Passes", Value::Seq(vec![pass]))])]),
+            ),
+        ]);
+        let value = smap(&[("m_ParsedForm", parsed_form)]);
+
+        let groups = program_groups(&value);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].platform, 15);
+        assert_eq!(groups[0].passes.len(), 1);
+        assert_eq!(groups[0].passes[0].label, "Pass 0");
+        let programs = &groups[0].passes[0].programs;
+        assert_eq!(programs.len(), 1);
+        assert_eq!(programs[0].blob_index, 0);
+        assert_eq!(programs[0].stage, "vertex");
+        assert_eq!(programs[0].type_name, "GLCore32");
+        assert_eq!(programs[0].keywords, ["USE_MASK"]);
     }
 }

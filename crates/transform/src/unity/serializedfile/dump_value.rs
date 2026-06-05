@@ -88,6 +88,25 @@ pub fn dump_object_json<R: EnvResolver, P: TypeTreeProvider>(
     dump_object_json_from_handle(&file, data_dir, "", path_id, opts)
 }
 
+/// Lazy node content for one shader sub-program in a plain
+/// SerializedFile: decompress + decode the program at `blob_index` for
+/// `platform`.
+pub fn dump_shader_program<R: EnvResolver, P: TypeTreeProvider>(
+    env: &Environment<R, P>,
+    data_dir: &str,
+    path: &str,
+    path_id: PathId,
+    platform: u32,
+    blob_index: u32,
+) -> Result<(&'static str, String)> {
+    let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
+    let file = env.load_serialized(relative)?;
+    let value = file.object_at::<Value>(path_id)?.read()?;
+    let version = env.unity_version()?.version_tuple();
+    super::shader::decode_one_program(&value, platform, blob_index, version)
+        .ok_or_else(|| anyhow::anyhow!("could not decode shader program {blob_index}"))
+}
+
 /// Pretty-print one object from an already-opened SerializedFile. Used
 /// both by the prod manifest-store path above and by tests that
 /// assemble files in memory.
@@ -125,35 +144,30 @@ pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
     Ok((MIME_JSON, serde_json::to_string_pretty(&value)?))
 }
 
-/// Replace a `Shader`'s opaque program blob with decoded per-platform
-/// source (see [`super::shader`]). The raw blob fields are dropped, the
-/// rest of the object goes through [`simplify_for_dump`] as usual, and
-/// the decoded programs are spliced back in under `$programs` (the `$`
-/// marks it as synthetic, not an original typetree field).
-/// `None` when the object has no decodable blob, so the caller falls
-/// back to the plain JSON dump.
+/// Shader node content: drop the opaque program blob fields (the
+/// programs are navigable as tree children, their source served lazily
+/// per node via [`super::shader::decode_one_program`]) and dump the rest
+/// (`m_ParsedForm`, properties, …) as usual. `None` for a shader without
+/// the blob fields, so the caller falls back to the plain JSON dump.
 fn dump_shader<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     data_dir: &str,
     local_ref_prefix: &str,
     value: &mut Value,
 ) -> Option<String> {
-    let version = file.env.unity_version().ok()?.version_tuple();
-    let programs = super::shader::decode_shader(value, version)?;
-    if let Value::Map(map) = value {
-        for key in [
-            "compressedBlob",
-            "offsets",
-            "compressedLengths",
-            "decompressedLengths",
-        ] {
-            map.remove(&svalue_str(key));
-        }
+    let Value::Map(map) = value else { return None };
+    if !map.contains_key(&svalue_str("compressedBlob")) {
+        return None;
+    }
+    for key in [
+        "compressedBlob",
+        "offsets",
+        "compressedLengths",
+        "decompressedLengths",
+    ] {
+        map.remove(&svalue_str(key));
     }
     simplify_for_dump(file, data_dir, local_ref_prefix, value);
-    if let Value::Map(map) = value {
-        map.insert(svalue_str("$programs"), programs);
-    }
     serde_json::to_string_pretty(value).ok()
 }
 
@@ -230,44 +244,7 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
     path_id: PathId,
     opts: DumpOptions<'_>,
 ) -> Result<(&'static str, String)> {
-    use std::io::Cursor;
-
-    use rabex_env::env::Data;
-    use rabex_env::rabex::files::SerializedFile;
-    use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
-
-    let unity_version = {
-        let _span = tracing::info_span!("unity_version").entered();
-        env.unity_version()?.clone()
-    };
-    let bundle = {
-        let _span = tracing::info_span!("parse_bundle_header").entered();
-        BundleFileReader::from_reader(
-            Cursor::new(bundle_bytes.as_ref()),
-            &ExtractionConfig::default().with_fallback_unity_version(unity_version.clone()),
-        )?
-    };
-    let entry_bytes = bundle
-        .read_at(archive_entry)?
-        .ok_or_else(|| anyhow::anyhow!("entry {archive_entry} not found in bundle"))?;
-    let mut sf = {
-        let _span =
-            tracing::info_span!("parse_serializedfile", bytes = entry_bytes.len()).entered();
-        SerializedFile::from_reader(&mut Cursor::new(entry_bytes.as_slice()))?
-    };
-    // Bundle entry SerializedFiles usually omit the unity version (it
-    // lives at the bundle level), but `path()`/typetree reads resolve
-    // against the file's *own* version — without it they fail and a
-    // component's label degrades to a bare PathID. Backfill from the env.
-    if sf.m_UnityVersion.is_none() {
-        sf.m_UnityVersion = Some(unity_version.clone());
-    }
-    let file = env.insert_cache(archive_entry.into(), sf, Data::InMemory(entry_bytes));
-    let (class_id, value) = {
-        let _span = tracing::info_span!("read_object").entered();
-        let object = file.object_at::<Value>(path_id)?;
-        (object.class_id(), object.read()?)
-    };
+    let (file, class_id, value) = read_bundle_object(env, &bundle_bytes, archive_entry, path_id)?;
     if class_id == ClassId::TextAsset
         && let Some(plain) = try_decrypt_textasset(&value, opts.spp_key)
     {
@@ -292,6 +269,58 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
         serde_json::to_string_pretty(&value)?
     };
     Ok((MIME_JSON, json))
+}
+
+/// Parse a bundle, extract `archive_entry`, and read `path_id` as a
+/// dynamic `Value` — the shared setup for the bundle dump paths.
+fn read_bundle_object<'env, R: EnvResolver, P: TypeTreeProvider>(
+    env: &'env Environment<R, P>,
+    bundle_bytes: &rabex_env::env::Data,
+    archive_entry: &str,
+    path_id: PathId,
+) -> Result<(SerializedFileHandle<'env, R, P>, ClassId, Value)> {
+    use std::io::Cursor;
+
+    use rabex_env::env::Data;
+    use rabex_env::rabex::files::SerializedFile;
+    use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
+
+    let unity_version = env.unity_version()?.clone();
+    let bundle = BundleFileReader::from_reader(
+        Cursor::new(bundle_bytes.as_ref()),
+        &ExtractionConfig::default().with_fallback_unity_version(unity_version.clone()),
+    )?;
+    let entry_bytes = bundle
+        .read_at(archive_entry)?
+        .ok_or_else(|| anyhow::anyhow!("entry {archive_entry} not found in bundle"))?;
+    let mut sf = SerializedFile::from_reader(&mut Cursor::new(entry_bytes.as_slice()))?;
+    // Bundle entry SerializedFiles usually omit the unity version (it
+    // lives at the bundle level), but typetree reads resolve against the
+    // file's own version — backfill from the env.
+    if sf.m_UnityVersion.is_none() {
+        sf.m_UnityVersion = Some(unity_version);
+    }
+    let file = env.insert_cache(archive_entry.into(), sf, Data::InMemory(entry_bytes));
+    let (class_id, value) = {
+        let object = file.object_at::<Value>(path_id)?;
+        (object.class_id(), object.read()?)
+    };
+    Ok((file, class_id, value))
+}
+
+/// Lazy node content for one shader sub-program inside a bundle.
+pub fn dump_bundle_shader_program<R: EnvResolver, P: TypeTreeProvider>(
+    env: &Environment<R, P>,
+    bundle_bytes: rabex_env::env::Data,
+    archive_entry: &str,
+    path_id: PathId,
+    platform: u32,
+    blob_index: u32,
+) -> Result<(&'static str, String)> {
+    let version = env.unity_version()?.version_tuple();
+    let (_file, _class_id, value) = read_bundle_object(env, &bundle_bytes, archive_entry, path_id)?;
+    super::shader::decode_one_program(&value, platform, blob_index, version)
+        .ok_or_else(|| anyhow::anyhow!("could not decode shader program {blob_index}"))
 }
 
 /// Single-pass rewrite of a deserialised object tree:

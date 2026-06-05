@@ -2,7 +2,7 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
 /// Languages we ship grammars for. Add to this *and* to extToLang below.
-const LANGS = ["xml", "json", "lua", "csharp", "diff"] as const;
+const LANGS = ["xml", "json", "lua", "csharp", "diff", "glsl", "cpp"] as const;
 export type Lang = (typeof LANGS)[number];
 
 const THEME = "github-dark";
@@ -49,6 +49,8 @@ const MIME_TO_LANG: Record<string, Lang> = {
   "text/xml": "xml",
   "application/xml": "xml",
   "text/x-lua": "lua",
+  "text/x-glsl": "glsl",
+  "text/x-metal": "cpp",
 };
 
 export function langForMime(mime: string): Lang | null {

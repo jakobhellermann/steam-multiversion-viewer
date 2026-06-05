@@ -138,6 +138,22 @@ pub struct NodeContentQuery {
     pub node_id: String,
 }
 
+fn empty_node() -> (ImmutableCache, Json<NodeContent>) {
+    (
+        ImmutableCache,
+        Json(NodeContent {
+            mime: "text/plain".to_string(),
+            text: String::new(),
+        }),
+    )
+}
+
+/// Parse the `<platform>:<blobIndex>` tail of a shader-program node id.
+fn parse_program(tail: &str) -> Option<(u32, u32)> {
+    let (platform, blob_index) = tail.split_once(':')?;
+    Some((platform.parse().ok()?, blob_index.parse().ok()?))
+}
+
 /// Structured tree node content
 #[utoipa::path(
     get,
@@ -171,19 +187,25 @@ pub async fn manifest_file_structured_node(
     match transform::tools::transformer_for(&q.path) {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
-            // Resolve the node id to a path-id; non-object ids
-            // (section headers, class-stats rows) get an empty body so
-            // the frontend hides the panel.
+            // Node ids: `obj:<pid>` (object dump), or
+            // `obj:<pid>/prog:<platform>:<blobIndex>` (one shader
+            // program's source). Non-object ids (sections, class-stats)
+            // get an empty body so the frontend hides the panel.
+            let (obj_id, prog_tail) = q
+                .node_id
+                .split_once("/prog:")
+                .map_or((q.node_id.as_str(), None), |(o, p)| (o, Some(p)));
             let Some(path_id) =
-                transform::unity::serializedfile::tree::parse_object_node_id(&q.node_id)
+                transform::unity::serializedfile::tree::parse_object_node_id(obj_id)
             else {
-                return Ok((
-                    ImmutableCache,
-                    Json(NodeContent {
-                        mime: "text/plain".to_string(),
-                        text: String::new(),
-                    }),
-                ));
+                return Ok(empty_node());
+            };
+            let program = match prog_tail {
+                None => None,
+                Some(tail) => match parse_program(tail) {
+                    Some(parsed) => Some(parsed),
+                    None => return Ok(empty_node()),
+                },
             };
             let path = q.path.clone();
             let scratch = state
@@ -202,12 +224,18 @@ pub async fn manifest_file_structured_node(
                 let unity = scratch
                     .unity_already_initialized()
                     .expect("unity scratch was initialised on the async side");
-                let opts = transform::unity::serializedfile::dump_value::DumpOptions {
-                    spp_key: unity.secure_player_prefs_key(),
-                };
-                transform::unity::serializedfile::dump_value::dump_object_json(
-                    &unity.env, &data_dir, &path, path_id, opts,
-                )
+                use transform::unity::serializedfile::dump_value;
+                match program {
+                    Some((platform, blob_index)) => dump_value::dump_shader_program(
+                        &unity.env, &data_dir, &path, path_id, platform, blob_index,
+                    ),
+                    None => {
+                        let opts = dump_value::DumpOptions {
+                            spp_key: unity.secure_player_prefs_key(),
+                        };
+                        dump_value::dump_object_json(&unity.env, &data_dir, &path, path_id, opts)
+                    }
+                }
             })
             .await
             .map_err(|e| ApiError::internal(format!("structured-node task panicked: {e}")))?
@@ -229,23 +257,24 @@ pub async fn manifest_file_structured_node(
             let Some((archive_entry, inner)) =
                 transform::unity::bundle::parse_archive_id(&q.node_id)
             else {
-                return Ok((
-                    ImmutableCache,
-                    Json(NodeContent {
-                        mime: "text/plain".to_string(),
-                        text: String::new(),
-                    }),
-                ));
+                return Ok(empty_node());
             };
-            let Some(path_id) = transform::unity::serializedfile::tree::parse_object_node_id(inner)
+            // `inner`: `obj:<pid>` (object dump) or
+            // `obj:<pid>/prog:<platform>:<blobIndex>` (one program).
+            let (obj_id, prog_tail) = inner
+                .split_once("/prog:")
+                .map_or((inner, None), |(o, p)| (o, Some(p)));
+            let Some(path_id) =
+                transform::unity::serializedfile::tree::parse_object_node_id(obj_id)
             else {
-                return Ok((
-                    ImmutableCache,
-                    Json(NodeContent {
-                        mime: "text/plain".to_string(),
-                        text: String::new(),
-                    }),
-                ));
+                return Ok(empty_node());
+            };
+            let program = match prog_tail {
+                None => None,
+                Some(tail) => match parse_program(tail) {
+                    Some(parsed) => Some(parsed),
+                    None => return Ok(empty_node()),
+                },
             };
             let bundle_path = q.path.clone();
             let archive_entry = archive_entry.to_string();
@@ -266,17 +295,30 @@ pub async fn manifest_file_structured_node(
                     .strip_prefix(&format!("{data_dir}/"))
                     .unwrap_or(&bundle_path);
                 let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
-                let opts = transform::unity::serializedfile::dump_value::DumpOptions {
-                    spp_key: unity.secure_player_prefs_key(),
-                };
-                transform::unity::serializedfile::dump_value::dump_bundle_object_json(
-                    env,
-                    &data_dir,
-                    bundle_bytes,
-                    &archive_entry,
-                    path_id,
-                    opts,
-                )
+                use transform::unity::serializedfile::dump_value;
+                match program {
+                    Some((platform, blob_index)) => dump_value::dump_bundle_shader_program(
+                        env,
+                        bundle_bytes,
+                        &archive_entry,
+                        path_id,
+                        platform,
+                        blob_index,
+                    ),
+                    None => {
+                        let opts = dump_value::DumpOptions {
+                            spp_key: unity.secure_player_prefs_key(),
+                        };
+                        dump_value::dump_bundle_object_json(
+                            env,
+                            &data_dir,
+                            bundle_bytes,
+                            &archive_entry,
+                            path_id,
+                            opts,
+                        )
+                    }
+                }
             })
             .await
             .map_err(|e| ApiError::internal(format!("structured-node task panicked: {e}")))?

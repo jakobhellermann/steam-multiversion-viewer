@@ -366,7 +366,99 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     if loose && display_label != class_label {
         node = node.with_badge(class_label.clone());
     }
+    if matches!(class_id, ClassId::Shader) {
+        node.children = shader_children(file, path_id);
+        node.default_collapsed = true;
+    }
     Ok(node)
+}
+
+/// Per-platform → per-program child nodes for a `Shader`, from
+/// `m_ParsedForm` (no blob decompression). Each program leaf's source is
+/// served lazily by the content endpoint via its `prog:` id. Best-effort
+/// — an unreadable shader just gets no children.
+fn shader_children<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    path_id: PathId,
+) -> Vec<Node> {
+    use serde_value::Value;
+
+    let Ok(value) = file.object_at::<Value>(path_id).and_then(|h| h.read()) else {
+        return Vec::new();
+    };
+    shader_nodes(path_id, super::shader::program_groups(&value))
+}
+
+/// Assemble the platform → (pass →) program node tree from decoded
+/// program groups. Split out from the I/O so it can be snapshot-tested.
+fn shader_nodes(path_id: PathId, groups: Vec<super::shader::PlatformPrograms>) -> Vec<Node> {
+    groups
+        .into_iter()
+        .map(|group| {
+            let total: usize = group.passes.iter().map(|p| p.programs.len()).sum();
+            // A single pass adds no information — inline its programs;
+            // multiple passes get a grouping level so identical
+            // stage/keyword variants stay distinguishable.
+            let children = if group.passes.len() == 1 {
+                program_leaves(path_id, group.platform, &group.passes[0].programs)
+            } else {
+                group
+                    .passes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, pass)| {
+                        let leaves = program_leaves(path_id, group.platform, &pass.programs);
+                        Node {
+                            id: format!("obj:{path_id}/passgroup:{}:{i}", group.platform),
+                            label: pass.label.clone(),
+                            kind: "shader-pass".to_string(),
+                            badge: Some(pass.programs.len().to_string()),
+                            default_collapsed: true,
+                            children: leaves,
+                            ..Default::default()
+                        }
+                    })
+                    .collect()
+            };
+            Node {
+                id: format!("obj:{path_id}/plat:{}", group.platform),
+                label: super::shader::platform_name(group.platform).to_string(),
+                kind: "shader-platform".to_string(),
+                badge: Some(total.to_string()),
+                default_collapsed: true,
+                children,
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
+/// Leaf nodes for a pass's programs — label is stage + keyword set, the
+/// `prog:` id drives lazy source loading.
+fn program_leaves(
+    path_id: PathId,
+    platform: u32,
+    programs: &[super::shader::ProgramRef],
+) -> Vec<Node> {
+    programs
+        .iter()
+        .map(|p| {
+            let label = if p.keywords.is_empty() {
+                p.stage.to_string()
+            } else {
+                format!("{} · {}", p.stage, p.keywords.join(", "))
+            };
+            let mut leaf = Node::leaf(
+                format!("obj:{path_id}/prog:{platform}:{}", p.blob_index),
+                label,
+                "shader-program",
+            )
+            .with_facet("stage", p.stage)
+            .with_badge(p.type_name);
+            leaf.has_content = true;
+            leaf
+        })
+        .collect()
 }
 
 /// Best-effort read of `m_Name` via the dynamic value path — failure
@@ -384,5 +476,53 @@ fn read_m_name<R: EnvResolver, P: TypeTreeProvider>(
     match map.get(&Value::String("m_Name".to_string()))? {
         Value::String(s) => Some(s.clone()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::unity::serializedfile::shader::{PassPrograms, PlatformPrograms, ProgramRef};
+
+    fn program(blob_index: u32, stage: &'static str, keywords: &[&str]) -> ProgramRef {
+        ProgramRef {
+            blob_index,
+            type_name: "GLCore32",
+            stage,
+            keywords: keywords.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn shader_nodes_group_multi_pass_inline_single() {
+        let groups = vec![
+            // Multiple passes → a grouping level per pass.
+            PlatformPrograms {
+                platform: 15,
+                passes: vec![
+                    PassPrograms {
+                        label: "Pass 0".to_string(),
+                        programs: vec![
+                            program(2, "vertex", &[]),
+                            program(3, "vertex", &["USE_MASK"]),
+                        ],
+                    },
+                    PassPrograms {
+                        label: "Pass 1".to_string(),
+                        programs: vec![program(4, "vertex", &[])],
+                    },
+                ],
+            },
+            // Single pass → programs inlined directly under the platform.
+            PlatformPrograms {
+                platform: 18,
+                passes: vec![PassPrograms {
+                    label: "Pass 0".to_string(),
+                    programs: vec![program(7, "fragment", &[])],
+                }],
+            },
+        ];
+
+        insta::assert_yaml_snapshot!(shader_nodes(42, groups));
     }
 }

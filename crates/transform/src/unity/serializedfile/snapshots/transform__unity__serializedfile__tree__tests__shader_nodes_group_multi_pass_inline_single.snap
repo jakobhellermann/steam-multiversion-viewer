@@ -1,0 +1,60 @@
+---
+source: crates/transform/src/unity/serializedfile/tree.rs
+expression: "shader_nodes(42, groups)"
+---
+- id: "obj:42/plat:15"
+  label: OpenGLCore
+  kind: shader-platform
+  badge: "3"
+  default_collapsed: true
+  children:
+    - id: "obj:42/passgroup:15:0"
+      label: Pass 0
+      kind: shader-pass
+      badge: "2"
+      default_collapsed: true
+      children:
+        - id: "obj:42/prog:15:2"
+          label: vertex
+          kind: shader-program
+          badge: GLCore32
+          facets:
+            stage: vertex
+          has_content: true
+          children: []
+        - id: "obj:42/prog:15:3"
+          label: vertex · USE_MASK
+          kind: shader-program
+          badge: GLCore32
+          facets:
+            stage: vertex
+          has_content: true
+          children: []
+    - id: "obj:42/passgroup:15:1"
+      label: Pass 1
+      kind: shader-pass
+      badge: "1"
+      default_collapsed: true
+      children:
+        - id: "obj:42/prog:15:4"
+          label: vertex
+          kind: shader-program
+          badge: GLCore32
+          facets:
+            stage: vertex
+          has_content: true
+          children: []
+- id: "obj:42/plat:18"
+  label: Vulkan
+  kind: shader-platform
+  badge: "1"
+  default_collapsed: true
+  children:
+    - id: "obj:42/prog:18:7"
+      label: fragment
+      kind: shader-program
+      badge: GLCore32
+      facets:
+        stage: fragment
+      has_content: true
+      children: []
