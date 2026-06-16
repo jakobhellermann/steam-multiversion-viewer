@@ -13,8 +13,7 @@ use std::io::Cursor;
 use rabex_env::Environment;
 use rabex_env::rabex::UnityVersion;
 use rabex_env::rabex::files::bundlefile::{
-    BundleFileHeader, BundleFileReader, BundleSignature, CompressionType, ExtractionConfig,
-    write_bundle,
+    BundleFileBuilder, BundleFileReader, CompressionType, ExtractionConfig,
 };
 use rabex_env::rabex::files::unityfile::FileEntry;
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
@@ -57,8 +56,9 @@ impl BundleBuilder {
     }
 
     pub(super) fn write(self) -> Vec<u8> {
-        let mut uncompressed: Vec<u8> = Vec::new();
-        let mut dir: Vec<FileEntry> = Vec::new();
+        let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+        let mut builder = BundleFileBuilder::unityfs(7, &unity_version);
+
         for entry in self.entries {
             let (path, bytes, flags) = match entry {
                 BundleEntry::Serialized { path, bytes } => {
@@ -66,35 +66,14 @@ impl BundleBuilder {
                 }
                 BundleEntry::Blob { path, bytes } => (path, bytes, 0),
             };
-            let offset = uncompressed.len() as i64;
-            let size = bytes.len() as i64;
-            uncompressed.extend_from_slice(&bytes);
-            dir.push(FileEntry {
-                offset,
-                size,
-                flags,
-                path,
-            });
+
+            builder
+                .add_file_with_flags(&path, &mut bytes.as_slice(), flags)
+                .unwrap();
         }
 
-        let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
-        let header = BundleFileHeader {
-            signature: BundleSignature::UnityFS,
-            version: 7,
-            unity_version: "5.x.x".to_owned(),
-            unity_revision: Some(unity_version),
-            size: 0,
-        };
         let mut out = Cursor::new(Vec::new());
-        write_bundle(
-            &header,
-            &mut out,
-            CompressionType::None,
-            CompressionType::None,
-            &dir,
-            &uncompressed,
-        )
-        .unwrap();
+        builder.write(&mut out, CompressionType::None).unwrap();
         out.into_inner()
     }
 }

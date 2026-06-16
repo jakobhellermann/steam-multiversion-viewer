@@ -2264,9 +2264,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rabex"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e23982996b1c239770657b08680d181ffebfdc0cb7a45f6ecc7a92c73c7e064e"
+checksum = "6faf51b5a5e8f55cdf49fec3b2c8d13e61cb05642c8ad25c5bd8e1fd116f91da"
 dependencies = [
  "bitflags",
  "byteorder",
