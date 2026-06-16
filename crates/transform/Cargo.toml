@@ -17,16 +17,16 @@ dll-diff = { path = "../dll-diff" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 serde-value = "0.7"
-similar = "2.6"
+similar = "3.1"
 tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "process", "sync"] }
 tracing = "0.1"
 utoipa = "5"
 zstd = "0.13.3"
-rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = ["tracing-instrument"] }
-# Unity-specific TextAsset decryption (SecurePlayerPrefs.keyArray
-# extracted from Assembly-CSharp.dll, blob = base64(AES-256-ECB(xml))).
-aes = { version = "0.8", optional = true }
-ecb = { version = "0.1", features = ["std"], optional = true }
+rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = [
+  "tracing-instrument",
+] }
+aes = { version = "0.9", optional = true }
+ecb = { version = "0.2", optional = true }
 base64 = { version = "0.22", optional = true }
 lz4_flex = { version = "0.13", optional = true }
 

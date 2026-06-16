@@ -7,6 +7,7 @@
 
 #![cfg(feature = "unity")]
 
+use aes::cipher::BlockModeEncrypt;
 use transform::unity::secure_player_prefs::{decrypt, extract_key};
 
 const KEY: &[u8] = b"UKu52ePUBwetZ9wNX88o54dnfKRu0T1l";
@@ -24,15 +25,15 @@ fn decrypt_roundtrip_matches_securecplayerprefs_encoding() {
     // Hand-built ciphertext using the canonical 32-byte key and the
     // C# `RijndaelManaged { Mode = ECB, Padding = PKCS7 }` defaults.
     // Plaintext is `<r>hi</r>` — short enough to fit one AES block.
+    use aes::cipher::KeyInit;
     use aes::cipher::block_padding::Pkcs7;
-    use aes::cipher::{BlockEncryptMut, KeyInit};
     use base64::prelude::*;
 
     let plain = "<r>hi</r>";
     let cipher = ecb::Encryptor::<aes::Aes256>::new_from_slice(KEY).unwrap();
     let mut buf = vec![0u8; plain.len() + 16];
     let ct = cipher
-        .encrypt_padded_b2b_mut::<Pkcs7>(plain.as_bytes(), &mut buf)
+        .encrypt_padded_b2b::<Pkcs7>(plain.as_bytes(), &mut buf)
         .unwrap();
     let blob = BASE64_STANDARD.encode(ct);
 

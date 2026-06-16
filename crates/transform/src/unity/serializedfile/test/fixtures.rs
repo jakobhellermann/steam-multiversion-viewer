@@ -667,7 +667,6 @@ fn tt_leaf(ty: &str, name: &str) -> TypeTreeNode {
         m_Type: ty.to_string(),
         m_Name: name.to_string(),
         m_MetaFlag: Some(0),
-        m_Index: Some(0),
         ..Default::default()
     }
 }
@@ -677,19 +676,8 @@ fn tt_node(ty: &str, name: &str, children: Vec<TypeTreeNode>) -> TypeTreeNode {
         m_Type: ty.to_string(),
         m_Name: name.to_string(),
         m_MetaFlag: Some(0),
-        m_Index: Some(0),
         children,
         ..Default::default()
-    }
-}
-
-/// Re-stamp `m_Level` on every node based on depth from the root.
-/// The TT serializer flattens the tree to a sequence and uses
-/// `m_Level` to recover parent/child structure when reading back.
-fn fix_levels(node: &mut TypeTreeNode, depth: u8) {
-    node.m_Level = depth;
-    for child in &mut node.children {
-        fix_levels(child, depth + 1);
     }
 }
 
@@ -760,12 +748,6 @@ pub(crate) fn scene_with_custom_mb(body: CustomMbBody) -> (Vec<u8>, PathId) {
             ],
         )],
     ));
-    // The TT serializer encodes the tree shape via per-node `m_Level`
-    // (root=0, direct child=1, …). Our synthesized appended nodes have
-    // m_Level=0 from `Default::default()`, which would confuse the
-    // reader when it tries to recover parent/child relationships.
-    // Walk the whole TT post-append and stamp the right levels.
-    fix_levels(&mut extended, 0);
     let mut ty = SerializedType::simple(ClassId::MonoBehaviour, Some(extended));
     ty.m_ScriptTypeIndex = script_type_index;
     let mb_type_id = sfb.add_type_uncached(ty);

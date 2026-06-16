@@ -17,6 +17,7 @@
 //! recognise other shapes — games that diverge from this pattern just
 //! fall through and the renderer skips decryption.
 
+use aes::cipher::BlockModeDecrypt;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use dll_diff::dotnetdll::prelude::{ReadOptions, Resolution};
@@ -156,8 +157,8 @@ fn is_utf8_getbytes_call(ins: &Instruction, res: &Resolution<'_>) -> bool {
 /// which mean "this TextAsset wasn't encoded with our key", not an
 /// error worth surfacing.
 pub fn decrypt(key: &[u8], blob: &str) -> Option<String> {
+    use aes::cipher::KeyInit;
     use aes::cipher::block_padding::Pkcs7;
-    use aes::cipher::{BlockDecryptMut, KeyInit};
 
     // The cipher rejects bad key sizes via `new_from_slice`. Anything
     // other than the canonical 32-byte key just yields `None`.
@@ -165,6 +166,6 @@ pub fn decrypt(key: &[u8], blob: &str) -> Option<String> {
 
     let ct = BASE64_STANDARD.decode(blob.trim()).ok()?;
     let mut buf = vec![0u8; ct.len()];
-    let pt = cipher.decrypt_padded_b2b_mut::<Pkcs7>(&ct, &mut buf).ok()?;
+    let pt = cipher.decrypt_padded_b2b::<Pkcs7>(&ct, &mut buf).ok()?;
     std::str::from_utf8(pt).ok().map(|s| s.to_owned())
 }
