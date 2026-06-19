@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Focus } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -108,6 +109,64 @@ function AppDetailBody({
   for (const s of statuses ?? []) {
     statusByKey.set(`${s.depot_id}/${s.manifest_id}`, s);
   }
+  // Branch names that actually occur across depots + extras, in
+  // info.branches order first (public usually leads), then any extra
+  // ones. This is the togglable set in the Depots filter below.
+  const allBranches = useMemo(() => {
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    const add = (name: string) => {
+      if (!seen.has(name)) {
+        seen.add(name);
+        ordered.push(name);
+      }
+    };
+    for (const b of info.branches) add(b.name);
+    for (const d of info.depots) for (const m of d.manifests) add(m.branch);
+    for (const e of extras) add(e.branch ?? "public");
+    return ordered;
+  }, [info, extras]);
+  // Session-only: which branches to hide from the depot manifest rows.
+  // Defaults to showing only "public" — the other branches (betas, old
+  // versions) are opt-in. Persisted in the query cache (keyed by appid)
+  // so it survives navigating into a manifest and back, mirroring the
+  // "extras-expanded" pattern below. Resets on full reload.
+  const queryClient = useQueryClient();
+  const branchFilterKey = useMemo(() => ["branch-filter", info.appid] as const, [info.appid]);
+  const [hiddenBranches, setHiddenBranchesLocal] = useState<Set<string>>(() => {
+    const cached = queryClient.getQueryData<Set<string>>(branchFilterKey);
+    if (cached) return cached;
+    // Hide everything but "public" when it exists; otherwise show all so
+    // we never start with an empty depot list.
+    return allBranches.includes("public")
+      ? new Set(allBranches.filter((b) => b !== "public"))
+      : new Set();
+  });
+  // Filtering rows changes the depot list height; pin the Depots header
+  // (where the filter button lives) so toggling doesn't yank the viewport
+  // and the dropdown stays put under the cursor.
+  const depotsHeaderRef = useRef<HTMLDivElement>(null);
+  const setHiddenBranches = (next: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    const restore = pinScroll(depotsHeaderRef.current);
+    setHiddenBranchesLocal((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      queryClient.setQueryData(branchFilterKey, value);
+      return value;
+    });
+    requestAnimationFrame(restore);
+  };
+  const toggleBranch = (name: string) =>
+    setHiddenBranches((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  const showAllBranches = () => setHiddenBranches(new Set());
+  const hideAllBranches = () => setHiddenBranches(new Set(allBranches));
+  // "Select only this": hide every branch except `name`.
+  const onlyBranch = (name: string) =>
+    setHiddenBranches(new Set(allBranches.filter((b) => b !== name)));
   const branchDescriptions = new Map<string, string>();
   for (const b of info.branches) {
     if (b.description) branchDescriptions.set(b.name, b.description);
@@ -195,7 +254,19 @@ function AppDetailBody({
       </section>
 
       <section className="mt-8">
-        <h2 className="mb-3 text-xl font-semibold">Depots</h2>
+        <div ref={depotsHeaderRef} className="mb-3 flex items-center justify-between gap-4">
+          <h2 className="text-xl font-semibold">Depots</h2>
+          {allBranches.length > 1 && (
+            <BranchFilter
+              branches={allBranches}
+              hidden={hiddenBranches}
+              onToggle={toggleBranch}
+              onShowAll={showAllBranches}
+              onHideAll={hideAllBranches}
+              onOnly={onlyBranch}
+            />
+          )}
+        </div>
         {statusError && (
           <p className="mb-2 text-xs text-red-400">
             Failed to load manifest status: {statusError.message}
@@ -214,6 +285,7 @@ function AppDetailBody({
                 branchDescriptions={branchDescriptions}
                 extras={extrasByDepot.get(depot.depot_id) ?? []}
                 allExtras={extras}
+                hiddenBranches={hiddenBranches}
               />
             ))}
           </div>
@@ -230,6 +302,7 @@ function DepotCard({
   branchDescriptions,
   extras,
   allExtras,
+  hiddenBranches,
 }: {
   depot: DepotEntry;
   appid: number;
@@ -237,9 +310,12 @@ function DepotCard({
   branchDescriptions: Map<string, string>;
   extras: ExtraManifestEntry[];
   allExtras: ExtraManifestEntry[];
+  hiddenBranches: Set<string>;
 }) {
   const [importOpen, setImportOpen] = useState(false);
   const tags = [depot.oslist, depot.osarch, depot.language].filter(Boolean) as string[];
+  const visibleManifests = depot.manifests.filter((m) => !hiddenBranches.has(m.branch));
+  const visibleExtras = extras.filter((e) => !hiddenBranches.has(e.branch ?? "public"));
   const sharedFromLink =
     depot.from_app_id != null ? (
       <Link
@@ -251,7 +327,10 @@ function DepotCard({
         app {depot.from_app_id}
       </Link>
     ) : null;
-  const hasBody = depot.manifests.length > 0 || !sharedFromLink || extras.length > 0;
+  // A depot with manifests upstream but all of them filtered out renders
+  // an empty body — don't draw the header's bottom border then.
+  const showNoManifestsMsg = depot.manifests.length === 0 && !sharedFromLink;
+  const hasBody = visibleManifests.length > 0 || showNoManifestsMsg || visibleExtras.length > 0;
   // Extras only make sense for depots whose content lives here; shared
   // depots belong to another app entirely.
   const canTrackExtras = depot.from_app_id == null;
@@ -286,7 +365,7 @@ function DepotCard({
             No manifests in this depot.
           </div>
         )
-      ) : (
+      ) : visibleManifests.length === 0 ? null : (
         <>
           <div className="col-span-full grid grid-cols-subgrid border-b border-slate-800 text-slate-400">
             <div className="px-4 py-1.5 font-semibold">Branch</div>
@@ -300,7 +379,7 @@ function DepotCard({
             // public-beta when no beta is active). Mute the second+ occurrence
             // so the duplicate doesn't draw the eye.
             const seenManifests = new Set<string>();
-            return depot.manifests.map((m) => {
+            return visibleManifests.map((m) => {
               const status = statuses.get(`${depot.depot_id}/${m.manifest_id}`);
               const duplicate = seenManifests.has(m.manifest_id);
               seenManifests.add(m.manifest_id);
@@ -319,11 +398,11 @@ function DepotCard({
           })()}
         </>
       )}
-      {extras.length > 0 && (
+      {visibleExtras.length > 0 && (
         <ExtrasSection
           appid={appid}
           depotId={depot.depot_id}
-          extras={extras}
+          extras={visibleExtras}
           allExtras={allExtras}
           statuses={statuses}
         />
@@ -863,6 +942,114 @@ function ImportExtrasModal({
           </button>
         </footer>
       </div>
+    </div>
+  );
+}
+
+function BranchFilter({
+  branches,
+  hidden,
+  onToggle,
+  onShowAll,
+  onHideAll,
+  onOnly,
+}: {
+  branches: string[];
+  hidden: Set<string>;
+  onToggle: (name: string) => void;
+  onShowAll: () => void;
+  onHideAll: () => void;
+  onOnly: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const allShown = hidden.size === 0;
+  // Master checkbox reflects partial selection; the DOM `indeterminate`
+  // flag can only be set imperatively.
+  const masterRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (masterRef.current)
+      masterRef.current.indeterminate = !allShown && hidden.size < branches.length;
+  }, [allShown, hidden.size, branches.length]);
+  // Close on outside click / Escape — same pattern as CompareMenu.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const visibleCount = branches.length - hidden.size;
+  const label =
+    hidden.size === 0
+      ? "all"
+      : visibleCount === 0
+        ? "none"
+        : `${visibleCount} of ${branches.length}`;
+  return (
+    <div ref={rootRef} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-slate-600"
+      >
+        <span className="text-slate-500">Branches:</span>
+        <span>{label}</span>
+        <span className="text-slate-500">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="absolute top-full right-0 z-10 mt-1 flex max-h-96 w-64 flex-col overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-lg">
+          <div className="flex items-center justify-between border-b border-slate-800 px-3 py-1.5 text-xs text-slate-400">
+            <label className="flex cursor-pointer items-center gap-2 select-none">
+              <input
+                ref={masterRef}
+                type="checkbox"
+                checked={allShown}
+                onChange={() => (allShown ? onHideAll() : onShowAll())}
+                className="accent-sky-500"
+              />
+              <span>All</span>
+            </label>
+            <span className="tabular-nums">{branches.length} branches</span>
+          </div>
+          <ul className="overflow-y-auto py-1 text-sm">
+            {branches.map((name) => {
+              const checked = !hidden.has(name);
+              return (
+                <li key={name} className="flex items-center hover:bg-slate-800/60">
+                  <label className="flex flex-1 cursor-pointer items-center gap-2 px-3 py-1 select-none">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => onToggle(name)}
+                      className="accent-sky-500"
+                    />
+                    <span className={checked ? "" : "text-slate-500"}>{name}</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => onOnly(name)}
+                    title={`Show only ${name}`}
+                    aria-label={`Show only ${name}`}
+                    className="px-3 py-1 text-slate-500 hover:text-sky-400"
+                  >
+                    <Focus className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
