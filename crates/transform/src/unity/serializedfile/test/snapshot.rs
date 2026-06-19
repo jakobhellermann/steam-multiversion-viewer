@@ -8,7 +8,7 @@
 
 use super::fixtures::{
     Scene, SceneNode, external_gameobject_with_transform, external_monoscript_file,
-    external_text_asset_file, loose_monobehaviour_referencing_external,
+    external_shader_file, external_text_asset_file, loose_monobehaviour_referencing_external,
     loose_monobehaviour_with_script_typetree, preload_referencing_external,
     preload_referencing_local, preload_with_dependency, with_diff_handles, with_handle,
 };
@@ -245,6 +245,63 @@ fn diff_external_pptr_renumber_to_same_name_is_unchanged() {
         "expected every section pruned, got {} section(s)",
         children.len()
     );
+}
+
+#[test]
+fn diff_external_shader_renumber_to_same_parsed_form_name_is_unchanged() {
+    // The external target is a Shader, whose top-level `m_Name` is empty
+    // — its name lives in `m_ParsedForm.m_Name`. Across the two manifests
+    // the shader renumbers (5 → 9) but keeps the same parsed-form name, so
+    // the referencing PreloadData must resolve to the same identity and
+    // prune away. Regression for shader pptrs being reported as changed.
+    let ext = "extern.assets";
+    let (status, children) = with_diff_handles(
+        &[
+            (PATH, preload_referencing_external(ext, 5)),
+            (ext, external_shader_file(5, "Hidden/FastBloom")),
+        ],
+        &[
+            (PATH, preload_referencing_external(ext, 9)),
+            (ext, external_shader_file(9, "Hidden/FastBloom")),
+        ],
+        |base, target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            (status, children)
+        },
+    );
+
+    assert_eq!(status, NodeStatus::Unchanged);
+    assert!(
+        children.is_empty(),
+        "expected every section pruned, got {} section(s)",
+        children.len()
+    );
+}
+
+#[test]
+fn diff_external_shader_with_different_parsed_form_name_is_changed() {
+    // Same shape, but the shader's parsed-form name differs across the
+    // two manifests — a genuine reference change that must survive.
+    let ext = "extern.assets";
+    let (status, labels) = with_diff_handles(
+        &[
+            (PATH, preload_referencing_external(ext, 5)),
+            (ext, external_shader_file(5, "Hidden/FastBloom")),
+        ],
+        &[
+            (PATH, preload_referencing_external(ext, 9)),
+            (ext, external_shader_file(9, "Hidden/SlowBloom")),
+        ],
+        |base, target| {
+            let (children, status) = diff_sections(base, target).unwrap();
+            let mut labels = Vec::new();
+            collect_changed_labels(&children, &mut labels);
+            (status, labels)
+        },
+    );
+
+    assert_eq!(status, NodeStatus::Changed);
+    assert_eq!(labels, vec!["PreloadData".to_string()]);
 }
 
 #[test]

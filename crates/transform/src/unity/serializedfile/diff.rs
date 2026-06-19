@@ -1164,8 +1164,9 @@ fn pptr_refs_equal<R: EnvResolver, P: TypeTreeProvider>(
 /// resolve in their own file, so an empty key just means "same file".
 /// The name is the target's own `m_Name`, or — for components that have
 /// none (Transform, AudioSource, … which only the owning GameObject
-/// names) — the `m_Name` of its `m_GameObject`. Uses raw names (not
-/// `display_name`, which formats for display and falls back to
+/// names) — the `m_Name` of its `m_GameObject`, or — for shaders, whose
+/// top-level `m_Name` is empty — `m_ParsedForm.m_Name`. Uses raw names
+/// (not `display_name`, which formats for display and falls back to
 /// `PathID=N`).
 ///
 /// TODO(diff): targets we can't name (no `m_Name`, no named GameObject)
@@ -1188,8 +1189,15 @@ fn pptr_target_identity<R: EnvResolver, P: TypeTreeProvider>(
     // component's `m_GameObject` is local to *its* file (`m_FileID == 0`
     // means "same file as the component", which for an external target
     // is the external file, not `file`), so dereference against the
-    // resolved object's own handle.
-    let name = value_m_name(&data).or_else(|| gameobject_name(&obj.file, &data))?;
+    // resolved object's own handle. Shaders keep top-level `m_Name`
+    // empty and carry their name in `m_ParsedForm.m_Name` instead.
+    let name = value_m_name(&data)
+        .or_else(|| {
+            (class == ClassId::Shader)
+                .then(|| super::shader::parsed_form_name(&data))
+                .flatten()
+        })
+        .or_else(|| gameobject_name(&obj.file, &data))?;
     Some((file_key, name, class))
 }
 

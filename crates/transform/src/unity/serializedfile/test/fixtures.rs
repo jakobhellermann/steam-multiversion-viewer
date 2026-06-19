@@ -384,6 +384,82 @@ pub(crate) fn external_text_asset_file(at: PathId, name: &str) -> Vec<u8> {
     sfb.write_vec().unwrap()
 }
 
+/// A standalone external file holding a single `Shader` at path id `at`.
+/// Real shaders keep top-level `m_Name` empty and carry their name in
+/// `m_ParsedForm.m_Name`, so the typetree is hand-built to that shape
+/// (the embedded TPK's full Shader tree would need the whole parsed-form
+/// payload). Pairs with [`preload_referencing_external`] to test that a
+/// shader renumber to the same parsed-form name collapses to unchanged.
+pub(crate) fn external_shader_file(at: PathId, parsed_form_name: &str) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+
+    let string_node = |name: &str| TypeTreeNode {
+        m_Type: "string".to_owned(),
+        m_Name: name.to_owned(),
+        m_Version: 1,
+        m_TypeFlags: 0,
+        m_ByteSize: -1,
+        m_MetaFlag: Some(0),
+        m_RefTypeHash: None,
+        m_VariableCount: None,
+        children: Vec::new(),
+    };
+    let parsed_form = TypeTreeNode {
+        m_Type: "SerializedShader".to_owned(),
+        m_Name: "m_ParsedForm".to_owned(),
+        m_Version: 1,
+        m_TypeFlags: 0,
+        m_ByteSize: -1,
+        m_MetaFlag: Some(0),
+        m_RefTypeHash: None,
+        m_VariableCount: None,
+        children: vec![string_node("m_Name")],
+    };
+    let shader_tt = TypeTreeNode {
+        m_Type: "Shader".to_owned(),
+        m_Name: "Base".to_owned(),
+        m_Version: 1,
+        m_TypeFlags: 0,
+        m_ByteSize: -1,
+        m_MetaFlag: Some(0),
+        m_RefTypeHash: None,
+        m_VariableCount: None,
+        children: vec![string_node("m_Name"), parsed_form],
+    };
+
+    #[derive(Serialize)]
+    #[allow(non_snake_case)]
+    struct ParsedForm {
+        m_Name: String,
+    }
+    #[derive(Serialize)]
+    #[allow(non_snake_case)]
+    struct Shader {
+        m_Name: String,
+        m_ParsedForm: ParsedForm,
+    }
+
+    let data = serde_typetree::to_vec_endianed(
+        &Shader {
+            m_Name: String::new(),
+            m_ParsedForm: ParsedForm {
+                m_Name: parsed_form_name.to_owned(),
+            },
+        },
+        &shader_tt,
+        Endianness::Little,
+    )
+    .unwrap();
+
+    let type_id = sfb.add_type_uncached(SerializedType::simple(ClassId::Shader, Some(shader_tt)));
+    sfb.add_object_untyped_with(at, ClassId::Shader, type_id, std::borrow::Cow::Owned(data))
+        .unwrap();
+    sfb.write_vec().unwrap()
+}
+
 /// A file with one loose `PreloadData` ("preload") whose single
 /// `m_Assets` entry points at `target_pid` in the external file
 /// `ext_path`.
