@@ -100,6 +100,8 @@ pub async fn game_info(
         // unparsable object should not turn the whole game-info into
         // a 500, it just means we have no bundleVersion to report.
         let (version, bundle_version) = tokio::task::spawn_blocking(move || {
+            use rabex_env::resolver::EnvResolver;
+
             let version = env.unity_version().map(ToString::to_string)?;
             let bundle_version = env
                 .load_serialized("globalgamemanagers")
@@ -107,6 +109,20 @@ pub async fn game_info(
                 .ok()
                 .flatten()
                 .and_then(|ps| ps.bundleVersion);
+            // `bundleVersion` stays "1.0" (or empty) for many older Unity
+            // games that never bumped it — fall back to the game's own
+            // `Constants.GAME_VERSION` constant in Assembly-CSharp.dll.
+            let bundle_version = match bundle_version.as_deref() {
+                Some(v) if v != "1.0" => bundle_version,
+                _ => env
+                    .game_files
+                    .read_path(std::path::Path::new("Managed/Assembly-CSharp.dll"))
+                    .ok()
+                    .and_then(|bytes| {
+                        transform::unity::game_version::extract_game_version(bytes.as_ref())
+                    })
+                    .or(bundle_version),
+            };
             Ok::<_, anyhow::Error>((version, bundle_version))
         })
         .await
