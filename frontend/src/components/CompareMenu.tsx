@@ -11,7 +11,9 @@ import {
   type ManifestRef,
   type ManifestStatusEntry,
 } from "../api";
+import { BranchFilterList } from "./BranchFilterList";
 import { formatDate } from "../lib/format";
+import { useBranchFilter } from "../lib/useBranchFilter";
 
 /// File-context the file-view page hands in so the menu can hide
 /// manifests whose version of this single file is identical to the
@@ -177,6 +179,40 @@ export function CompareMenu({
       });
   }, [appInfo, extras, statuses, currentDepotId, currentManifestId]);
 
+  // Distinct branches across all candidates, in encounter order. Drives
+  // the branch filter at the bottom of the depot column.
+  const allCandidateBranches = useMemo(() => {
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const g of groups) {
+      for (const c of g.candidates) {
+        if (!seen.has(c.branch)) {
+          seen.add(c.branch);
+          ordered.push(c.branch);
+        }
+      }
+    }
+    return ordered;
+  }, [groups]);
+  // Which branches to hide from the candidate list. Shared with the
+  // app-overview page (persisted per appid) and defaulting to public-only.
+  const {
+    hidden: hiddenBranches,
+    toggle: toggleBranch,
+    showAll: showAllBranches,
+    hideAll: hideAllBranches,
+    only: onlyBranch,
+  } = useBranchFilter(appInfo.appid, allCandidateBranches);
+  // The branch filter is a popover, not an inline list — the default
+  // (public only) is what you want almost all the time, so it stays out
+  // of the way until clicked. It lives at the top of the depot column so
+  // its anchor stays put as the candidate list (and the dropdown) grows
+  // downward.
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!open) setBranchMenuOpen(false);
+  }, [open]);
+
   // When the menu is bound to a specific file (file-view page), ask the
   // backend which candidates have a *different* version of that file.
   // We only enable the query while the menu is open so opening a file
@@ -277,6 +313,17 @@ export function CompareMenu({
   }, [searchActive, searchDiff.data, currentDepotId]);
 
   const visibleGroups = useMemo<DepotGroup[]>(() => {
+    // Drop branches the user filtered out, then prune now-empty depots
+    // (keeping "this depot" so the right pane can explain the emptiness).
+    const filterBranches = (gs: DepotGroup[]) => {
+      if (hiddenBranches.size === 0) return gs;
+      return gs
+        .map((g) => ({
+          ...g,
+          candidates: g.candidates.filter((c) => !hiddenBranches.has(c.branch)),
+        }))
+        .filter((g) => g.depotId === currentDepotId || g.candidates.length > 0);
+    };
     if (fileContext) {
       // File-detail variant — original `/file/diff-targets` filter.
       // Until the diff-targets query returns, don't render anything —
@@ -293,7 +340,9 @@ export function CompareMenu({
       // Hide empty *other* depots but keep "this depot" — the right pane
       // can then explicitly say "no different manifests in this depot"
       // instead of the whole menu collapsing to "nothing".
-      return filtered.filter((g) => g.depotId === currentDepotId || g.candidates.length > 0);
+      return filterBranches(
+        filtered.filter((g) => g.depotId === currentDepotId || g.candidates.length > 0),
+      );
     }
     if (searchActive) {
       if (!searchKeptKeys) return [];
@@ -301,9 +350,11 @@ export function CompareMenu({
         ...g,
         candidates: g.candidates.filter((c) => searchKeptKeys.has(c.key)),
       }));
-      return filtered.filter((g) => g.depotId === currentDepotId || g.candidates.length > 0);
+      return filterBranches(
+        filtered.filter((g) => g.depotId === currentDepotId || g.candidates.length > 0),
+      );
     }
-    return groups;
+    return filterBranches(groups);
   }, [
     groups,
     fileContext,
@@ -312,6 +363,7 @@ export function CompareMenu({
     currentDepotId,
     searchActive,
     searchKeptKeys,
+    hiddenBranches,
   ]);
 
   // If our previously-active depot stopped having candidates, fall back
@@ -355,6 +407,17 @@ export function CompareMenu({
     onChange(next);
   };
   const count = selected.size;
+  // Compact summary for the branch-filter button: the single branch name
+  // when exactly one is shown (the common "public" case), else a count.
+  const shownBranches = allCandidateBranches.filter((b) => !hiddenBranches.has(b));
+  const branchLabel =
+    hiddenBranches.size === 0
+      ? "all"
+      : shownBranches.length === 0
+        ? "none"
+        : shownBranches.length === 1
+          ? shownBranches[0]
+          : `${shownBranches.length} of ${allCandidateBranches.length}`;
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -372,10 +435,37 @@ export function CompareMenu({
         Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
       </button>
       {open && (
-        <div className="absolute top-full -right-25 z-10 mt-1 flex max-h-96 w-128 overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-lg">
-          <div className="w-56 overflow-auto border-r border-slate-800">
-            <div className="sticky top-0 flex items-center justify-between border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400">
-              <span>compare to…</span>
+        <div className="absolute top-full -right-25 z-10 mt-1 flex max-h-96 w-128 rounded border border-slate-700 bg-slate-900 shadow-lg">
+          <div className="flex w-56 flex-col border-r border-slate-800">
+            {allCandidateBranches.length > 1 && (
+              <div className="relative z-20 shrink-0 border-b border-slate-800 bg-slate-900">
+                <button
+                  type="button"
+                  onClick={() => setBranchMenuOpen((o) => !o)}
+                  aria-expanded={branchMenuOpen}
+                  className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-800/60"
+                >
+                  <span className="truncate">
+                    Branches: <span className="text-slate-300">{branchLabel}</span>
+                  </span>
+                  <span className="text-slate-500">{branchMenuOpen ? "▲" : "▼"}</span>
+                </button>
+                {branchMenuOpen && (
+                  <div className="absolute top-full left-0 z-20 mt-1 flex max-h-72 w-48 flex-col overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-lg">
+                    <BranchFilterList
+                      branches={allCandidateBranches}
+                      hidden={hiddenBranches}
+                      onToggle={toggleBranch}
+                      onShowAll={showAllBranches}
+                      onHideAll={hideAllBranches}
+                      onOnly={onlyBranch}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400">
+              <span className="tabular-nums">compare to...</span>
               {count > 0 && (
                 <button
                   type="button"
@@ -386,57 +476,59 @@ export function CompareMenu({
                 </button>
               )}
             </div>
-            {visibleGroups.length === 0 ? (
-              <p className="px-3 py-2 text-sm text-slate-500">
-                {fileContext && fileDiff.isFetching
-                  ? "Checking which manifests differ…"
-                  : fileContext
-                    ? "No manifests where this file differs."
-                    : searchActive && searchDiff.isFetching
-                      ? "Checking which manifests differ…"
-                      : searchActive
-                        ? "No manifests with changes in the search results."
-                        : "No other manifests."}
-              </p>
-            ) : (
-              <ul>
-                {visibleGroups.map((g) => {
-                  const isActive = g.depotId === activeGroup?.depotId;
-                  const selectedHere = g.candidates.reduce(
-                    (n, c) => n + (selected.has(c.key) ? 1 : 0),
-                    0,
-                  );
-                  return (
-                    <li key={g.depotId}>
-                      <button
-                        type="button"
-                        onClick={() => setActiveDepotId(g.depotId)}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
-                          isActive
-                            ? "bg-slate-800 text-slate-100"
-                            : "text-slate-300 hover:bg-slate-800/60"
-                        }`}
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate">
-                            {g.depotId === currentDepotId ? (
-                              <span>This depot</span>
-                            ) : (
-                              <span>depot {g.depotId}</span>
-                            )}
+            <div className="flex-1 overflow-auto">
+              {visibleGroups.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-slate-500">
+                  {fileContext && fileDiff.isFetching
+                    ? "Checking which manifests differ…"
+                    : fileContext
+                      ? "No manifests where this file differs."
+                      : searchActive && searchDiff.isFetching
+                        ? "Checking which manifests differ…"
+                        : searchActive
+                          ? "No manifests with changes in the search results."
+                          : "No other manifests."}
+                </p>
+              ) : (
+                <ul>
+                  {visibleGroups.map((g) => {
+                    const isActive = g.depotId === activeGroup?.depotId;
+                    const selectedHere = g.candidates.reduce(
+                      (n, c) => n + (selected.has(c.key) ? 1 : 0),
+                      0,
+                    );
+                    return (
+                      <li key={g.depotId}>
+                        <button
+                          type="button"
+                          onClick={() => setActiveDepotId(g.depotId)}
+                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                            isActive
+                              ? "bg-slate-800 text-slate-100"
+                              : "text-slate-300 hover:bg-slate-800/60"
+                          }`}
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">
+                              {g.depotId === currentDepotId ? (
+                                <span>This depot</span>
+                              ) : (
+                                <span>depot {g.depotId}</span>
+                              )}
+                            </span>
+                            <span className="block truncate text-xs text-slate-500">{g.label}</span>
                           </span>
-                          <span className="block truncate text-xs text-slate-500">{g.label}</span>
-                        </span>
-                        <span className="text-xs text-slate-500 tabular-nums">
-                          {selectedHere > 0 ? `${selectedHere}/` : ""}
-                          {g.candidates.length}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+                          <span className="text-xs text-slate-500 tabular-nums">
+                            {selectedHere > 0 ? `${selectedHere}/` : ""}
+                            {g.candidates.length}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           </div>
           <div className="flex-1 overflow-auto">
             {error && (

@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Focus } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -13,10 +12,12 @@ import {
   type ManifestRef,
   type ManifestStatusEntry,
 } from "../api";
+import { BranchFilterList } from "../components/BranchFilterList";
 import { Bytes } from "../components/Bytes";
 import { ErrorBox } from "../components/ErrorBox";
 import { parseSteamDbPaste, type ParsedExtra } from "../lib/parseSteamDbPaste";
 import { pinScroll } from "../lib/pinScroll";
+import { useBranchFilter } from "../lib/useBranchFilter";
 
 export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
 
@@ -126,47 +127,18 @@ function AppDetailBody({
     for (const e of extras) add(e.branch ?? "public");
     return ordered;
   }, [info, extras]);
-  // Session-only: which branches to hide from the depot manifest rows.
-  // Defaults to showing only "public" — the other branches (betas, old
-  // versions) are opt-in. Persisted in the query cache (keyed by appid)
-  // so it survives navigating into a manifest and back, mirroring the
-  // "extras-expanded" pattern below. Resets on full reload.
-  const queryClient = useQueryClient();
-  const branchFilterKey = useMemo(() => ["branch-filter", info.appid] as const, [info.appid]);
-  const [hiddenBranches, setHiddenBranchesLocal] = useState<Set<string>>(() => {
-    const cached = queryClient.getQueryData<Set<string>>(branchFilterKey);
-    if (cached) return cached;
-    // Hide everything but "public" when it exists; otherwise show all so
-    // we never start with an empty depot list.
-    return allBranches.includes("public")
-      ? new Set(allBranches.filter((b) => b !== "public"))
-      : new Set();
-  });
-  // Filtering rows changes the depot list height; pin the Depots header
-  // (where the filter button lives) so toggling doesn't yank the viewport
-  // and the dropdown stays put under the cursor.
+  // Branch filter, shared with the compare menu (persisted per appid) and
+  // defaulting to public-only. Filtering rows changes the depot list
+  // height, so pin the Depots header (where the filter button lives) on
+  // every change to keep the viewport from jumping.
   const depotsHeaderRef = useRef<HTMLDivElement>(null);
-  const setHiddenBranches = (next: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-    const restore = pinScroll(depotsHeaderRef.current);
-    setHiddenBranchesLocal((prev) => {
-      const value = typeof next === "function" ? next(prev) : next;
-      queryClient.setQueryData(branchFilterKey, value);
-      return value;
-    });
-    requestAnimationFrame(restore);
-  };
-  const toggleBranch = (name: string) =>
-    setHiddenBranches((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  const showAllBranches = () => setHiddenBranches(new Set());
-  const hideAllBranches = () => setHiddenBranches(new Set(allBranches));
-  // "Select only this": hide every branch except `name`.
-  const onlyBranch = (name: string) =>
-    setHiddenBranches(new Set(allBranches.filter((b) => b !== name)));
+  const {
+    hidden: hiddenBranches,
+    toggle: toggleBranch,
+    showAll: showAllBranches,
+    hideAll: hideAllBranches,
+    only: onlyBranch,
+  } = useBranchFilter(info.appid, allBranches, () => pinScroll(depotsHeaderRef.current));
   const branchDescriptions = new Map<string, string>();
   for (const b of info.branches) {
     if (b.description) branchDescriptions.set(b.name, b.description);
@@ -963,14 +935,6 @@ function BranchFilter({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const allShown = hidden.size === 0;
-  // Master checkbox reflects partial selection; the DOM `indeterminate`
-  // flag can only be set imperatively.
-  const masterRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (masterRef.current)
-      masterRef.current.indeterminate = !allShown && hidden.size < branches.length;
-  }, [allShown, hidden.size, branches.length]);
   // Close on outside click / Escape — same pattern as CompareMenu.
   useEffect(() => {
     if (!open) return;
@@ -1008,46 +972,14 @@ function BranchFilter({
       </button>
       {open && (
         <div className="absolute top-full right-0 z-10 mt-1 flex max-h-96 w-64 flex-col overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-lg">
-          <div className="flex items-center justify-between border-b border-slate-800 px-3 py-1.5 text-xs text-slate-400">
-            <label className="flex cursor-pointer items-center gap-2 select-none">
-              <input
-                ref={masterRef}
-                type="checkbox"
-                checked={allShown}
-                onChange={() => (allShown ? onHideAll() : onShowAll())}
-                className="accent-sky-500"
-              />
-              <span>All</span>
-            </label>
-            <span className="tabular-nums">{branches.length} branches</span>
-          </div>
-          <ul className="overflow-y-auto py-1 text-sm">
-            {branches.map((name) => {
-              const checked = !hidden.has(name);
-              return (
-                <li key={name} className="flex items-center hover:bg-slate-800/60">
-                  <label className="flex flex-1 cursor-pointer items-center gap-2 px-3 py-1 select-none">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => onToggle(name)}
-                      className="accent-sky-500"
-                    />
-                    <span className={checked ? "" : "text-slate-500"}>{name}</span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => onOnly(name)}
-                    title={`Show only ${name}`}
-                    aria-label={`Show only ${name}`}
-                    className="px-3 py-1 text-slate-500 hover:text-sky-400"
-                  >
-                    <Focus className="h-3.5 w-3.5" />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <BranchFilterList
+            branches={branches}
+            hidden={hidden}
+            onToggle={onToggle}
+            onShowAll={onShowAll}
+            onHideAll={onHideAll}
+            onOnly={onOnly}
+          />
         </div>
       )}
     </div>
