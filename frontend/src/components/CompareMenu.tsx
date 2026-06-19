@@ -139,7 +139,6 @@ export function CompareMenu({
       for (const m of d.manifests) {
         if (seenManifest.has(m.manifest_id)) continue;
         seenManifest.add(m.manifest_id);
-        if (d.depot_id === currentDepotId && m.manifest_id === currentManifestId) continue;
         const creationKey = `${d.depot_id}/${m.manifest_id}`;
         groupMap.get(d.depot_id)!.candidates.push({
           key: diffTargetKey(d.depot_id, m.manifest_id, currentDepotId),
@@ -147,11 +146,11 @@ export function CompareMenu({
           manifestId: m.manifest_id,
           branch: m.branch,
           creationTime: creationByKey.get(creationKey) ?? 0,
+          isCurrent: d.depot_id === currentDepotId && m.manifest_id === currentManifestId,
         });
       }
     }
     for (const e of extras) {
-      if (e.depot_id === currentDepotId && e.manifest_id === currentManifestId) continue;
       const group = groupMap.get(e.depot_id);
       if (!group) continue;
       if (group.candidates.some((c) => c.manifestId === e.manifest_id)) continue;
@@ -162,6 +161,7 @@ export function CompareMenu({
         manifestId: e.manifest_id,
         branch: e.branch ?? "public",
         creationTime: creationByKey.get(creationKey) ?? 0,
+        isCurrent: e.depot_id === currentDepotId && e.manifest_id === currentManifestId,
       });
     }
     // Sort each depot's candidates by creation_time desc; manifests we
@@ -189,6 +189,7 @@ export function CompareMenu({
     const seen = new Set<string>();
     for (const g of groups) {
       for (const c of g.candidates) {
+        if (c.isCurrent) continue;
         if (!seen.has(c.branch)) {
           seen.add(c.branch);
           ordered.push(c.branch);
@@ -223,11 +224,13 @@ export function CompareMenu({
   const others = useMemo<ManifestRef[]>(() => {
     if (!fileContext) return [];
     return groups.flatMap((g) =>
-      g.candidates.map((c) => ({
-        depot_id: c.depotId,
-        manifest_id: c.manifestId,
-        branch: c.branch,
-      })),
+      g.candidates
+        .filter((c) => !c.isCurrent)
+        .map((c) => ({
+          depot_id: c.depotId,
+          manifest_id: c.manifestId,
+          branch: c.branch,
+        })),
     );
   }, [fileContext, groups]);
   const fileDiff = useQuery({
@@ -279,11 +282,13 @@ export function CompareMenu({
   const searchOthers = useMemo<ManifestRef[]>(() => {
     if (!searchActive) return [];
     return groups.flatMap((g) =>
-      g.candidates.map((c) => ({
-        depot_id: c.depotId,
-        manifest_id: c.manifestId,
-        branch: c.branch,
-      })),
+      g.candidates
+        .filter((c) => !c.isCurrent)
+        .map((c) => ({
+          depot_id: c.depotId,
+          manifest_id: c.manifestId,
+          branch: c.branch,
+        })),
     );
   }, [searchActive, groups]);
   const searchDiff = useQuery({
@@ -323,7 +328,7 @@ export function CompareMenu({
       return gs
         .map((g) => ({
           ...g,
-          candidates: g.candidates.filter((c) => !hiddenBranches.has(c.branch)),
+          candidates: g.candidates.filter((c) => c.isCurrent || !hiddenBranches.has(c.branch)),
         }))
         .filter((g) => g.depotId === currentDepotId || g.candidates.length > 0);
     };
@@ -338,7 +343,9 @@ export function CompareMenu({
         // Keep only manifests where the file still exists *and* differs —
         // skip both `same` (no change to show) and `missing` (deleted in
         // that version, nothing to compare to).
-        candidates: g.candidates.filter((c) => fileStatusByKey.get(c.key) === "different"),
+        candidates: g.candidates.filter(
+          (c) => c.isCurrent || fileStatusByKey.get(c.key) === "different",
+        ),
       }));
       // Hide empty *other* depots but keep "this depot" — the right pane
       // can then explicitly say "no different manifests in this depot"
@@ -351,7 +358,7 @@ export function CompareMenu({
       if (!searchKeptKeys) return [];
       const filtered = groups.map((g) => ({
         ...g,
-        candidates: g.candidates.filter((c) => searchKeptKeys.has(c.key)),
+        candidates: g.candidates.filter((c) => c.isCurrent || searchKeptKeys.has(c.key)),
       }));
       return filterBranches(
         filtered.filter((g) => g.depotId === currentDepotId || g.candidates.length > 0),
@@ -553,6 +560,37 @@ export function CompareMenu({
               <ul>
                 {activeGroup.candidates.map((c) => {
                   const checked = selected.has(c.key);
+                  // The manifest you're on: same layout as the others, but a
+                  // disabled "you are here" anchor (• instead of the checkmark)
+                  // so its date places it among them. Not selectable.
+                  if (c.isCurrent) {
+                    return (
+                      <li key={c.key}>
+                        <div
+                          aria-disabled="true"
+                          className="flex w-full items-center gap-2 px-3 py-1 text-left text-sm text-slate-500"
+                        >
+                          <span aria-hidden="true" className="inline-block w-3 text-center">
+                            •
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{c.branch}</span>
+                            <span className="block truncate text-xs text-slate-600">
+                              {c.creationTime > 0 ? formatDate(c.creationTime) : "date unknown"}
+                            </span>
+                          </span>
+                          <span
+                            className={`text-xs tabular-nums ${
+                              bundleVersionByKey.has(c.key) ? "" : "font-mono"
+                            }`}
+                            title={bundleVersionByKey.has(c.key) ? c.manifestId : undefined}
+                          >
+                            {bundleVersionByKey.get(c.key) ?? `${c.manifestId.slice(0, 8)}…`}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  }
                   return (
                     <li key={c.key}>
                       {/*
