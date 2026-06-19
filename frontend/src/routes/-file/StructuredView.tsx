@@ -397,6 +397,31 @@ export function Tree({
     [filterActive],
   );
 
+  // Batch-open a whole chain of ids (always opening, never closing) —
+  // used by the single-child-chain click expansion so the run unfolds
+  // in one state update instead of N sequential `setExpanded` calls.
+  const setExpandedChain = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      // Same filter-mode override handling as `setExpanded`, but only
+      // the opening side: clear each id from the collapse override.
+      if (filterActive) {
+        setCollapseOverride((prev) => {
+          if (ids.every((id) => !prev.has(id))) return prev;
+          const out = new Set(prev);
+          for (const id of ids) out.delete(id);
+          return out;
+        });
+      }
+      setExpandedIds((prev) => {
+        const out = new Set(prev);
+        for (const id of ids) out.add(id);
+        return out;
+      });
+    },
+    [filterActive],
+  );
+
   const treeRef = useRef<HTMLDivElement | null>(null);
   // Stable prefix so each row's DOM id is unique across multiple
   // structured views on the same page (and across remounts).
@@ -587,12 +612,25 @@ export function Tree({
       // losing its open state). Expanded *and* already selected →
       // collapse (second click on the same header closes it).
       if (!isExpanded) {
-        setExpanded(id, true);
+        // Open the clicked node and unfold any single-child chain below
+        // it in one shot, so an unambiguous run (e.g. HutongGames →
+        // PlayMaker) doesn't need a click per level. `visibleSet` gates
+        // the descent so hidden / filtered-out children don't count.
+        const chain = singleChildExpandChain(id, nodeById, (cid) => visibleSet.has(cid));
+        setExpandedChain(chain);
       } else if (wasSelected) {
         setExpanded(id, false);
       }
     },
-    [visibleRows, effectiveExpanded, focusedId, setExpanded],
+    [
+      visibleRows,
+      effectiveExpanded,
+      focusedId,
+      setExpanded,
+      setExpandedChain,
+      nodeById,
+      visibleSet,
+    ],
   );
 
   const matchedCount = directMatches?.size ?? null;
@@ -807,6 +845,31 @@ export function treeKeyAction(key: string, state: TreeNavState): TreeNavAction |
 function walk(node: StructuredNode, visit: (n: StructuredNode) => void) {
   visit(node);
   for (const c of node.children) walk(c, visit);
+}
+
+/// Ids to open when the user explicitly expands `id`: the node itself
+/// plus every node down a single-(visible-)child run. The descent stops
+/// at the first node that branches (>1 visible child) or a leaf, so an
+/// unambiguous chain like `HutongGames → PlayMaker` unfolds in one
+/// click while a real fan-out only opens one level. `isVisible` gates
+/// children so `hide_unless_matched` rows and active filters don't make
+/// a chain look single-child when it isn't on screen.
+export function singleChildExpandChain(
+  id: string,
+  nodeById: Map<string, StructuredNode>,
+  isVisible: (childId: string) => boolean,
+): string[] {
+  const start = nodeById.get(id);
+  if (!start) return [];
+  const ids = [start.id];
+  let cur: StructuredNode = start;
+  for (;;) {
+    const kids = cur.children.filter((c) => isVisible(c.id));
+    if (kids.length !== 1) break;
+    cur = kids[0];
+    ids.push(cur.id);
+  }
+  return ids;
 }
 
 /// Split a node id / ref into its bundle `archive:<entry>/` prefix (or

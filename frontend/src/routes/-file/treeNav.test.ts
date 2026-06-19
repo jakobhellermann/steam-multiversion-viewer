@@ -1,7 +1,12 @@
 // TODO(ai-review): review for style and correctness
 import { describe, expect, test } from "vitest";
 
-import { treeKeyAction, type TreeNavState, type VisibleRow } from "./StructuredView";
+import {
+  singleChildExpandChain,
+  treeKeyAction,
+  type TreeNavState,
+  type VisibleRow,
+} from "./StructuredView";
 import type { StructuredNode } from "../../api";
 
 // Minimal node — only the fields the nav logic reads.
@@ -126,6 +131,62 @@ describe("treeKeyAction ArrowRight", () => {
       ]),
     };
     expect(treeKeyAction("ArrowRight", state)).toEqual({ type: "focus", id: "B" });
+  });
+});
+
+describe("singleChildExpandChain", () => {
+  function index(root: StructuredNode): Map<string, StructuredNode> {
+    const map = new Map<string, StructuredNode>();
+    const walk = (n: StructuredNode) => {
+      map.set(n.id, n);
+      n.children.forEach(walk);
+    };
+    walk(root);
+    return map;
+  }
+  const allVisible = () => true;
+
+  test("unfolds a single-child run and stops at the branch node", () => {
+    // HutongGames ─ PlayMaker ─┬ Actions
+    //                          └ Fsm
+    // Clicking HutongGames opens HutongGames + PlayMaker (the branch),
+    // but not Actions/Fsm.
+    const root = node("ns:HutongGames", [
+      node("ns:HutongGames.PlayMaker", [node("type:Actions"), node("type:Fsm")]),
+    ]);
+    const chain = singleChildExpandChain("ns:HutongGames", index(root), allVisible);
+    expect(chain).toEqual(["ns:HutongGames", "ns:HutongGames.PlayMaker"]);
+  });
+
+  test("a node that branches immediately opens only itself", () => {
+    const root = node("ns:A", [node("type:X"), node("type:Y")]);
+    expect(singleChildExpandChain("ns:A", index(root), allVisible)).toEqual(["ns:A"]);
+  });
+
+  test("descends through a leaf at the end of the run", () => {
+    const root = node("ns:A", [node("ns:A.B", [node("type:Only")])]);
+    expect(singleChildExpandChain("ns:A", index(root), allVisible)).toEqual([
+      "ns:A",
+      "ns:A.B",
+      "type:Only",
+    ]);
+  });
+
+  test("hidden children don't count toward the single-child run", () => {
+    // A's only visible child is B; B has two children but one is hidden,
+    // so B looks single-child and the run continues into the visible one.
+    const root = node("ns:A", [node("ns:A.B", [node("type:Visible"), node("type:Hidden")])]);
+    const visible = new Set(["ns:A", "ns:A.B", "type:Visible"]);
+    expect(singleChildExpandChain("ns:A", index(root), (id) => visible.has(id))).toEqual([
+      "ns:A",
+      "ns:A.B",
+      "type:Visible",
+    ]);
+  });
+
+  test("unknown id yields an empty chain", () => {
+    const root = node("ns:A");
+    expect(singleChildExpandChain("ns:missing", index(root), allVisible)).toEqual([]);
   });
 });
 

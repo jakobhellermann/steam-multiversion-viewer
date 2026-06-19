@@ -30,6 +30,9 @@ type CompareCandidate = {
   manifestId: string;
   branch: string;
   creationTime: number;
+  /// The manifest currently open. Shown disabled in the list as a "you
+  /// are here" anchor; never selectable or used as a diff target.
+  isCurrent: boolean;
 };
 
 type DepotGroup = {
