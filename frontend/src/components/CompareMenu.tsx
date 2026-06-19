@@ -12,8 +12,18 @@ import {
   type ManifestStatusEntry,
 } from "../api";
 import { BranchFilterList } from "./BranchFilterList";
+import {
+  buildDepotGroups,
+  diffTargetKey,
+  filterGroupsByBranch,
+  type CompareCandidate,
+  type DepotGroup,
+} from "./compareCandidates";
 import { formatDate } from "../lib/format";
 import { useBranchFilter } from "../lib/useBranchFilter";
+
+// Re-exported for the route files that import it alongside the component.
+export { diffTargetKey };
 
 /// File-context the file-view page hands in so the menu can hide
 /// manifests whose version of this single file is identical to the
@@ -22,23 +32,6 @@ export type FileContext = {
   appid: number;
   base: ManifestRef;
   path: string;
-};
-
-type CompareCandidate = {
-  key: string;
-  depotId: number;
-  manifestId: string;
-  branch: string;
-  creationTime: number;
-  /// The manifest currently open. Shown disabled in the list as a "you
-  /// are here" anchor; never selectable or used as a diff target.
-  isCurrent: boolean;
-};
-
-type DepotGroup = {
-  depotId: number;
-  label: string;
-  candidates: CompareCandidate[];
 };
 
 /// URL of the page that opens this candidate in isolation. For
@@ -59,14 +52,6 @@ function candidateHref(
   }
   const qs = params.toString();
   return `/apps/${appid}/depots/${c.depotId}/manifests/${c.manifestId}${qs ? `?${qs}` : ""}`;
-}
-
-/// Build the URL-safe key used for `compare_to`. Targets in the same
-/// depot as the base get a bare manifest_id, cross-depot targets carry
-/// the depot prefix joined with a dash (so neither slash nor comma need
-/// percent-encoding).
-export function diffTargetKey(depotId: number, manifestId: string, currentDepotId: number): string {
-  return depotId === currentDepotId ? manifestId : `${depotId}-${manifestId}`;
 }
 
 export function CompareMenu({
@@ -125,62 +110,10 @@ export function CompareMenu({
   // Group every known manifest (official + tracked) under its depot. Per
   // entry we keep creation_time from manifest_statuses (0 if unknown)
   // so each depot's submenu can sort chronologically.
-  const groups = useMemo<DepotGroup[]>(() => {
-    const creationByKey = new Map<string, number>();
-    for (const s of statuses ?? []) {
-      creationByKey.set(`${s.depot_id}/${s.manifest_id}`, s.creation_time);
-    }
-    const groupMap = new Map<number, DepotGroup>();
-    for (const d of appInfo.depots) {
-      const tag = [d.oslist, d.osarch, d.language].filter(Boolean).join(" · ");
-      const label = tag ? `depot ${d.depot_id} · ${tag}` : `depot ${d.depot_id}`;
-      groupMap.set(d.depot_id, { depotId: d.depot_id, label, candidates: [] });
-      const seenManifest = new Set<string>();
-      for (const m of d.manifests) {
-        if (seenManifest.has(m.manifest_id)) continue;
-        seenManifest.add(m.manifest_id);
-        const creationKey = `${d.depot_id}/${m.manifest_id}`;
-        groupMap.get(d.depot_id)!.candidates.push({
-          key: diffTargetKey(d.depot_id, m.manifest_id, currentDepotId),
-          depotId: d.depot_id,
-          manifestId: m.manifest_id,
-          branch: m.branch,
-          creationTime: creationByKey.get(creationKey) ?? 0,
-          isCurrent: d.depot_id === currentDepotId && m.manifest_id === currentManifestId,
-        });
-      }
-    }
-    for (const e of extras) {
-      const group = groupMap.get(e.depot_id);
-      if (!group) continue;
-      if (group.candidates.some((c) => c.manifestId === e.manifest_id)) continue;
-      const creationKey = `${e.depot_id}/${e.manifest_id}`;
-      group.candidates.push({
-        key: diffTargetKey(e.depot_id, e.manifest_id, currentDepotId),
-        depotId: e.depot_id,
-        manifestId: e.manifest_id,
-        branch: e.branch ?? "public",
-        creationTime: creationByKey.get(creationKey) ?? 0,
-        isCurrent: e.depot_id === currentDepotId && e.manifest_id === currentManifestId,
-      });
-    }
-    // Sort each depot's candidates by creation_time desc; manifests we
-    // haven't fetched yet (creation_time 0) bubble to the bottom.
-    for (const g of groupMap.values()) {
-      g.candidates.sort((a, b) => {
-        if (b.creationTime !== a.creationTime) return b.creationTime - a.creationTime;
-        return a.manifestId.localeCompare(b.manifestId);
-      });
-    }
-    // Sort groups: current depot first, then by depot id.
-    return [...groupMap.values()]
-      .filter((g) => g.candidates.length > 0)
-      .sort((a, b) => {
-        if (a.depotId === currentDepotId) return -1;
-        if (b.depotId === currentDepotId) return 1;
-        return a.depotId - b.depotId;
-      });
-  }, [appInfo, extras, statuses, currentDepotId, currentManifestId]);
+  const groups = useMemo<DepotGroup[]>(
+    () => buildDepotGroups(appInfo, extras, statuses, currentDepotId, currentManifestId),
+    [appInfo, extras, statuses, currentDepotId, currentManifestId],
+  );
 
   // Distinct branches across all candidates, in encounter order. Drives
   // the branch filter at the bottom of the depot column.
@@ -190,9 +123,11 @@ export function CompareMenu({
     for (const g of groups) {
       for (const c of g.candidates) {
         if (c.isCurrent) continue;
-        if (!seen.has(c.branch)) {
-          seen.add(c.branch);
-          ordered.push(c.branch);
+        for (const b of c.branches) {
+          if (!seen.has(b)) {
+            seen.add(b);
+            ordered.push(b);
+          }
         }
       }
     }
@@ -321,17 +256,8 @@ export function CompareMenu({
   }, [searchActive, searchDiff.data, currentDepotId]);
 
   const visibleGroups = useMemo<DepotGroup[]>(() => {
-    // Drop branches the user filtered out, then prune now-empty depots
-    // (keeping "this depot" so the right pane can explain the emptiness).
-    const filterBranches = (gs: DepotGroup[]) => {
-      if (hiddenBranches.size === 0) return gs;
-      return gs
-        .map((g) => ({
-          ...g,
-          candidates: g.candidates.filter((c) => c.isCurrent || !hiddenBranches.has(c.branch)),
-        }))
-        .filter((g) => g.depotId === currentDepotId || g.candidates.length > 0);
-    };
+    const filterBranches = (gs: DepotGroup[]) =>
+      filterGroupsByBranch(gs, hiddenBranches, currentDepotId);
     if (fileContext) {
       // File-detail variant — original `/file/diff-targets` filter.
       // Until the diff-targets query returns, don't render anything —
@@ -392,7 +318,11 @@ export function CompareMenu({
   const candidates = useMemo(() => visibleGroups.flatMap((g) => g.candidates), [visibleGroups]);
   const gameInfoQueries = useQueries({
     queries: candidates.map((c) => ({
-      queryKey: ["game-info", appInfo.appid, c.depotId, c.manifestId, c.branch],
+      // Branch omitted from the key on purpose: game_info is content-
+      // addressed by manifest_id, so the same gid shares one entry across
+      // branches and with the manifest page + switcher. Branch is still
+      // passed to the fetch so the backend can open the manifest.
+      queryKey: ["game-info", appInfo.appid, c.depotId, c.manifestId],
       queryFn: () => fetchGameInfo(appInfo.appid, c.depotId, c.manifestId, c.branch),
       enabled: open,
       staleTime: Infinity,

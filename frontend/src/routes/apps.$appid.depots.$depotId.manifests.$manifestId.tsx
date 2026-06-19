@@ -97,7 +97,11 @@ function ManifestDetail() {
     queryFn: () => fetchManifestInfo(appid, depotId, manifestId, branch),
   });
   const gameInfo = useQuery({
-    queryKey: ["game-info", appid, depotId, manifestId, branch],
+    // Keyed by manifest_id only — game_info is content-addressed (same gid
+    // → same result regardless of branch), so the page, the switcher, and
+    // the compare menu all share one cache entry. `branch` is still passed
+    // to the fetch (the backend needs it to open the manifest).
+    queryKey: ["game-info", appid, depotId, manifestId],
     queryFn: () => fetchGameInfo(appid, depotId, manifestId, branch),
   });
   const files = useQuery({
@@ -317,7 +321,9 @@ function ManifestSwitcher({
   // hit. Only fetched while the dropdown is open.
   const gameInfoQueries = useQueries({
     queries: visible.map((m) => ({
-      queryKey: ["game-info", appid, depotId, m.manifestId, m.branch],
+      // Branch omitted from the key on purpose — shared with the page +
+      // compare menu (see the gameInfo query above).
+      queryKey: ["game-info", appid, depotId, m.manifestId],
       queryFn: () => fetchGameInfo(appid, depotId, m.manifestId, m.branch),
       enabled: open,
       staleTime: Infinity,
