@@ -20,6 +20,35 @@
      keeps heartbeating into the void until the local socket end closes.
      Worth filing once we're sure."
 
+## DLL decompile: missing assembly references
+- ilspycmd decompiles `Assembly-CSharp.dll` with no access to its sibling
+  assemblies, so it can't tell value-types from reference-types for
+  external types (UnityEngine.*) and litters method bodies with
+  `//IL_xxxx: Unknown result type (might be due to invalid IL or missing
+  references)` and `//IL_xxxx: Expected O, but got Unknown` comments.
+   - Root cause: `tempfile_for` (`crates/transform/src/cache.rs`) drops the
+     DLL alone into a flat `$TMPDIR/smv-transform-*` file. ILSpy's resolver
+     searches the input's own directory for references and finds none.
+     A clean local decomp works only because the DLL sat in `Managed/`
+     next to all the `UnityEngine.*.dll`. Affects BOTH the per-type (`-t`)
+     and warmer (`-p`) paths — same isolated tempfile.
+   - Fix needs the sibling DLLs on disk next to the input (or via
+     `ilspycmd -r <dir>`). At the decompile call sites (`structured.rs`,
+     `diff.rs`) `snapshot.manifest().files` lets us enumerate every `.dll`
+     in the same Managed dir and `snapshot.read_full` them — but the
+     `transform` crate only gets `dll_bytes`, so the dir would have to be
+     plumbed through.
+   - Open: ilspycmd needs the references as real files on disk. Disliked
+     options: materialize a persistent ref-dir per sibling-set under
+     store_root (storage cost), or build/delete an ephemeral tempdir per
+     call (constant write/delete churn). Ideal would be lazy in-memory
+     references, but ilspycmd can't consume those, and FUSE isn't
+     cross-platform. No good approach yet — left unimplemented.
+   - Note: existing `transforms/<sha>/` cache entries were produced
+     without references and won't be regenerated when this lands (cache
+     key is the DLL sha only); they'd need clearing or an artifact-version
+     bump to pick up cleaner output.
+
 ## View formats
 - Unity component-type-specific views (TextComponent, Texture2D, Shader)
 
