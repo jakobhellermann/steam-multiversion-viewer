@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 export type BranchFilter = {
   /// Branch names currently hidden. Empty = all shown.
@@ -34,13 +34,25 @@ export function useBranchFilter(
 ): BranchFilter {
   const queryClient = useQueryClient();
   const key = ["branch-filter", appid] as const;
-  const [hidden, setLocal] = useState<Set<string>>(
-    () => queryClient.getQueryData<Set<string>>(key) ?? defaultHidden(branches),
+  // `null` = no explicit choice yet and nothing cached → fall back to the
+  // computed default. We can't bake the default into the initial state:
+  // on a fresh page load `branches` is often still empty (data loading),
+  // so a one-shot initializer would freeze "show all". Instead derive the
+  // default reactively, recomputing once branches arrive.
+  const [stored, setStored] = useState<Set<string> | null>(
+    () => queryClient.getQueryData<Set<string>>(key) ?? null,
   );
+  // Branch arrays churn identity every render; key the default off the
+  // contents so it stays stable. Branch names carry no spaces.
+  const branchKey = branches.join(" ");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fallback = useMemo(() => defaultHidden(branches), [branchKey]);
+  const hidden = stored ?? fallback;
   const set = (next: Set<string> | ((prev: Set<string>) => Set<string>)) => {
     const restore = pin?.();
-    setLocal((prev) => {
-      const value = typeof next === "function" ? next(prev) : next;
+    setStored((prev) => {
+      const base = prev ?? defaultHidden(branches);
+      const value = typeof next === "function" ? next(base) : next;
       queryClient.setQueryData(key, value);
       return value;
     });
