@@ -1,14 +1,26 @@
-import { Link, Outlet, createRootRouteWithContext } from "@tanstack/react-router";
+import { Link, Outlet, createRootRouteWithContext, redirect, useNavigate } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { TanStackDevtools } from "@tanstack/react-devtools";
-import type { QueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
 import { DownloadsDrawer } from "../components/DownloadsDrawer";
 import { MountToggle } from "../components/MountToggle";
+import { fetchAuthStatus, logout, type AuthStatus } from "../api";
 import "../styles.css";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  beforeLoad: async ({ context, location }) => {
+    // The login page is the one route reachable while logged out.
+    if (location.pathname === "/login") return;
+    const status = await context.queryClient.ensureQueryData<AuthStatus>({
+      queryKey: ["auth"],
+      queryFn: fetchAuthStatus,
+    });
+    if (!status.authenticated) {
+      throw redirect({ to: "/login", search: { redirect: location.href } });
+    }
+  },
   component: RootComponent,
 });
 
@@ -40,6 +52,7 @@ function RootComponent() {
             Library
           </Link>
           <div className="ml-auto flex items-center gap-2">
+            <AccountMenu />
             <MountToggle />
             <Link
               to="/settings"
@@ -72,5 +85,37 @@ function RootComponent() {
         plugins={[{ name: "TanStack Router", render: <TanStackRouterDevtoolsPanel /> }]}
       />
     </>
+  );
+}
+
+function AccountMenu() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const { data: auth } = useQuery({ queryKey: ["auth"], queryFn: fetchAuthStatus });
+
+  const mutation = useMutation({
+    mutationFn: logout,
+    onSuccess: async (status) => {
+      qc.setQueryData(["auth"], status);
+      await navigate({ to: "/login" });
+    },
+  });
+
+  if (!auth?.authenticated) return null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-sm text-slate-400" title={auth.steamid ?? undefined}>
+        {auth.account}
+      </span>
+      <button
+        type="button"
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+        className="text-sm text-slate-400 hover:text-sky-400 disabled:opacity-30"
+      >
+        {mutation.isPending ? "Signing out…" : "Sign out"}
+      </button>
+    </div>
   );
 }

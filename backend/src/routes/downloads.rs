@@ -49,6 +49,7 @@ pub async fn manifest_download(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Json(body): Json<DownloadManifestBody>,
 ) -> Result<Json<EnqueueSummary>> {
+    state.steam()?; // 401 if not logged in
     let snapshot = state
         .open_manifest(appid, depot_id, manifest_id, &body.branch)
         .await?;

@@ -54,6 +54,26 @@ async fn main() -> Result<()> {
 
     let state = AppState::init().await?;
 
+    // Convenience: if credentials are in the environment, log in eagerly in
+    // the background so the server is reachable immediately and the user
+    // skips the web login. Failures are non-fatal — they just leave the
+    // app logged out, and the user can retry via `/login`.
+    if let (Ok(account), Ok(password)) = (
+        std::env::var("STEAM_USERNAME"),
+        std::env::var("STEAM_PASSWORD"),
+    ) {
+        let state = state.clone();
+        tokio::spawn(async move {
+            match steam::auth::login_device(&account, &password).await {
+                Ok(connection) => {
+                    state.set_steam(steam::SteamClient::new(account, connection));
+                    tracing::info!("logged in from environment credentials");
+                }
+                Err(err) => tracing::warn!(%err, "background env-var login failed"),
+            }
+        });
+    }
+
     let (api_router, openapi) =
         routes::register(OpenApiRouter::with_openapi(ApiDoc::openapi())).split_for_parts();
 

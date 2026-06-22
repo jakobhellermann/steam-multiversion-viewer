@@ -78,6 +78,7 @@ pub async fn game_info(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<GameInfoQuery>,
 ) -> Result<(ImmutableCache, Json<GameInfo>)> {
+    state.steam()?; // 401 if not logged in
     let snapshot = Arc::new(
         state
             .open_manifest(appid, depot_id, manifest_id, &q.branch)

@@ -8,15 +8,20 @@ use steam_vent_depot::{CdnServer, DepotClient};
 use tokio::sync::OnceCell;
 
 pub struct SteamClient {
+    /// Steam account name this connection was authenticated as. Surfaced
+    /// by the auth status endpoint; the connection itself only exposes the
+    /// numeric steam id.
+    pub account: String,
     pub connection: Connection,
     pub depot: DepotClient,
     cdn_servers: OnceCell<Arc<[CdnServer]>>,
 }
 
 impl SteamClient {
-    pub fn new(connection: Connection) -> Self {
+    pub fn new(account: String, connection: Connection) -> Self {
         let depot = DepotClient::new(connection.clone());
         Self {
+            account,
             connection,
             depot,
             cdn_servers: OnceCell::new(),

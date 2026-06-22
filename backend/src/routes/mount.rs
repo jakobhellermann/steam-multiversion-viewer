@@ -19,6 +19,7 @@ use crate::state::mount::{MountControlError, MountStatus};
 )]
 #[tracing::instrument(skip_all)]
 pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, ApiError> {
+    let steam = state.steam()?; // 401 if not logged in
     let cfg = state.config.load();
     // Snapshot the index under its lock so we can drop it before
     // entering Mount::start (which acquires the mount's own lock).
@@ -34,7 +35,7 @@ pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, A
         .start_with(
             mountpoint,
             tokio::runtime::Handle::current(),
-            Arc::clone(&state.steam),
+            steam,
             Arc::clone(&state.store),
             index_snapshot.into_iter(),
             &state.extra_manifests,

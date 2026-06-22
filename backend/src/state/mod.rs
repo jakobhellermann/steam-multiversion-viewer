@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
 use steam_depot_vfs::fs::DepotManifestStore;
 use steam_depot_vfs::{DepotStore, VfsError};
@@ -18,6 +18,7 @@ use self::extra_manifests::ExtraManifestsStore;
 use self::mount::MountManager;
 use self::store_index::StoreIndex;
 use crate::config::Config;
+use crate::http::ApiError;
 use crate::steam::chunk_store::TrackedChunkStore;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient, auth};
 
@@ -29,7 +30,14 @@ pub type Snapshot = DepotManifestStore<SnapChunkStore>;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub steam: Arc<SteamClient>,
+    /// Authenticated Steam connection, or `None` until the user logs in
+    /// via `/api/auth/login`. Swapped atomically so login/logout take
+    /// effect without restarting the server. Read it through
+    /// [`AppState::steam`] in request handlers to get a `401` when absent.
+    pub steam: Arc<ArcSwapOption<SteamClient>>,
+    /// The (at most one) in-progress interactive web login, so the auth
+    /// status endpoint can report whether a code is needed.
+    pub pending_login: auth::PendingLoginSlot,
     pub store: Arc<DepotStore>,
     /// Latest config. Updated atomically by `PATCH /api/config`; read
     /// via `state.config.load()` to get an `Arc<Config>` snapshot that
@@ -50,12 +58,9 @@ pub struct AppState {
 
 impl AppState {
     pub async fn init() -> Result<Self> {
-        let account = std::env::var("STEAM_USERNAME").context("STEAM_USERNAME not set")?;
-        let password = std::env::var("STEAM_PASSWORD").context("STEAM_PASSWORD not set")?;
-
-        let connection = auth::login(&account, &password).await?;
-        let steam = Arc::new(SteamClient::new(connection));
-
+        // The Steam connection is established lazily via `/api/auth/login`
+        // (or an optional background env-var login, see `main`), so the
+        // server can start without credentials.
         let config = Config::load_or_default()?;
         let store_root = config.store_root.clone();
         std::fs::create_dir_all(&store_root)
@@ -76,7 +81,8 @@ impl AppState {
         let mount = Arc::new(MountManager::new());
 
         Ok(Self {
-            steam,
+            steam: Arc::new(ArcSwapOption::empty()),
+            pending_login: Arc::new(std::sync::Mutex::new(None)),
             store,
             initial_config: Arc::new(config.clone()),
             config: Arc::new(ArcSwap::from_pointee(config)),
@@ -88,9 +94,31 @@ impl AppState {
         })
     }
 
+    /// The authenticated Steam client, or a `401` error when the user
+    /// hasn't logged in yet. Request handlers that touch Steam should go
+    /// through this so the logged-out case is a clean `Unauthorized`.
+    pub fn steam(&self) -> Result<Arc<SteamClient>, ApiError> {
+        self.steam
+            .load_full()
+            .ok_or_else(|| ApiError::unauthorized("not logged in to Steam"))
+    }
+
+    /// Install a freshly authenticated connection (login).
+    pub fn set_steam(&self, client: SteamClient) {
+        self.steam.store(Some(Arc::new(client)));
+    }
+
+    /// Drop the current connection (logout). The cached refresh token is
+    /// kept on disk so the next login can skip the password.
+    pub fn clear_steam(&self) {
+        self.steam.store(None);
+    }
+
     /// Fetch (or load from cache) a manifest and fold it into the in-memory
     /// refcount index. All routes that need a manifest should go through
-    /// this so `bytes_unique` stays consistent.
+    /// this so `bytes_unique` stays consistent. Handlers should guard with
+    /// [`AppState::steam`] for a clean `401`; the not-logged-in case here is
+    /// a defensive fallback.
     pub async fn open_manifest(
         &self,
         app_id: AppId,
@@ -100,10 +128,14 @@ impl AppState {
     ) -> Result<Snapshot, VfsError> {
         let started = Instant::now();
         let downloads = Arc::clone(&self.downloads);
+        let steam = self
+            .steam
+            .load_full()
+            .ok_or_else(|| VfsError::Other("not logged in to Steam".into()))?;
         let snap = self
             .store
             .open_depot_manifest_with_chunks(
-                self.steam.clone(),
+                steam,
                 app_id.0,
                 depot_id.0,
                 manifest_id.0,

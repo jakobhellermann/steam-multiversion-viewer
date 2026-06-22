@@ -21,6 +21,10 @@ impl ApiError {
         Self::new(StatusCode::NOT_FOUND, message)
     }
 
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::UNAUTHORIZED, message)
+    }
+
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }

@@ -92,6 +92,7 @@ pub async fn manifest_diff(
     Path(appid): Path<AppId>,
     Json(body): Json<ManifestDiffRequest>,
 ) -> Result<Json<ManifestDiffResponse>> {
+    state.steam()?; // 401 if not logged in
     let base_snap = state
         .open_manifest(
             appid,
@@ -251,6 +252,7 @@ pub async fn file_diff_targets(
     Path(appid): Path<AppId>,
     Json(body): Json<FileDiffTargetsRequest>,
 ) -> Result<Json<FileDiffTargetsResponse>> {
+    state.steam()?; // 401 if not logged in
     let base_snap = state
         .open_manifest(
             appid,
@@ -381,6 +383,7 @@ pub async fn manifest_diff_targets(
     Path(appid): Path<AppId>,
     Json(body): Json<ManifestDiffTargetsRequest>,
 ) -> Result<Json<ManifestDiffTargetsResponse>> {
+    state.steam()?; // 401 if not logged in
     let base_snap = state
         .open_manifest(
             appid,
@@ -522,6 +525,7 @@ pub async fn manifest_file_diff(
     Query(q): Query<FileViewQuery>,
     Json(body): Json<FileDiffRequest>,
 ) -> Result<Response> {
+    state.steam()?; // 401 if not logged in
     // Both sides resolve through the same helper. We deliberately run
     // the two snapshot opens sequentially — `open_manifest` is cheap
     // when cached, and serialising keeps the depot-key fetch from
@@ -762,6 +766,7 @@ pub async fn manifest_file_structured_diff(
     crate::http::ImmutableCache,
     Json<transform::structured::StructuredTree>,
 )> {
+    state.steam()?; // 401 if not logged in
     match build_structured_diff_tree(
         &state,
         appid,
@@ -983,6 +988,7 @@ pub async fn manifest_diff_deep(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<DeepDiffQuery>,
 ) -> Result<Json<ManifestDiffResponse>> {
+    state.steam()?; // 401 if not logged in
     let base_snap = state
         .open_manifest(appid, depot_id, manifest_id, &q.branch)
         .await?;
@@ -1506,6 +1512,7 @@ pub async fn manifest_file_structured_diff_node(
 ) -> Result<(crate::http::ImmutableCache, Response)> {
     use transform::Transformer;
 
+    state.steam()?; // 401 if not logged in
     let kind = transform::tools::transformer_for(&q.path);
     let supported = match kind {
         Some(Transformer::Dll) => true,

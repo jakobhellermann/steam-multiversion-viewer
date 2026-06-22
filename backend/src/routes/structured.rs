@@ -38,6 +38,7 @@ pub async fn manifest_file_structured(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<FileViewQuery>,
 ) -> Result<(ImmutableCache, Json<StructuredTree>)> {
+    state.steam()?; // 401 if not logged in
     let snapshot = Arc::new(
         state
             .open_manifest(appid, depot_id, manifest_id, &q.branch)
@@ -171,6 +172,7 @@ pub async fn manifest_file_structured_node(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<NodeContentQuery>,
 ) -> Result<(ImmutableCache, Json<NodeContent>)> {
+    state.steam()?; // 401 if not logged in
     let snapshot = Arc::new(
         state
             .open_manifest(appid, depot_id, manifest_id, &q.branch)

@@ -4,6 +4,7 @@ use utoipa_axum::routes;
 use crate::http::ApiError;
 use crate::state::AppState;
 
+pub mod auth;
 pub mod config;
 pub mod diff;
 pub mod downloads;
@@ -22,6 +23,10 @@ pub(super) fn default_branch() -> String {
 
 pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
     router
+        .routes(routes!(auth::status))
+        .routes(routes!(auth::login))
+        .routes(routes!(auth::login_code))
+        .routes(routes!(auth::logout))
         .routes(routes!(library::library))
         .routes(routes!(library::app_info))
         .routes(routes!(library::manifest_info))

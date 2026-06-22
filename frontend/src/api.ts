@@ -67,6 +67,60 @@ export function fetchLibrary(): Promise<OwnedGame[]> {
   return getJson("/api/library");
 }
 
+/** Progress of an in-flight interactive login (mirrors backend `LoginPhase`). */
+export type LoginPhase =
+  | { phase: "starting" }
+  | { phase: "waiting_device" }
+  | { phase: "need_code"; code_type: string; details: string; device_available: boolean }
+  | { phase: "error"; message: string };
+
+export type AuthStatus = {
+  authenticated: boolean;
+  /** Steam account name, present while logged in or while a login is pending. */
+  account?: string;
+  /** Steam3 id (e.g. `[U:1:...]`), present only while logged in. */
+  steamid?: string;
+  /** Set while an interactive login is in progress. */
+  pending?: LoginPhase | null;
+};
+
+export function fetchAuthStatus(): Promise<AuthStatus> {
+  return getJson("/api/auth/status");
+}
+
+export async function login(credentials: {
+  account: string;
+  password: string;
+}): Promise<AuthStatus> {
+  const r = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(credentials),
+  });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
+/**
+ * Submit a Steam Guard code. Confirming in the mobile app needs no call —
+ * the backend detects that out-of-band and the login completes on its own.
+ */
+export async function submitLoginCode(code: string): Promise<AuthStatus> {
+  const r = await fetch("/api/auth/login/code", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
+export async function logout(): Promise<AuthStatus> {
+  const r = await fetch("/api/auth/logout", { method: "POST" });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
 export function fetchAppInfo(appid: AppId): Promise<AppInfo> {
   return getJson(`/api/apps/${appid}`);
 }

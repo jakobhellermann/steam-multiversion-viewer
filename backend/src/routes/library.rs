@@ -46,14 +46,15 @@ pub struct OwnedGame {
 pub async fn library(
     State(state): State<AppState>,
 ) -> Result<(CacheSeconds, Json<Vec<OwnedGame>>)> {
+    let steam = state.steam()?;
     let req = CPlayer_GetOwnedGames_Request {
-        steamid: Some(state.steam.connection.steam_id().into()),
+        steamid: Some(steam.connection.steam_id().into()),
         include_appinfo: Some(true),
         include_played_free_games: Some(true),
         ..Default::default()
     };
 
-    let resp = state.steam.connection.service_method(req).await?;
+    let resp = steam.connection.service_method(req).await?;
 
     let games = resp
         .games
@@ -171,7 +172,7 @@ pub async fn app_info(
     State(state): State<AppState>,
     Path(appid): Path<AppId>,
 ) -> Result<(CacheSeconds, Json<AppInfo>)> {
-    let info = state.steam.depot.app_info(appid.0).await?;
+    let info = state.steam()?.depot.app_info(appid.0).await?;
 
     let asset_url = |hash: &str, ext: &str| {
         format!(
@@ -332,6 +333,7 @@ pub async fn manifest_info(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestInfoQuery>,
 ) -> Result<(ImmutableCache, Json<ManifestInfo>)> {
+    state.steam()?; // 401 if not logged in
     let snapshot = state
         .open_manifest(appid, depot_id, manifest_id, &q.branch)
         .await?;
@@ -370,6 +372,7 @@ pub async fn manifest_files(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestFilesQuery>,
 ) -> Result<(ImmutableCache, Json<ManifestFiles>)> {
+    state.steam()?; // 401 if not logged in
     let snapshot = state
         .open_manifest(appid, depot_id, manifest_id, &q.branch)
         .await?;
@@ -464,6 +467,7 @@ pub async fn manifest_statuses(
     Path(appid): Path<AppId>,
     Json(body): Json<ManifestStatusRequest>,
 ) -> Result<Json<Vec<ManifestStatusEntry>>> {
+    state.steam()?; // 401 if not logged in
     // Dedupe — multiple branches often share a manifest_id, no point asking
     // the cache (or the CDN) for it twice in one request.
     let mut seen = HashSet::new();
