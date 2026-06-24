@@ -8,6 +8,7 @@ pub mod auth;
 pub mod config;
 pub mod diff;
 pub mod downloads;
+pub mod export;
 pub mod extra_manifests;
 pub mod files;
 pub mod game_info;
@@ -48,6 +49,9 @@ pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
         .routes(routes!(downloads::manifest_download))
         .routes(routes!(downloads::downloads_snapshot))
         .routes(routes!(downloads::downloads_cancel))
+        .routes(routes!(export::manifest_export))
+        .routes(routes!(export::export_status))
+        .routes(routes!(export::export_cancel))
         .routes(routes!(config::get_config, config::patch_config))
         .routes(routes!(
             extra_manifests::get_extra_manifests,

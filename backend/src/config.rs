@@ -1,7 +1,7 @@
 //! On-disk user configuration.
 
 use camino::{Utf8Path, Utf8PathBuf};
-use directories::ProjectDirs;
+use directories::{ProjectDirs, UserDirs};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,6 +9,9 @@ pub struct Config {
     pub store_root: Utf8PathBuf,
     #[serde(default = "default_mountpoint")]
     pub mountpoint: Utf8PathBuf,
+    /// Root for manifest exports; each export gets its own subdirectory below it.
+    #[serde(default = "default_export_dir")]
+    pub export_dir: Utf8PathBuf,
 }
 
 impl Default for Config {
@@ -16,6 +19,7 @@ impl Default for Config {
         Self {
             store_root: default_store_root(),
             mountpoint: default_mountpoint(),
+            export_dir: default_export_dir(),
         }
     }
 }
@@ -66,6 +70,16 @@ fn default_mountpoint() -> Utf8PathBuf {
         .and_then(|d| Utf8Path::from_path(d.data_dir()).map(|p| p.to_path_buf()))
         .map(|p| p.join("mount"))
         .unwrap_or_else(|| Utf8PathBuf::from("/tmp/steam-multiversion-viewer"))
+}
+
+fn default_export_dir() -> Utf8PathBuf {
+    UserDirs::new()
+        .and_then(|d| {
+            d.download_dir()
+                .and_then(Utf8Path::from_path)
+                .map(Utf8Path::to_path_buf)
+        })
+        .unwrap_or_else(|| default_store_root().join("exports"))
 }
 
 #[derive(Debug)]

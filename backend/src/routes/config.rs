@@ -27,6 +27,8 @@ pub struct ConfigDto {
     pub store_root: Utf8PathBuf,
     #[schema(value_type = String)]
     pub mountpoint: Utf8PathBuf,
+    #[schema(value_type = String)]
+    pub export_dir: Utf8PathBuf,
     pub restart_required: bool,
 }
 
@@ -37,6 +39,8 @@ pub struct PatchConfig {
     pub store_root: Option<Utf8PathBuf>,
     #[schema(value_type = String)]
     pub mountpoint: Option<Utf8PathBuf>,
+    #[schema(value_type = String)]
+    pub export_dir: Option<Utf8PathBuf>,
 }
 
 fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
@@ -47,6 +51,7 @@ fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
         restart_required: saved.store_root != state.initial_config.store_root,
         store_root: saved.store_root,
         mountpoint: saved.mountpoint,
+        export_dir: saved.export_dir,
     }
 }
 
@@ -87,6 +92,9 @@ pub async fn patch_config(
         // Only validated when the user actually starts the mount; we
         // intentionally don't create the dir here.
         cfg.mountpoint = mountpoint;
+    }
+    if let Some(export_dir) = body.export_dir {
+        cfg.export_dir = export_dir;
     }
     cfg.save()?;
     // Publish the new config to every other request handler atomically.

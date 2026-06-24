@@ -14,6 +14,7 @@ import {
   fetchManifestFiles,
   fetchManifestInfo,
   fetchManifestStatuses,
+  type AppId,
   type AppInfo,
   type EnqueueSummary,
   type ExtraManifestEntry,
@@ -27,6 +28,7 @@ import {
 import { Bytes } from "../components/Bytes";
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
 import { ErrorBox } from "../components/ErrorBox";
+import { ExportButton } from "../components/ExportButton";
 import { formatBytes, formatDate } from "../lib/format";
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
@@ -206,6 +208,8 @@ function ManifestDetail() {
           gameInfo={gameInfo.data}
           gameInfoPending={gameInfo.isPending}
           gameInfoError={gameInfo.error as Error | null}
+          appid={appid}
+          appName={appInfoQuery.data?.name}
           branch={branch}
           onDownload={() => {
             markShowImmediately();
@@ -245,6 +249,9 @@ function ManifestHeader({
   gameInfo,
   gameInfoPending,
   gameInfoError,
+  appid,
+  appName,
+  branch,
   onDownload,
   downloadPending,
   downloadResult,
@@ -255,6 +262,8 @@ function ManifestHeader({
   gameInfo: GameInfo | undefined;
   gameInfoPending: boolean;
   gameInfoError: Error | null;
+  appid: AppId;
+  appName: string | undefined;
   branch: string;
   onDownload: () => void;
   downloadPending: boolean;
@@ -273,16 +282,26 @@ function ManifestHeader({
     <div>
       <div className="flex items-start gap-4">
         <h1 className="text-2xl font-bold">Manifest</h1>
-        {!fullyCached && (
-          <button
-            type="button"
-            onClick={onDownload}
-            disabled={downloadPending}
-            className="ml-auto rounded border border-sky-700 bg-sky-950/40 px-3 py-1.5 text-sm hover:bg-sky-900/40 disabled:opacity-50"
-          >
-            {downloadPending ? "Enqueuing…" : "Download all"}
-          </button>
-        )}
+        <div className="ml-auto flex items-start gap-2">
+          <ExportButton
+            appid={appid}
+            appName={appName}
+            depotId={info.depot_id}
+            manifestId={info.manifest_id}
+            branch={branch}
+            gameInfo={gameInfo}
+          />
+          {!fullyCached && (
+            <button
+              type="button"
+              onClick={onDownload}
+              disabled={downloadPending}
+              className="rounded border border-sky-700 bg-sky-950/40 px-3 py-1.5 text-sm hover:bg-sky-900/40 disabled:opacity-50"
+            >
+              {downloadPending ? "Enqueuing…" : "Download all"}
+            </button>
+          )}
+        </div>
       </div>
       {!downloadResult && fullyCached && cachedStatus && (
         <p className="mt-2 text-xs text-slate-400">

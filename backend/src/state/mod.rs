@@ -1,4 +1,5 @@
 pub mod downloads;
+pub mod export;
 pub mod extra_manifests;
 pub mod manifest_cache;
 pub mod mount;
@@ -51,6 +52,7 @@ pub struct AppState {
     /// manifests are fetched.
     pub store_index: Arc<RwLock<StoreIndex>>,
     pub downloads: Arc<DownloadManager>,
+    pub exports: Arc<export::ExportManager>,
     pub extra_manifests: Arc<ExtraManifestsStore>,
     pub mount: Arc<MountManager>,
     pub manifest_cache: Arc<manifest_cache::ManifestCache>,
@@ -72,6 +74,7 @@ impl AppState {
             StoreIndex::scan(&store).with_context(|| format!("scanning store {store_root}"))?;
         let store_index = Arc::new(RwLock::new(index));
         let downloads = DownloadManager::spawn(store_index.clone());
+        let exports = export::ExportManager::new(Arc::clone(&downloads));
 
         let extra_manifests = Arc::new(
             ExtraManifestsStore::load(&store_root)
@@ -88,6 +91,7 @@ impl AppState {
             config: Arc::new(ArcSwap::from_pointee(config)),
             store_index,
             downloads,
+            exports,
             extra_manifests,
             mount,
             manifest_cache: Arc::new(manifest_cache::ManifestCache::new()),

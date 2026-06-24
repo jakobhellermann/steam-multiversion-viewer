@@ -635,6 +635,7 @@ export function fetchGameInfo(
 export type Config = {
   store_root: string;
   mountpoint: string;
+  export_dir: string;
   restart_required: boolean;
 };
 
@@ -645,6 +646,7 @@ export function fetchConfig(): Promise<Config> {
 export async function patchConfig(patch: {
   store_root?: string;
   mountpoint?: string;
+  export_dir?: string;
 }): Promise<Config> {
   const r = await fetch("/api/config", {
     method: "PATCH",
@@ -723,6 +725,51 @@ export async function downloadManifest(
 
 export function fetchDownloads(): Promise<DownloadStats> {
   return getJson("/api/downloads");
+}
+
+export type ExportState = "idle" | "running" | "done" | "failed" | "cancelled";
+
+export type ExportTarget = {
+  app_id: number;
+  depot_id: number;
+  manifest_id: string;
+};
+
+export type ExportStatus = {
+  state: ExportState;
+  target: ExportTarget | null;
+  target_dir: string | null;
+  files_total: number;
+  files_done: number;
+  bytes_total: number;
+  bytes_written: number;
+  current_path: string | null;
+  error: string | null;
+};
+
+export async function exportManifest(
+  appid: AppId,
+  depotId: number,
+  manifestId: string,
+  body: { branch: string; subdir?: string },
+): Promise<ExportStatus> {
+  const r = await fetch(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/export`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
+export function fetchExportStatus(): Promise<ExportStatus> {
+  return getJson("/api/export");
+}
+
+export async function cancelExport(): Promise<ExportStatus> {
+  const r = await fetch("/api/export/cancel", { method: "POST" });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
 }
 
 export async function cancelDownloads(): Promise<DownloadStats> {

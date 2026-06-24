@@ -28,18 +28,23 @@ function SettingsPage() {
 function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void }) {
   const [storeRoot, setStoreRoot] = useState(config.store_root);
   const [mountpoint, setMountpoint] = useState(config.mountpoint);
+  const [exportDir, setExportDir] = useState(config.export_dir);
 
   useEffect(() => {
     setStoreRoot(config.store_root);
     setMountpoint(config.mountpoint);
-  }, [config.store_root, config.mountpoint]);
+    setExportDir(config.export_dir);
+  }, [config.store_root, config.mountpoint, config.export_dir]);
 
   const mutation = useMutation({
-    mutationFn: () => patchConfig({ store_root: storeRoot, mountpoint }),
+    mutationFn: () => patchConfig({ store_root: storeRoot, mountpoint, export_dir: exportDir }),
     onSuccess: () => onSaved(),
   });
 
-  const dirty = storeRoot !== config.store_root || mountpoint !== config.mountpoint;
+  const dirty =
+    storeRoot !== config.store_root ||
+    mountpoint !== config.mountpoint ||
+    exportDir !== config.export_dir;
 
   return (
     <form
@@ -76,6 +81,21 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
         <p className="mt-1 text-xs text-slate-500">
           Where the depot tree appears when you click the mount button. Created on first mount;
           changes take effect after the next stop/start.
+        </p>
+      </label>
+
+      <label className="block">
+        <span className="text-sm text-slate-400">Export directory</span>
+        <input
+          type="text"
+          value={exportDir}
+          onChange={(e) => setExportDir(e.target.value)}
+          className="mt-1 block w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm"
+          spellCheck={false}
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Root for "Export" on a manifest page. Each export lands in its own{" "}
+          <code>&lt;game&gt;-&lt;version&gt;</code> subdirectory below it.
         </p>
       </label>
 
