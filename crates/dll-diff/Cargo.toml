@@ -5,7 +5,7 @@ edition = "2024"
 description = "Per-type diff between two .NET assemblies using dotnetdll metadata."
 
 [dependencies]
-dotnetdll = "0.2"
+dotnetdll = "0.3"
 rayon = "1"
 thiserror = "2"
 tracing = "0.1"
