@@ -11,4 +11,5 @@ export const libraryFixture: OwnedGame[] = [
 export const defaultHandlers = [
   http.get("/api/library", () => HttpResponse.json(libraryFixture)),
   http.get("/api/mount/status", () => HttpResponse.json({ mounted: false })),
+  http.get("/api/auth/status", () => HttpResponse.json({ authenticated: true })),
 ];
