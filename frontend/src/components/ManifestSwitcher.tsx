@@ -125,11 +125,7 @@ export function ManifestSwitcher({
 
   if (visible.length <= 1) {
     return onGoToManifest ? (
-      <button
-        type="button"
-        onClick={onGoToManifest}
-        className="hover:underline"
-      >
+      <button type="button" onClick={onGoToManifest} className="hover:underline">
         {label}
       </button>
     ) : (
@@ -140,11 +136,7 @@ export function ManifestSwitcher({
     <div ref={rootRef} className="relative flex items-center gap-0.5">
       {onGoToManifest ? (
         <>
-          <button
-            type="button"
-            onClick={onGoToManifest}
-            className="hover:underline"
-          >
+          <button type="button" onClick={onGoToManifest} className="hover:underline">
             {label}
           </button>
           <button

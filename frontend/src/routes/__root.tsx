@@ -1,4 +1,10 @@
-import { Link, Outlet, createRootRouteWithContext, redirect, useNavigate } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  createRootRouteWithContext,
+  redirect,
+  useNavigate,
+} from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";

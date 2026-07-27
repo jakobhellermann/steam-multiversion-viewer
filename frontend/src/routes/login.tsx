@@ -182,6 +182,8 @@ function PendingPanel({ pending }: { pending: NonNullable<AuthStatus["pending"]>
 
   // starting / waiting_device
   return (
-    <p className="text-sm text-slate-400">Confirm the login in your Steam mobile app to continue…</p>
+    <p className="text-sm text-slate-400">
+      Confirm the login in your Steam mobile app to continue…
+    </p>
   );
 }

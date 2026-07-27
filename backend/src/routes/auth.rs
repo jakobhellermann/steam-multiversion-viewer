@@ -17,8 +17,8 @@ use utoipa::ToSchema;
 
 use crate::http::ApiError;
 use crate::state::AppState;
-use crate::steam::auth::{self, LoginPhase};
 use crate::steam::SteamClient;
+use crate::steam::auth::{self, LoginPhase};
 
 use super::Result;
 

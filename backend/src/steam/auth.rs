@@ -93,7 +93,10 @@ pub fn begin_web_login(slot: PendingLoginSlot, account: String) -> (WebConfirmat
 pub fn submit_code(slot: &PendingLoginSlot, code: String) -> Result<(), &'static str> {
     let mut guard = slot.lock().expect("pending_login poisoned");
     let pending = guard.as_mut().ok_or("no login in progress")?;
-    let tx = pending.code_tx.take().ok_or("login is not awaiting a code")?;
+    let tx = pending
+        .code_tx
+        .take()
+        .ok_or("login is not awaiting a code")?;
     tx.send(code).map_err(|_| "login task is no longer running")
 }
 
