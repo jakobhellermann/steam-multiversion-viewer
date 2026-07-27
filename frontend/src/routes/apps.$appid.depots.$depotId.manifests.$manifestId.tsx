@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -28,9 +28,9 @@ import { Bytes } from "../components/Bytes";
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
 import { ErrorBox } from "../components/ErrorBox";
 import { formatBytes, formatDate } from "../lib/format";
+import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { pinScroll } from "../lib/pinScroll";
-import { useBranchFilter } from "../lib/useBranchFilter";
 
 type Search = {
   /// `undefined` means "default" (which is `public`). Keeping default
@@ -183,14 +183,18 @@ function ManifestDetail() {
         <ManifestSwitcher
           label={info.data ? formatDate(info.data.creation_time) : "manifest"}
           appid={appid}
-          appidParam={appidParam}
-          depotIdParam={depotIdParam}
           depotId={depotId}
           currentManifestId={manifestId}
           currentBranch={branch}
           appInfo={appInfoQuery.data}
           extras={extraQuery.data ?? []}
           statuses={statusQuery.data}
+          onSelect={(mid, br) =>
+            navigate({
+              params: { appid: appidParam, depotId: depotIdParam, manifestId: mid },
+              search: { branch: br === "public" ? undefined : br },
+            })
+          }
         />
       </nav>
 
@@ -232,175 +236,6 @@ function ManifestDetail() {
           />
         )}
       </section>
-    </div>
-  );
-}
-
-/// Dropdown next to the manifest breadcrumb to jump to another manifest
-/// in the same depot without going back to the app page. Lists official
-/// + tracked manifests, newest first; selecting one navigates to its
-/// page (resetting the per-manifest filters in the URL).
-function ManifestSwitcher({
-  label,
-  appid,
-  appidParam,
-  depotIdParam,
-  depotId,
-  currentManifestId,
-  currentBranch,
-  appInfo,
-  extras,
-  statuses,
-}: {
-  label: string;
-  appid: number;
-  appidParam: string;
-  depotIdParam: string;
-  depotId: number;
-  currentManifestId: string;
-  currentBranch: string;
-  appInfo: AppInfo | undefined;
-  extras: ExtraManifestEntry[];
-  statuses: ManifestStatusEntry[] | undefined;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  const manifests = useMemo(() => {
-    if (!appInfo) return [];
-    const creation = new Map<string, number>();
-    for (const s of statuses ?? []) creation.set(`${s.depot_id}/${s.manifest_id}`, s.creation_time);
-    const seen = new Set<string>();
-    const out: { manifestId: string; branch: string; creationTime: number }[] = [];
-    const add = (manifestId: string, branch: string) => {
-      const key = `${manifestId}|${branch}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push({ manifestId, branch, creationTime: creation.get(`${depotId}/${manifestId}`) ?? 0 });
-    };
-    for (const m of appInfo.depots.find((d) => d.depot_id === depotId)?.manifests ?? []) {
-      add(m.manifest_id, m.branch);
-    }
-    for (const e of extras) {
-      if (e.depot_id === depotId) add(e.manifest_id, e.branch ?? "public");
-    }
-    out.sort((a, b) => b.creationTime - a.creationTime || a.manifestId.localeCompare(b.manifestId));
-    return out;
-  }, [appInfo, extras, statuses, depotId]);
-  // Follow the shared branch filter, but always keep the current manifest
-  // visible so the dropdown still reflects where you are.
-  const { hidden } = useBranchFilter(
-    appid,
-    manifests.map((m) => m.branch),
-  );
-  const visible = useMemo(
-    () =>
-      manifests.filter(
-        (m) =>
-          !hidden.has(m.branch) ||
-          (m.manifestId === currentManifestId && m.branch === currentBranch),
-      ),
-    [manifests, hidden, currentManifestId, currentBranch],
-  );
-  // Show the Unity game version instead of the raw manifest id when we can
-  // detect it — same `/game_info` query shape as elsewhere, so it's a cache
-  // hit. Only fetched while the dropdown is open.
-  const gameInfoQueries = useQueries({
-    queries: visible.map((m) => ({
-      // Branch omitted from the key on purpose — shared with the page +
-      // compare menu (see the gameInfo query above).
-      queryKey: ["game-info", appid, depotId, m.manifestId],
-      queryFn: () => fetchGameInfo(appid, depotId, m.manifestId, m.branch),
-      enabled: open,
-      staleTime: Infinity,
-      gcTime: 30 * 60 * 1000,
-    })),
-  });
-  const versionByKey = useMemo(() => {
-    const map = new Map<string, string>();
-    visible.forEach((m, i) => {
-      const data = gameInfoQueries[i]?.data as GameInfo | undefined;
-      const v = data?.engine?.engine === "unity" ? data.engine.data.bundle_version : undefined;
-      if (v) map.set(`${m.manifestId}|${m.branch}`, v);
-    });
-    return map;
-  }, [visible, gameInfoQueries]);
-  // Nothing to switch to — show the label as plain text.
-  if (visible.length <= 1) {
-    return <span className="font-medium text-slate-200">{label}</span>;
-  }
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        title="Switch to another manifest"
-        className="flex items-center gap-1 font-medium text-slate-200 hover:text-white"
-      >
-        {label}
-        <span className="text-xs text-slate-500">▾</span>
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 z-20 mt-1 max-h-80 w-72 overflow-auto rounded border border-slate-700 bg-slate-900 shadow-lg">
-          <ul>
-            {visible.map((m) => {
-              const isCurrent = m.manifestId === currentManifestId && m.branch === currentBranch;
-              return (
-                <li key={`${m.manifestId}|${m.branch}`}>
-                  <Link
-                    to="/apps/$appid/depots/$depotId/manifests/$manifestId"
-                    params={{ appid: appidParam, depotId: depotIdParam, manifestId: m.manifestId }}
-                    search={{ branch: m.branch === "public" ? undefined : m.branch }}
-                    onClick={() => setOpen(false)}
-                    className={`flex items-center gap-2 px-3 py-1.5 text-sm ${
-                      isCurrent
-                        ? "bg-slate-800 text-slate-100"
-                        : "text-slate-300 hover:bg-slate-800/60"
-                    }`}
-                  >
-                    <span className="inline-block w-3 text-center text-sky-400">
-                      {isCurrent ? "✓" : ""}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{m.branch}</span>
-                      <span className="block truncate text-xs text-slate-500">
-                        {m.creationTime > 0 ? formatDate(m.creationTime) : "date unknown"}
-                      </span>
-                    </span>
-                    {(() => {
-                      const v = versionByKey.get(`${m.manifestId}|${m.branch}`);
-                      return (
-                        <span
-                          className={`text-xs text-slate-500 tabular-nums ${v ? "" : "font-mono"}`}
-                          title={v ? m.manifestId : undefined}
-                        >
-                          {v ?? `${m.manifestId.slice(0, 8)}…`}
-                        </span>
-                      );
-                    })()}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

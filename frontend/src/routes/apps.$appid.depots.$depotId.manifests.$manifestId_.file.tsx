@@ -14,6 +14,7 @@ import {
   type ManifestStatusEntry,
 } from "../api";
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
+import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { ErrorBox } from "../components/ErrorBox";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { formatBytes, formatDate } from "../lib/format";
@@ -218,14 +219,29 @@ function FileViewPage() {
           {branch === "public" ? depotId : `${depotId} · ${branch}`}
         </Link>
         <span className="text-slate-600">/</span>
-        <Link
-          to="/apps/$appid/depots/$depotId/manifests/$manifestId"
-          params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
-          search={{ branch: branch === "public" ? undefined : branch, compare_to }}
-          className="hover:underline"
-        >
-          {manifestCrumbLabel(currentManifestCreation(statusQuery.data, depotId, manifestId))}
-        </Link>
+        <ManifestSwitcher
+          label={manifestCrumbLabel(currentManifestCreation(statusQuery.data, depotId, manifestId))}
+          appid={appid}
+          depotId={depotId}
+          currentManifestId={manifestId}
+          currentBranch={branch}
+          appInfo={appInfoQuery.data}
+          extras={extraQuery.data ?? []}
+          statuses={statusQuery.data}
+          onSelect={(mid, br) =>
+            navigate({
+              params: { appid: appidParam, depotId: depotIdParam, manifestId: mid },
+              search: { branch: br === "public" ? undefined : br, path, compare_to },
+            })
+          }
+          onGoToManifest={() =>
+            navigate({
+              to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
+              params: { appid: appidParam, depotId: depotIdParam, manifestId },
+              search: { branch: branch === "public" ? undefined : branch, compare_to },
+            })
+          }
+        />
         <span className="text-slate-600">/</span>
         <span className="truncate font-medium text-slate-200">{filenameOf(path)}</span>
       </nav>

@@ -1,15 +1,18 @@
 // TODO(ai-review): review for style and correctness
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 import {
   fetchAppInfo,
+  fetchExtraManifests,
   fetchFileViewOptional,
   fetchManifestStatuses,
   fileRawUrl,
   type FileView,
   type ManifestRef,
 } from "../api";
+import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { ErrorBox } from "../components/ErrorBox";
 import { formatDate } from "../lib/format";
 import { DiffView } from "./-file/DiffView";
@@ -52,6 +55,7 @@ export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$ma
 function DiffPage() {
   const { appid: appidParam, depotId: depotIdParam, manifestId } = Route.useParams();
   const search = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
   const branch = search.branch ?? "public";
   const targetBranch = search.target_branch ?? "public";
   const { path, target_depot_id: targetDepotId, target_manifest_id: targetManifestId } = search;
@@ -62,6 +66,10 @@ function DiffPage() {
     queryKey: ["app", appid],
     queryFn: () => fetchAppInfo(appid),
   });
+  const extraQuery = useQuery({
+    queryKey: ["extra-manifests", appid],
+    queryFn: () => fetchExtraManifests(appid),
+  });
   const baseRef: ManifestRef = { depot_id: depotId, manifest_id: manifestId, branch };
   const targetRef: ManifestRef = {
     depot_id: targetDepotId,
@@ -71,6 +79,37 @@ function DiffPage() {
   const statusQuery = useQuery({
     queryKey: ["manifest-statuses", appid, [baseRef, targetRef]],
     queryFn: () => fetchManifestStatuses(appid, [baseRef, targetRef]),
+  });
+  // Full status query for the manifest switcher — shared cache key with
+  // the manifest detail + file pages so it's usually a cache hit.
+  const compareRefs = useMemo<ManifestRef[]>(() => {
+    if (!appInfoQuery.data) return [];
+    const seen = new Set<string>();
+    const refs: ManifestRef[] = [];
+    for (const d of appInfoQuery.data.depots) {
+      for (const m of d.manifests) {
+        const key = `${d.depot_id}/${m.manifest_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        refs.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
+      }
+    }
+    for (const e of extraQuery.data ?? []) {
+      const key = `${e.depot_id}/${e.manifest_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      refs.push({
+        depot_id: e.depot_id,
+        manifest_id: e.manifest_id,
+        branch: e.branch ?? "public",
+      });
+    }
+    return refs;
+  }, [appInfoQuery.data, extraQuery.data]);
+  const switcherStatusQuery = useQuery({
+    queryKey: ["manifest-statuses", appid, compareRefs],
+    queryFn: () => fetchManifestStatuses(appid, compareRefs),
+    enabled: compareRefs.length > 0 && extraQuery.isSuccess,
   });
   // Confirm the file exists on both sides up front — saves the diff
   // endpoint a roundtrip for a missing path and lets us surface a
@@ -114,15 +153,35 @@ function DiffPage() {
           {branch === "public" ? depotId : `${depotId} · ${branch}`}
         </Link>
         <span className="text-slate-600">/</span>
-        <Link
-          from={Route.fullPath}
-          to="/apps/$appid/depots/$depotId/manifests/$manifestId"
-          params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
-          search={{ branch: branch === "public" ? undefined : branch }}
-          className="hover:underline"
-        >
-          {baseCreation > 0 ? formatDate(baseCreation) : "manifest"}
-        </Link>
+        <ManifestSwitcher
+          label={baseCreation > 0 ? formatDate(baseCreation) : "manifest"}
+          appid={appid}
+          depotId={depotId}
+          currentManifestId={manifestId}
+          currentBranch={branch}
+          appInfo={appInfoQuery.data}
+          extras={extraQuery.data ?? []}
+          statuses={switcherStatusQuery.data}
+          onSelect={(mid, br) =>
+            navigate({
+              params: { appid: appidParam, depotId: depotIdParam, manifestId: mid },
+              search: {
+                branch: br === "public" ? undefined : br,
+                path,
+                target_depot_id: targetDepotId,
+                target_manifest_id: targetManifestId,
+                target_branch: targetBranch === "public" ? undefined : targetBranch,
+              },
+            })
+          }
+          onGoToManifest={() =>
+            navigate({
+              to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
+              params: { appid: appidParam, depotId: depotIdParam, manifestId },
+              search: { branch: branch === "public" ? undefined : branch },
+            })
+          }
+        />
         <span className="text-slate-600">/</span>
         <Link
           from={Route.fullPath}
