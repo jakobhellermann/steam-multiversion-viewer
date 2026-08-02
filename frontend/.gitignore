@@ -12,5 +12,3 @@ dist-ssr
 __unconfig*
 todos.json
 /.vite
-pnpm-workspace.yaml
-pnpm-lock.yaml
