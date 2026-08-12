@@ -14,7 +14,7 @@ use tokio::io::AsyncWriteExt;
 use utoipa::ToSchema;
 
 use super::Snapshot;
-use super::downloads::DownloadManager;
+use super::downloads::ChunkService;
 use crate::steam::{AppId, DepotId, ManifestId};
 
 /// Window size for the read-then-write loop, so a multi-GiB file never lands in memory whole.
@@ -54,7 +54,7 @@ pub struct ExportStatus {
 
 pub struct ExportManager {
     status: Mutex<ExportStatus>,
-    downloads: Arc<DownloadManager>,
+    downloads: Arc<ChunkService>,
     cancelled: AtomicBool,
 }
 
@@ -91,7 +91,7 @@ impl From<std::io::Error> for ExportError {
 }
 
 impl ExportManager {
-    pub fn new(downloads: Arc<DownloadManager>) -> Arc<Self> {
+    pub fn new(downloads: Arc<ChunkService>) -> Arc<Self> {
         Arc::new(Self {
             status: Mutex::new(ExportStatus::default()),
             downloads,
@@ -186,8 +186,7 @@ impl ExportManager {
         // Queue every chunk up front so the download worker's parallelism is
         // saturated while we write files out one by one.
         self.downloads
-            .enqueue(Arc::clone(snapshot), plan.all_chunks())
-            .await;
+            .enqueue(Arc::clone(snapshot), plan.all_chunks());
 
         let mut buf = Vec::with_capacity(WRITE_WINDOW as usize);
         for file in &plan.files {

@@ -14,7 +14,7 @@ use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
 use steam_depot_vfs::fs::DepotManifestStore;
 use steam_depot_vfs::{DepotStore, VfsError};
 
-use self::downloads::DownloadManager;
+use self::downloads::ChunkService;
 use self::extra_manifests::ExtraManifestsStore;
 use self::mount::MountManager;
 use self::store_index::StoreIndex;
@@ -51,7 +51,7 @@ pub struct AppState {
     /// In-memory indexes derived from the on-disk store. Updated when new
     /// manifests are fetched.
     pub store_index: Arc<RwLock<StoreIndex>>,
-    pub downloads: Arc<DownloadManager>,
+    pub downloads: Arc<ChunkService>,
     pub exports: Arc<export::ExportManager>,
     pub extra_manifests: Arc<ExtraManifestsStore>,
     pub mount: Arc<MountManager>,
@@ -73,7 +73,7 @@ impl AppState {
         let index =
             StoreIndex::scan(&store).with_context(|| format!("scanning store {store_root}"))?;
         let store_index = Arc::new(RwLock::new(index));
-        let downloads = DownloadManager::spawn(store_index.clone());
+        let downloads = ChunkService::spawn(store_index.clone());
         let exports = export::ExportManager::new(Arc::clone(&downloads));
 
         let extra_manifests = Arc::new(

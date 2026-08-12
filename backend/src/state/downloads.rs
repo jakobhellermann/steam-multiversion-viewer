@@ -1,32 +1,32 @@
 // TODO(ai-review): review for style and correctness
-//! Background chunk downloader.
+//! Central chunk service. Every CDN chunk fetch funnels through here:
+//! bulk downloads ([`ChunkService::enqueue`]), interactive reads
+//! ([`ChunkService::enqueue_and_wait`]), and implicit reads arriving via
+//! [`crate::steam::chunk_store::TrackedChunkStore`].
 //!
-//! Routes enqueue (snapshot, sha) pairs; a long-lived worker drains them
-//! with bounded parallelism and broadcasts progress so the UI can render a
-//! live status drawer. Chunks already present on disk or already queued
-//! in this session are skipped, so clicking "download" twice is cheap.
+//! Provides single-flight per SHA, interactive-over-bulk priority, and a
+//! single accounting point so download totals stay fixed after enqueue.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
+use bytes::Bytes;
 use serde::Serialize;
 #[allow(unused_imports)]
 use serde_json::json;
-use steam_depot_vfs::ChunkHash;
 use steam_depot_vfs::chunk_store::ChunkStore;
-use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
+use steam_depot_vfs::{ChunkHash, VfsError};
+use tokio::sync::{Semaphore, broadcast, mpsc, oneshot, watch};
 use utoipa::ToSchema;
 
 use super::Snapshot;
 use super::store_index::StoreIndex;
 use crate::steam::{DepotId, ManifestId};
 
-/// Coalesce window for the per-file `chunks` SSE events. Multiple chunk
-/// landings inside this window collapse into one event per affected
-/// (manifest, file) pair. Trades a tiny UI latency for far fewer events
-/// on the wire during a busy parallel download (16-32 chunks/s easy).
+/// Coalesce window for the per-file `chunks` SSE events, so a busy
+/// download emits one event per (manifest, file) instead of per chunk.
 const CHUNK_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Empirically the prefetch CLI saturates at 32 parallel CDN fetches. Be
@@ -42,9 +42,7 @@ fn parallelism() -> usize {
         .unwrap_or(DEFAULT_PARALLELISM)
 }
 
-/// Optional per-chunk delay knob, in milliseconds. Useful for stretching
-/// out a download so progress UI can be observed end-to-end. Debug-only;
-/// release builds have no point paying the syscall.
+/// Optional per-chunk delay in ms, for observing progress UI. Debug-only.
 #[cfg(debug_assertions)]
 fn throttle_ms() -> u64 {
     std::env::var("DOWNLOAD_THROTTLE_MS")
@@ -58,42 +56,51 @@ fn throttle_ms() -> u64 {
     0
 }
 
-pub struct DownloadManager {
-    submit: mpsc::UnboundedSender<Job>,
+#[derive(Clone, Copy)]
+enum Priority {
+    Interactive,
+    Bulk,
+}
+
+pub struct ChunkService {
+    interactive: mpsc::UnboundedSender<Job>,
+    bulk: mpsc::UnboundedSender<Job>,
     stats: Mutex<DownloadStats>,
     events: broadcast::Sender<DownloadEvent>,
-    seen: Mutex<HashSet<ChunkHash>>,
+    /// Chunks enqueued but not yet settled. Membership decides the
+    /// accounting regime in [`Self::fetch_via`]: pending SHAs were counted
+    /// at enqueue, everything else is an implicit read counted on the fly.
+    /// Doubles as the enqueue-dedup set and carries completion waiters.
+    pending: Mutex<HashMap<ChunkHash, Pending>>,
+    /// Single-flight map, present only while a fetch is running.
+    inflight: Mutex<HashMap<ChunkHash, watch::Receiver<Option<SharedResult>>>>,
     store_index: Arc<RwLock<StoreIndex>>,
-    /// Bumped on cancel. Jobs carry the epoch they were enqueued under;
-    /// any stats update from a stale-epoch job is suppressed.
-    epoch: AtomicU64,
-    /// One-shot completion notifications, keyed by chunk SHA. Callers of
-    /// [`DownloadManager::enqueue_and_wait`] register a sender per chunk
-    /// they need to wait on; the worker fires them after the chunk lands
-    /// (or fails) so the awaiter can proceed.
-    waiters: Mutex<HashMap<ChunkHash, Vec<oneshot::Sender<bool>>>>,
-    /// Landed chunks awaiting the next [`CHUNK_FLUSH_INTERVAL`] flush, so
-    /// per-file `chunks` events get batched instead of one-per-landing.
-    /// Keyed by (depot_id, manifest_id) because a single chunk SHA only
-    /// has meaningful file-paths inside the manifest that referenced it.
-    /// The `Arc<Snapshot>` keeps the manifest alive for the flush task's
-    /// scan over `manifest.files`.
+    /// Landed chunks awaiting the next [`CHUNK_FLUSH_INTERVAL`] flush.
+    /// Keyed per manifest because a SHA only has meaningful file paths
+    /// inside the manifest that referenced it.
     pending_chunks: Mutex<HashMap<(DepotId, ManifestId), PendingChunkBatch>>,
-    /// Set while a flush task is scheduled; ensures only one timer runs
-    /// at a time. Reset by the flush task before it drains.
+    /// Set while a flush task is scheduled, so only one timer runs.
     flush_scheduled: AtomicBool,
+}
+
+/// `VfsError` isn't `Clone`, so followers get the stringified error.
+type SharedResult = Result<Bytes, String>;
+
+struct Pending {
+    size_compressed: u64,
+    /// Keeps the manifest alive for [`ChunkService::record_chunk_landed`].
+    snapshot: Arc<Snapshot>,
+    waiters: Vec<oneshot::Sender<bool>>,
+}
+
+struct Job {
+    sha: ChunkHash,
+    snapshot: Arc<Snapshot>,
 }
 
 struct PendingChunkBatch {
     snapshot: Arc<Snapshot>,
     shas: HashSet<ChunkHash>,
-}
-
-struct Job {
-    sha: ChunkHash,
-    size_compressed: u64,
-    snapshot: Arc<Snapshot>,
-    epoch: u64,
 }
 
 #[derive(Default, Clone, Debug, Serialize, ToSchema)]
@@ -123,9 +130,8 @@ pub struct EnqueueSummary {
     pub already_present_chunks: u64,
 }
 
-/// Multiplexed event on the [`DownloadManager`] broadcast channel. The
-/// SSE handler maps each variant to a distinct SSE `event:` name so the
-/// frontend can register typed listeners.
+/// Multiplexed event on the broadcast channel; each variant maps to a
+/// distinct SSE `event:` name.
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum DownloadEvent {
@@ -133,11 +139,9 @@ pub enum DownloadEvent {
     Chunks(ChunkUpdate),
 }
 
-/// Coalesced "chunks landed" notice for a single manifest. The frontend
-/// uses it to patch its `manifest-files` query cache in place without a
-/// refetch — `path` keys into the visible rows, `chunks_present` is the
-/// authoritative new count (not a delta, so missed events self-heal on
-/// the next one).
+/// Coalesced "chunks landed" notice for a single manifest.
+/// `chunks_present` is the authoritative new count, not a delta, so
+/// missed events self-heal on the next one.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ChunkUpdate {
     pub depot_id: DepotId,
@@ -151,141 +155,163 @@ pub struct FileChunksUpdate {
     pub chunks_present: u32,
 }
 
-impl DownloadManager {
+impl ChunkService {
     pub fn spawn(store_index: Arc<RwLock<StoreIndex>>) -> Arc<Self> {
-        let (submit, mut rx) = mpsc::unbounded_channel::<Job>();
+        let (interactive, mut int_rx) = mpsc::unbounded_channel::<Job>();
+        let (bulk, mut bulk_rx) = mpsc::unbounded_channel::<Job>();
         let (events, _) = broadcast::channel(64);
-        let manager = Arc::new(Self {
-            submit,
+        let service = Arc::new(Self {
+            interactive,
+            bulk,
             stats: Mutex::new(DownloadStats::default()),
             events,
-            seen: Mutex::new(HashSet::new()),
+            pending: Mutex::new(HashMap::new()),
+            inflight: Mutex::new(HashMap::new()),
             store_index,
-            epoch: AtomicU64::new(0),
-            waiters: Mutex::new(HashMap::new()),
             pending_chunks: Mutex::new(HashMap::new()),
             flush_scheduled: AtomicBool::new(false),
         });
 
-        let worker = manager.clone();
+        let worker = Arc::downgrade(&service);
         let parallelism = parallelism();
         let throttle = throttle_ms();
-        tracing::info!(
-            parallelism,
-            throttle_ms = throttle,
-            "download worker started"
-        );
+        tracing::info!(parallelism, throttle_ms = throttle, "chunk service started");
         tokio::spawn(async move {
             let sem = Arc::new(Semaphore::new(parallelism));
-            while let Some(job) = rx.recv().await {
+            loop {
+                // Biased: interactive jobs overtake queued bulk work.
+                let job = tokio::select! {
+                    biased;
+                    j = int_rx.recv() => j,
+                    j = bulk_rx.recv() => j,
+                };
+                let Some(job) = job else { break };
                 let permit = sem
                     .clone()
                     .acquire_owned()
                     .await
                     .expect("semaphore not closed");
-                let worker = worker.clone();
+                let Some(worker) = worker.upgrade() else {
+                    break;
+                };
                 tokio::spawn(async move {
                     let _permit = permit;
-                    // Drop queued jobs whose enqueue epoch has been
-                    // superseded by a cancel — no point burning CDN
-                    // bandwidth on a download the user already aborted.
-                    if job.epoch < worker.epoch.load(Ordering::Acquire) {
+                    // Settled in the meantime or cancelled: skip.
+                    if !worker
+                        .pending
+                        .lock()
+                        .expect("pending poisoned")
+                        .contains_key(&job.sha)
+                    {
                         return;
                     }
                     if throttle > 0 {
                         tokio::time::sleep(Duration::from_millis(throttle)).await;
                     }
                     let res = job.snapshot.chunks().ensure(job.sha).await;
-                    let ok = res.is_ok();
-                    worker.complete(job.sha, job.size_compressed, res, job.epoch);
-                    if ok {
-                        Arc::clone(&worker).record_chunk_landed(job.snapshot, job.sha);
-                    }
+                    // Fallback for disk-cache hits, which never reach the
+                    // fetch_via layer that normally settles.
+                    let err = res.as_ref().err().map(|e| e.to_string());
+                    worker.settle(job.sha, res.is_ok(), err);
                 });
             }
         });
 
-        manager
+        service
     }
 
-    /// Filters out chunks that are already on disk or already queued in this
-    /// session, enqueues the rest. The summary tells the caller what
-    /// actually got submitted vs. what was a no-op.
-    pub async fn enqueue(
+    /// Enqueue as background bulk work; chunks already on disk or queued
+    /// are skipped.
+    pub fn enqueue(
         &self,
         snapshot: Arc<Snapshot>,
         chunks: impl IntoIterator<Item = (ChunkHash, u64)>,
     ) -> EnqueueSummary {
-        self.enqueue_internal(snapshot, chunks, false).await.0
+        self.enqueue_internal(snapshot, chunks, Priority::Bulk, false)
+            .0
     }
 
-    /// Like [`enqueue`], but also waits until every requested chunk has
-    /// either landed on disk (and been recorded in the chunk-presence
-    /// index) or failed. Chunks already on disk return immediately;
-    /// chunks already in flight from a prior enqueue still get a waiter
-    /// attached so the caller sees the same completion semantics.
+    /// Like [`enqueue`](Self::enqueue), but interactive: jumps ahead of
+    /// bulk work and waits until every requested chunk landed or failed.
     pub async fn enqueue_and_wait(
         &self,
         snapshot: Arc<Snapshot>,
         chunks: impl IntoIterator<Item = (ChunkHash, u64)>,
     ) -> EnqueueSummary {
-        let (summary, waiters) = self.enqueue_internal(snapshot, chunks, true).await;
+        let (summary, waiters) =
+            self.enqueue_internal(snapshot, chunks, Priority::Interactive, true);
         for rx in waiters {
-            // Err just means the sender was dropped (cancelled or worker
-            // crashed). Either way the caller will discover the missing
-            // chunks via the on-disk state.
+            // Err means cancelled; the caller discovers missing chunks
+            // via the on-disk state.
             let _ = rx.await;
         }
         summary
     }
 
-    async fn enqueue_internal(
+    fn enqueue_internal(
         &self,
         snapshot: Arc<Snapshot>,
         chunks: impl IntoIterator<Item = (ChunkHash, u64)>,
+        priority: Priority,
         register_waiters: bool,
     ) -> (EnqueueSummary, Vec<oneshot::Receiver<bool>>) {
+        let lane = match priority {
+            Priority::Interactive => &self.interactive,
+            Priority::Bulk => &self.bulk,
+        };
         let mut summary = EnqueueSummary::default();
         let mut waiters = Vec::new();
-        let epoch = self.epoch.load(Ordering::Acquire);
         {
             let index = self.store_index.read().expect("store_index poisoned");
-            let mut seen = self.seen.lock().expect("seen poisoned");
-            let mut waitmap_guard = if register_waiters {
-                Some(self.waiters.lock().expect("waiters poisoned"))
-            } else {
-                None
-            };
+            let mut pending = self.pending.lock().expect("pending poisoned");
             for (sha, size) in chunks {
                 if index.has_chunk(&sha) {
                     summary.already_present_chunks += 1;
                     continue;
                 }
-                if let Some(ref mut waitmap) = waitmap_guard {
-                    let (tx, rx) = oneshot::channel();
-                    waitmap.entry(sha).or_default().push(tx);
-                    waiters.push(rx);
+                match pending.entry(sha) {
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        // Already queued and counted. Re-submitting on the
+                        // interactive lane overtakes the bulk queue; the
+                        // stale bulk job sees the chunk settled and skips.
+                        if register_waiters {
+                            let (tx, rx) = oneshot::channel();
+                            e.get_mut().waiters.push(tx);
+                            waiters.push(rx);
+                        }
+                        if matches!(priority, Priority::Interactive) {
+                            let _ = lane.send(Job {
+                                sha,
+                                snapshot: snapshot.clone(),
+                            });
+                        }
+                    }
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        let mut entry = Pending {
+                            size_compressed: size,
+                            snapshot: snapshot.clone(),
+                            waiters: Vec::new(),
+                        };
+                        if register_waiters {
+                            let (tx, rx) = oneshot::channel();
+                            entry.waiters.push(tx);
+                            waiters.push(rx);
+                        }
+                        e.insert(entry);
+                        if lane
+                            .send(Job {
+                                sha,
+                                snapshot: snapshot.clone(),
+                            })
+                            .is_err()
+                        {
+                            // Worker has shut down; abort the rest.
+                            break;
+                        }
+                        summary.enqueued_chunks += 1;
+                        summary.enqueued_bytes += size;
+                    }
                 }
-                if !seen.insert(sha) {
-                    // Another caller already enqueued this sha. Our
-                    // waiter (if any) will fire alongside theirs.
-                    continue;
-                }
-                if self
-                    .submit
-                    .send(Job {
-                        sha,
-                        size_compressed: size,
-                        snapshot: snapshot.clone(),
-                        epoch,
-                    })
-                    .is_err()
-                {
-                    // Worker has shut down; abort the rest.
-                    break;
-                }
-                summary.enqueued_chunks += 1;
-                summary.enqueued_bytes += size;
             }
         }
         if summary.enqueued_chunks > 0 {
@@ -300,52 +326,180 @@ impl DownloadManager {
         (summary, waiters)
     }
 
-    /// Record the start of a CDN-tracked chunk fetch driven by an
-    /// out-of-band reader (e.g. rabex-env's bundle/typetree loads via
-    /// [`crate::steam::chunk_store::TrackedChunkStore`]). Bumps the queued
-    /// counter so the drawer surfaces in-flight reads that didn't go
-    /// through [`enqueue`](Self::enqueue). The size is unknown at this
-    /// point — we update `bytes_total` only on completion when we have
-    /// the actual transferred byte count.
-    pub fn track_fetch_started(&self, sha: ChunkHash) {
-        let snapshot = {
-            let mut s = self.stats.lock().expect("stats poisoned");
-            s.chunks_total += 1;
-            s.clone()
-        };
-        let _ = self.events.send(DownloadEvent::Stats(snapshot));
-        tracing::trace!(%sha, "tracked fetch started");
+    /// Single-flight + accounting wrapper around an actual CDN fetch;
+    /// the only place where chunk completions are counted.
+    /// Cancellation-safe: if the leader is dropped mid-fetch, followers
+    /// retry and one becomes the new leader.
+    pub async fn fetch_via<F>(self: &Arc<Self>, sha: ChunkHash, fetch: F) -> Result<Bytes, VfsError>
+    where
+        F: Future<Output = Result<Bytes, VfsError>>,
+    {
+        enum Role {
+            Leader(watch::Sender<Option<SharedResult>>),
+            Follower(watch::Receiver<Option<SharedResult>>),
+        }
+        let mut fetch = Some(fetch);
+        loop {
+            // Decide the role under the lock, fetch outside it.
+            let role = {
+                let mut inflight = self.inflight.lock().expect("inflight poisoned");
+                match inflight.entry(sha) {
+                    std::collections::hash_map::Entry::Occupied(e) => {
+                        Role::Follower(e.get().clone())
+                    }
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        let (tx, rx) = watch::channel(None);
+                        e.insert(rx);
+                        Role::Leader(tx)
+                    }
+                }
+            };
+            let mut rx = match role {
+                Role::Leader(tx) => {
+                    return self
+                        .lead_fetch(sha, fetch.take().expect("leader runs once"), tx)
+                        .await;
+                }
+                Role::Follower(rx) => rx,
+            };
+            loop {
+                if let Some(shared) = rx.borrow_and_update().clone() {
+                    return shared.map_err(|msg| VfsError::Other(msg.into()));
+                }
+                if rx.changed().await.is_err() {
+                    // Leader dropped without a result: clean up and retry.
+                    let mut inflight = self.inflight.lock().expect("inflight poisoned");
+                    if let Some(cur) = inflight.get(&sha)
+                        && cur.same_channel(&rx)
+                    {
+                        inflight.remove(&sha);
+                    }
+                    break;
+                }
+            }
+        }
     }
 
-    /// Record the completion of a fetch begun with
-    /// [`track_fetch_started`](Self::track_fetch_started). `size` is the
-    /// number of bytes the underlying store handed back (uncompressed,
-    /// since the CDN store decompresses before returning). On error
-    /// `last_error` is set and the failure counter ticks; size is
-    /// ignored.
-    pub fn track_fetch_completed(
-        &self,
+    async fn lead_fetch<F>(
+        self: &Arc<Self>,
         sha: ChunkHash,
-        size: u64,
-        result: Result<(), steam_depot_vfs::VfsError>,
-    ) {
+        fetch: F,
+        tx: watch::Sender<Option<SharedResult>>,
+    ) -> Result<Bytes, VfsError>
+    where
+        F: Future<Output = Result<Bytes, VfsError>>,
+    {
+        // Removes the inflight entry on drop, so followers don't hang
+        // on a dead leader.
+        struct InflightGuard<'a> {
+            service: &'a ChunkService,
+            sha: ChunkHash,
+        }
+        impl Drop for InflightGuard<'_> {
+            fn drop(&mut self) {
+                self.service
+                    .inflight
+                    .lock()
+                    .expect("inflight poisoned")
+                    .remove(&self.sha);
+            }
+        }
+        let guard = InflightGuard { service: self, sha };
+
+        // Queued chunks were counted at enqueue, implicit reads here.
+        let queued = self
+            .pending
+            .lock()
+            .expect("pending poisoned")
+            .contains_key(&sha);
+        if !queued {
+            let snapshot = {
+                let mut s = self.stats.lock().expect("stats poisoned");
+                s.chunks_total += 1;
+                s.clone()
+            };
+            let _ = self.events.send(DownloadEvent::Stats(snapshot));
+        }
+
+        let res = fetch.await;
+
+        match &res {
+            Ok(bytes) => {
+                if queued {
+                    self.settle(sha, true, None);
+                } else {
+                    // Implicit read: size unknown upfront, count the
+                    // delivered bytes into total and completed alike.
+                    self.store_index
+                        .write()
+                        .expect("store_index poisoned")
+                        .mark_chunk_present(sha);
+                    let snapshot = {
+                        let mut s = self.stats.lock().expect("stats poisoned");
+                        s.chunks_completed += 1;
+                        s.bytes_total += bytes.len() as u64;
+                        s.bytes_completed += bytes.len() as u64;
+                        s.clone()
+                    };
+                    let _ = self.events.send(DownloadEvent::Stats(snapshot));
+                }
+            }
+            Err(err) => {
+                tracing::warn!(%sha, %err, "chunk fetch failed");
+                if queued {
+                    self.settle(sha, false, Some(err.to_string()));
+                } else {
+                    let snapshot = {
+                        let mut s = self.stats.lock().expect("stats poisoned");
+                        s.chunks_failed += 1;
+                        s.last_error = Some(err.to_string());
+                        s.clone()
+                    };
+                    let _ = self.events.send(DownloadEvent::Stats(snapshot));
+                }
+            }
+        }
+
+        let shared: SharedResult = res.as_ref().map(Bytes::clone).map_err(|e| e.to_string());
+        // Remove the inflight entry before publishing so a late-comer
+        // becomes a fresh leader and hits the disk cache.
+        drop(guard);
+        let _ = tx.send(Some(shared));
+        res
+    }
+
+    /// Settle a queued chunk exactly once: update stats, mark disk
+    /// presence, notify waiters. No-op if already settled or cancelled.
+    fn settle(self: &Arc<Self>, sha: ChunkHash, ok: bool, err: Option<String>) {
+        let Some(entry) = self.pending.lock().expect("pending poisoned").remove(&sha) else {
+            return;
+        };
+        if ok {
+            // Inline (not spawned) so a waiter never resolves before the
+            // index reflects the chunk.
+            self.store_index
+                .write()
+                .expect("store_index poisoned")
+                .mark_chunk_present(sha);
+        }
         let snapshot = {
             let mut s = self.stats.lock().expect("stats poisoned");
-            match result {
-                Ok(()) => {
-                    s.chunks_completed += 1;
-                    s.bytes_completed += size;
-                    s.bytes_total += size;
-                }
-                Err(err) => {
-                    s.chunks_failed += 1;
-                    s.last_error = Some(err.to_string());
-                    tracing::warn!(%sha, %err, "tracked chunk fetch failed");
-                }
+            if ok {
+                s.chunks_completed += 1;
+                s.bytes_completed += entry.size_compressed;
+            } else {
+                s.chunks_failed += 1;
+                s.last_error = err;
             }
             s.clone()
         };
         let _ = self.events.send(DownloadEvent::Stats(snapshot));
+        for w in entry.waiters {
+            let _ = w.send(ok);
+        }
+        if ok {
+            self.record_chunk_landed(entry.snapshot, sha);
+        }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<DownloadEvent> {
@@ -356,18 +510,12 @@ impl DownloadManager {
         self.stats.lock().expect("stats poisoned").clone()
     }
 
-    /// Reset counters to zero and bump the epoch. Any chunks already
-    /// in-flight will land on disk (and update the chunks-present index)
-    /// but won't update the freshly-zeroed stats.
+    /// Drop all queued work and reset counters to zero. Chunks already
+    /// in-flight still land on disk but won't tick the zeroed stats.
     pub fn cancel(&self) {
-        self.epoch.fetch_add(1, Ordering::AcqRel);
-        self.seen.lock().expect("seen poisoned").clear();
-        // Dropping the senders signals every awaiter with Err — they
-        // fall back to direct fetches via FsCacheStore rather than
-        // hanging forever.
-        self.waiters.lock().expect("waiters poisoned").clear();
-        // Pending coalesced chunk updates from this run are no longer
-        // interesting; let the next flush start empty.
+        // Dropping the waiter senders signals every awaiter with Err.
+        // Queued jobs see their pending entry gone and skip.
+        self.pending.lock().expect("pending poisoned").clear();
         self.pending_chunks
             .lock()
             .expect("pending_chunks poisoned")
@@ -381,60 +529,8 @@ impl DownloadManager {
         tracing::info!("download queue cancelled");
     }
 
-    fn complete(
-        &self,
-        sha: ChunkHash,
-        size: u64,
-        res: Result<(), steam_depot_vfs::VfsError>,
-        job_epoch: u64,
-    ) {
-        // Stats update first — independent of any waiter or index work,
-        // and we want the broadcast snapshot to fire even if the chunk
-        // failed.
-        let stale = job_epoch < self.epoch.load(Ordering::Acquire);
-        let ok = res.is_ok();
-        if !stale {
-            let snapshot = {
-                let mut s = self.stats.lock().expect("stats poisoned");
-                match res {
-                    Ok(()) => {
-                        s.chunks_completed += 1;
-                        s.bytes_completed += size;
-                    }
-                    Err(err) => {
-                        s.chunks_failed += 1;
-                        s.last_error = Some(err.to_string());
-                        tracing::warn!(%sha, %err, "chunk fetch failed");
-                    }
-                }
-                s.clone()
-            };
-            let _ = self.events.send(DownloadEvent::Stats(snapshot));
-        } else if let Err(err) = &res {
-            tracing::warn!(%sha, %err, "chunk fetch failed (cancelled)");
-        }
-
-        if ok {
-            // Sync mutex acquisition is fine here — `mark_chunk_present`
-            // is a single HashSet::insert. Doing it inline (vs. spawning
-            // an async task) avoids races where a waiter resolves before
-            // the index reflects the chunk.
-            self.store_index
-                .write()
-                .expect("store_index poisoned")
-                .mark_chunk_present(sha);
-        }
-        if let Some(senders) = self.waiters.lock().expect("waiters poisoned").remove(&sha) {
-            for s in senders {
-                let _ = s.send(ok);
-            }
-        }
-    }
-
-    /// Record that a chunk just landed (and is now reflected in
-    /// `store_index`). Adds the SHA to the pending batch for its manifest
-    /// and, if no flush is already queued, spawns a deferred drain task.
-    fn record_chunk_landed(self: Arc<Self>, snapshot: Arc<Snapshot>, sha: ChunkHash) {
+    /// Batch a landed chunk for the next per-file SSE flush.
+    fn record_chunk_landed(self: &Arc<Self>, snapshot: Arc<Snapshot>, sha: ChunkHash) {
         {
             let m = snapshot.manifest();
             let key = (DepotId(m.depot_id), ManifestId(m.manifest_id));
@@ -449,7 +545,7 @@ impl DownloadManager {
                 .insert(sha);
         }
         if !self.flush_scheduled.swap(true, Ordering::AcqRel) {
-            let this = self;
+            let this = Arc::clone(self);
             tokio::spawn(async move {
                 tokio::time::sleep(CHUNK_FLUSH_INTERVAL).await;
                 this.flush_scheduled.store(false, Ordering::Release);
@@ -459,10 +555,8 @@ impl DownloadManager {
     }
 
     /// Drain pending chunk landings and broadcast one [`ChunkUpdate`] per
-    /// affected manifest. NB: this iterates `manifest.files` once per
-    /// pending manifest — O(N_files × avg_chunks_per_file) work, but
-    /// only every [`CHUNK_FLUSH_INTERVAL`] (~10 Hz max) instead of per
-    /// chunk landing.
+    /// affected manifest. Iterates `manifest.files`, but at most once per
+    /// [`CHUNK_FLUSH_INTERVAL`].
     fn flush_pending_chunks(&self) {
         let drained = {
             let mut pending = self.pending_chunks.lock().expect("pending poisoned");

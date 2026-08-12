@@ -91,7 +91,7 @@ pub async fn manifest_download(
         }
     }
 
-    let summary = state.downloads.enqueue(Arc::new(snapshot), chunks).await;
+    let summary = state.downloads.enqueue(Arc::new(snapshot), chunks);
     tracing::info!(
         %depot_id, %manifest_id, branch = %body.branch,
         enqueued = summary.enqueued_chunks,

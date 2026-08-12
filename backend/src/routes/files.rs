@@ -190,7 +190,7 @@ pub async fn manifest_file(
                 (FileContentKind::TooLarge, None)
             }
             ManifestFileKind::File => {
-                // Route the fetch through the DownloadManager so the live
+                // Route the fetch through the ChunkService so the live
                 // drawer reflects the load and the chunks-present index is
                 // kept consistent. `enqueue_and_wait` returns once every
                 // chunk has either landed on disk (and been recorded in the
