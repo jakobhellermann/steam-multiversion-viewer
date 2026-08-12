@@ -109,6 +109,12 @@ Seen Date    Relative Date    ManifestID
       bare("1234567890123456789", "staging_2026"),
     ]);
   });
+
+  test("_steamdb_external_ rows are skipped", () => {
+    const input = `24 March 2026 – 22:56:53 UTC    2 months ago    4006284489195722835 _steamdb_external_
+20 March 2026 – 08:31:28 UTC    2 months ago    468692862190470536`;
+    expect(parseSteamDbPaste(input)).toEqual([bare("468692862190470536")]);
+  });
 });
 
 describe("parseSteamDbPaste — depotdownloader CLI", () => {

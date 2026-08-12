@@ -44,6 +44,9 @@ export function parseSteamDbPaste(text: string): ParsedExtra[] {
   for (const rawLine of text.split(/\r?\n/)) {
     const entry = parseLine(rawLine);
     if (!entry) continue;
+    // SteamDB marker for manifests not attached to any branch; there is
+    // no branch to mint a request code for, fetching always fails.
+    if (entry.branch === "_steamdb_external_") continue;
     if (seen.has(entry.manifest_id)) continue;
     seen.add(entry.manifest_id);
     out.push(entry);
