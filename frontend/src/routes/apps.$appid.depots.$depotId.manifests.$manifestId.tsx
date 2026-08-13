@@ -16,7 +16,6 @@ import {
   fetchManifestStatuses,
   type AppId,
   type AppInfo,
-  type EnqueueSummary,
   type ExtraManifestEntry,
   type GameInfo,
   type ManifestDiffStatus,
@@ -216,7 +215,6 @@ function ManifestDetail() {
             downloadAll.mutate();
           }}
           downloadPending={downloadAll.isPending}
-          downloadResult={downloadAll.data}
           downloadError={downloadAll.error as Error | null}
           cachedStatus={selfStatus}
         />
@@ -254,7 +252,6 @@ function ManifestHeader({
   branch,
   onDownload,
   downloadPending,
-  downloadResult,
   downloadError,
   cachedStatus,
 }: {
@@ -267,7 +264,6 @@ function ManifestHeader({
   branch: string;
   onDownload: () => void;
   downloadPending: boolean;
-  downloadResult: EnqueueSummary | undefined;
   downloadError: Error | null;
   cachedStatus: ManifestStatusEntry | undefined;
 }) {
@@ -296,6 +292,11 @@ function ManifestHeader({
               type="button"
               onClick={onDownload}
               disabled={downloadPending}
+              title={
+                cachedStatus && cachedStatus.error == null && cachedStatus.chunks_total > 0
+                  ? `${cachedStatus.chunks_missing.toLocaleString()} of ${cachedStatus.chunks_total.toLocaleString()} chunks missing (${formatBytes(cachedStatus.bytes_missing_compressed)} compressed).`
+                  : undefined
+              }
               className="rounded border border-sky-700 bg-sky-950/40 px-3 py-1.5 text-sm hover:bg-sky-900/40 disabled:opacity-50"
             >
               {downloadPending ? "Enqueuing…" : "Download all"}
@@ -303,21 +304,6 @@ function ManifestHeader({
           )}
         </div>
       </div>
-      {!downloadResult && fullyCached && cachedStatus && (
-        <p className="mt-2 text-xs text-slate-400">
-          Everything is already cached. {cachedStatus.chunks_total.toLocaleString()} chunks on disk.
-        </p>
-      )}
-      {downloadResult && (
-        <p className="mt-2 text-xs text-slate-400">
-          {downloadResult.enqueued_chunks > 0
-            ? `Enqueued ${downloadResult.enqueued_chunks.toLocaleString()} chunks (${formatBytes(downloadResult.enqueued_bytes)} compressed).`
-            : "Nothing to download — everything is already cached."}
-          {downloadResult.already_present_chunks > 0 && (
-            <span> {downloadResult.already_present_chunks.toLocaleString()} already on disk.</span>
-          )}
-        </p>
-      )}
       {downloadError && (
         <p className="mt-2 text-xs text-red-300">Download failed: {downloadError.message}</p>
       )}
