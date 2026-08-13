@@ -11,6 +11,8 @@ default = ["unity"]
 # anything else in `crate::unity`. Disable to build a viewer with zero
 # unity-specific code.
 unity = ["transform/unity", "dep:rabex-env", "dep:rabex-env-steam-depot-vfs"]
+# Launch in a native webview window by default
+windowed = []
 
 [dependencies]
 anyhow = "1.0"
@@ -50,6 +52,8 @@ rabex-env-steam-depot-vfs = { version = "0.1.0", git = "https://github.com/jakob
 rust-embed = "8"
 clap = { version = "4", features = ["derive"] }
 open = "5"
+tao = "0.36"
+wry = "0.56"
 
 [dev-dependencies]
 tracing-timetree = { git = "https://github.com/jakobhellermann/tracing-timetree" }
@@ -58,3 +62,11 @@ insta = { version = "1", features = ["yaml"] }
 # FUSE mount is linux-only.
 [target.'cfg(target_os = "linux")'.dependencies]
 steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
+
+[package.metadata.packager]
+product-name = "Steam Multiversion Viewer"
+identifier = "io.github.jakobhellermann.steam-multiversion-viewer"
+icons = ["../frontend/public/logo512.png"]
+formats = ["app", "dmg", "wix", "appimage"]
+out-dir = "dist"
+before-packaging-command = "cargo build --release --features windowed"

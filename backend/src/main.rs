@@ -5,7 +5,9 @@ mod routes;
 mod state;
 mod static_files;
 mod steam;
+mod window;
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -17,6 +19,7 @@ use axum::routing::get;
 use clap::Parser;
 use directories::ProjectDirs;
 use std::time::Instant;
+use tokio::task::JoinHandle;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -41,18 +44,40 @@ struct Args {
     /// Open the frontend in the default browser after starting
     #[arg(long)]
     open: bool,
+    /// Open the frontend in a native webview window
+    #[arg(long, conflicts_with = "open", default_value_t = cfg!(feature = "windowed"))]
+    window: bool,
 }
 
 async fn scalar_html() -> Html<&'static str> {
     Html(include_str!("../static/scalar.html"))
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
     let log_path = setup_logging()?;
     tracing::info!(log_file = %log_path.display(), "Starting...");
 
+    let runtime = tokio::runtime::Runtime::new()?;
+    let (addr, server) = runtime.block_on(start_server())?;
+
+    if args.window {
+        window::run(&format!("http://{addr}"));
+    }
+
+    if args.open {
+        let url = format!("http://{addr}");
+        runtime.spawn_blocking(move || {
+            if let Err(e) = open::that(&url) {
+                tracing::warn!("failed to open browser: {e}");
+            }
+        });
+    }
+
+    runtime.block_on(server)?
+}
+
+async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>)> {
     let state = AppState::init().await?;
 
     // Resume the session saved by the last successful login in the
@@ -97,18 +122,12 @@ async fn main() -> Result<()> {
     let addr = listener.local_addr()?;
     tracing::info!("listening on http://{}", addr);
 
-    if args.open {
-        let url = format!("http://{addr}");
-        tokio::task::spawn_blocking(move || {
-            if let Err(e) = open::that(&url) {
-                tracing::warn!("failed to open browser: {e}");
-            }
-        });
-    }
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await?;
+        Ok(())
+    });
 
-    axum::serve(listener, app).await?;
-
-    Ok(())
+    Ok((addr, server))
 }
 
 async fn http_log(req: Request, next: Next) -> Response {
