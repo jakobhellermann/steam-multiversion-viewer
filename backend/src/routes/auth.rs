@@ -160,8 +160,8 @@ pub async fn login_code(
     Ok(Json(AuthStatus::from_state(&state)))
 }
 
-/// Drop the current Steam connection. The cached refresh token is kept so
-/// the next login can skip the password.
+/// Drop the current Steam connection and forget the saved session, so the
+/// next server start doesn't log back in automatically.
 #[utoipa::path(
     post,
     path = "/api/auth/logout",
@@ -171,6 +171,7 @@ pub async fn login_code(
 pub async fn logout(State(state): State<AppState>) -> Json<AuthStatus> {
     state.clear_steam();
     *state.pending_login.lock().expect("pending_login poisoned") = None;
+    auth::forget_session();
     tracing::info!("logged out");
     Json(AuthStatus::from_state(&state))
 }

@@ -1,3 +1,4 @@
+// TODO(ai-review): review for style and correctness
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -9,7 +10,7 @@ use directories::ProjectDirs;
 use serde::Serialize;
 use steam_vent::auth::{
     AuthConfirmationHandler, ConfirmationAction, ConfirmationMethod, ConfirmationMethodClass,
-    DeviceConfirmationHandler, FileGuardDataStore, UserProvidedAuthConfirmationHandler,
+    FileGuardDataStore, UserProvidedAuthConfirmationHandler,
 };
 use steam_vent::{Connection, ServerList};
 use tokio::io::{AsyncWriteExt, sink};
@@ -200,90 +201,123 @@ impl AuthConfirmationHandler for WebConfirmationHandler {
     }
 }
 
-/// Log in resolving 2FA out-of-band via the Steam mobile app
-/// ([`DeviceConfirmationHandler`]). Used for the optional env-var startup
-/// path, where there is no UI to route a code to.
-pub async fn login_device(account: &str, password: &str) -> Result<Connection> {
-    login(account, password, DeviceConfirmationHandler).await
+/// Register a passive pending entry (no code routing) so the UI shows the
+/// startup login as in progress instead of an empty login form.
+pub fn begin_startup_login(slot: &PendingLoginSlot, account: String) -> u64 {
+    let id = NEXT_LOGIN_ID.fetch_add(1, Ordering::Relaxed);
+    *slot.lock().expect("pending_login poisoned") = Some(PendingLogin {
+        id,
+        account,
+        phase: LoginPhase::Starting,
+        code_tx: None,
+    });
+    id
 }
 
-/// Establish a connection, preferring the cached refresh token and falling
-/// back to a password login that resolves 2FA via `confirmation`.
+/// Resume a saved session without a password.
+pub async fn resume(session: SavedSession) -> Result<(String, Connection)> {
+    let server_list = discover_servers().await?;
+    let conn = Connection::access(&server_list, &session.account, &session.token).await?;
+    tracing::info!(steam_id = %conn.steam_id().steam3(), "resumed saved session");
+    Ok((session.account, conn))
+}
+
+/// Establish a connection, preferring the saved refresh token (the entered
+/// password is ignored then) and falling back to a password login that
+/// resolves 2FA via `confirmation`.
 pub async fn login(
     account: &str,
     password: &str,
     confirmation: impl AuthConfirmationHandler + Send + Sync,
 ) -> Result<Connection> {
-    let server_list = ServerList::discover()
-        .instrument(tracing::debug_span!("discover_server_list").or_current())
-        .await?;
+    let server_list = discover_servers().await?;
 
-    let refresh_token = load_refresh_token(account);
-    let connection = match refresh_token {
-        Some(token) => match Connection::access(&server_list, account, &token).await {
+    if let Some(session) = saved_session().filter(|s| s.account == account) {
+        match Connection::access(&server_list, account, &session.token).await {
             Ok(conn) => {
-                tracing::info!(steam_id = %conn.steam_id().steam3(), "logged in");
-                conn
+                tracing::info!(steam_id = %conn.steam_id().steam3(), "logged in with cached refresh token");
+                return Ok(conn);
             }
             Err(err) => {
-                tracing::warn!(%err, "cached refresh token rejected, falling back to password login");
-                password_login(&server_list, account, password, confirmation).await?
+                tracing::warn!(%err, "cached refresh token rejected, falling back to password login")
             }
-        },
-        None => password_login(&server_list, account, password, confirmation).await?,
-    };
+        }
+    }
 
-    Ok(connection)
-}
-
-async fn password_login(
-    server_list: &ServerList,
-    account: &str,
-    password: &str,
-    confirmation: impl AuthConfirmationHandler + Send + Sync,
-) -> Result<Connection> {
-    let conn = Connection::login(
-        server_list,
-        account,
-        password,
-        FileGuardDataStore::user_cache(), // TODO: use steam-multiversion-viewer cache
-        confirmation,
-    )
-    .await?;
+    let guard_data = FileGuardDataStore::new(cache_dir()?.join("machine_tokens.json"));
+    let conn = Connection::login(&server_list, account, password, guard_data, confirmation).await?;
     if let Some(token) = conn.access_token() {
-        if let Err(err) = save_refresh_token(account, token) {
-            tracing::warn!(%err, "failed to persist refresh token");
-        } else {
-            tracing::info!("saved refresh token");
+        match save_session(account, token) {
+            Ok(()) => tracing::info!("saved session"),
+            Err(err) => tracing::warn!(%err, "failed to persist session"),
         }
     }
     Ok(conn)
 }
 
-fn refresh_token_path() -> Result<PathBuf> {
-    // TODO: centralize cache dir access
+async fn discover_servers() -> Result<ServerList> {
+    Ok(ServerList::discover()
+        .instrument(tracing::debug_span!("discover_server_list").or_current())
+        .await?)
+}
+
+/// The last successful login, persisted so a server restart can resume it
+/// without a password. Single-session on purpose: this is single-user
+/// software.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct SavedSession {
+    account: String,
+    token: String,
+}
+
+impl SavedSession {
+    pub fn account(&self) -> &str {
+        &self.account
+    }
+}
+
+fn cache_dir() -> Result<PathBuf> {
     let dirs = ProjectDirs::from("", "", "steam-multiversion-viewer")
         .context("user cache dir not supported on this platform")?;
-    Ok(dirs.cache_dir().join("refresh_tokens.json"))
+    Ok(dirs.cache_dir().to_path_buf())
 }
 
-fn load_refresh_token(account: &str) -> Option<String> {
-    let path = refresh_token_path().ok()?;
-    let raw = fs::read_to_string(path).ok()?;
-    let map: HashMap<String, String> = serde_json::from_str(&raw).ok()?;
-    map.get(account).cloned().filter(|t| !t.is_empty())
+fn session_path() -> Result<PathBuf> {
+    Ok(cache_dir()?.join("refresh_tokens.json"))
 }
 
-fn save_refresh_token(account: &str, token: &str) -> Result<()> {
-    let path = refresh_token_path()?;
+pub fn saved_session() -> Option<SavedSession> {
+    let raw = fs::read_to_string(session_path().ok()?).ok()?;
+    let session = serde_json::from_str::<SavedSession>(&raw)
+        .ok()
+        .or_else(|| {
+            // Legacy format: account → token map.
+            let map: HashMap<String, String> = serde_json::from_str(&raw).ok()?;
+            let (account, token) = map.into_iter().next()?;
+            Some(SavedSession { account, token })
+        })?;
+    Some(session).filter(|s| !s.token.is_empty())
+}
+
+fn save_session(account: &str, token: &str) -> Result<()> {
+    let path = session_path()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut map: HashMap<String, String> = fs::read_to_string(&path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default();
-    map.insert(account.into(), token.into());
-    fs::write(&path, serde_json::to_string(&map)?)?;
+    let session = SavedSession {
+        account: account.into(),
+        token: token.into(),
+    };
+    fs::write(&path, serde_json::to_string(&session)?)?;
     Ok(())
+}
+
+/// Delete the saved session so a restart doesn't log back in automatically.
+pub fn forget_session() {
+    let Ok(path) = session_path() else { return };
+    if let Err(err) = fs::remove_file(&path)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(%err, "failed to delete saved session");
+    }
 }

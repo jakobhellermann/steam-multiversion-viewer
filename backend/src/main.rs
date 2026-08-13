@@ -54,23 +54,21 @@ async fn main() -> Result<()> {
 
     let state = AppState::init().await?;
 
-    // Convenience: if credentials are in the environment, log in eagerly in
-    // the background so the server is reachable immediately and the user
-    // skips the web login. Failures are non-fatal — they just leave the
-    // app logged out, and the user can retry via `/login`.
-    if let (Ok(account), Ok(password)) = (
-        std::env::var("STEAM_USERNAME"),
-        std::env::var("STEAM_PASSWORD"),
-    ) {
+    // Resume the session saved by the last successful login in the
+    // background. Registered as a pending login so the UI shows progress
+    // instead of an empty login form. Failures are non-fatal, the user
+    // logs in via `/login`.
+    if let Some(session) = steam::auth::saved_session() {
+        let id = steam::auth::begin_startup_login(&state.pending_login, session.account().into());
         let state = state.clone();
         tokio::spawn(async move {
-            match steam::auth::login_device(&account, &password).await {
-                Ok(connection) => {
+            match steam::auth::resume(session).await {
+                Ok((account, connection)) => {
                     state.set_steam(steam::SteamClient::new(account, connection));
-                    tracing::info!("logged in from environment credentials");
                 }
-                Err(err) => tracing::warn!(%err, "background env-var login failed"),
+                Err(err) => tracing::warn!(%err, "resuming saved session failed"),
             }
+            steam::auth::clear_pending(&state.pending_login, id);
         });
     }
 
