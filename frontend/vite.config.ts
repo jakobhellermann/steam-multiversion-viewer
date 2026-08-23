@@ -10,6 +10,9 @@ import tailwindcss from "@tailwindcss/vite";
 const config = defineConfig({
   resolve: { tsconfigPaths: true },
   server: { proxy: { "/api": "http://127.0.0.1:6556" } },
+  // The cpp shiki grammar is a ~660KB lazy chunk by nature; raise the limit
+  // above it so the warning only fires for genuinely unexpected bloat.
+  build: { chunkSizeWarningLimit: 700 },
   plugins: [
     devtools(),
     tailwindcss(),

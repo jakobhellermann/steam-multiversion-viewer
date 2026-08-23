@@ -1,22 +1,39 @@
 // TODO(ai-review): review for style and correctness
-import { createHighlighter, type Highlighter } from "shiki";
+import { createHighlighterCore, type HighlighterCore } from "shiki/core";
+import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 
-/// Languages we ship grammars for. Add to this *and* to extToLang below.
-const LANGS = ["xml", "json", "lua", "csharp", "diff", "glsl", "cpp"] as const;
-export type Lang = (typeof LANGS)[number];
+/// Grammars we ship, as lazy imports. Single source of truth: the keys
+/// give the `Lang` type, the values are loaded into the highlighter.
+/// The fine-grained `shiki/core` bundle keeps rolldown from emitting a
+/// chunk per bundled grammar (~200 of them) that we never load. Add to
+/// this *and* to extToLang below.
+const GRAMMARS = {
+  xml: () => import("@shikijs/langs/xml"),
+  json: () => import("@shikijs/langs/json"),
+  lua: () => import("@shikijs/langs/lua"),
+  csharp: () => import("@shikijs/langs/csharp"),
+  diff: () => import("@shikijs/langs/diff"),
+  glsl: () => import("@shikijs/langs/glsl"),
+  cpp: () => import("@shikijs/langs/cpp"),
+} as const;
+export type Lang = keyof typeof GRAMMARS;
 
 const THEME = "github-dark";
 
-let highlighterPromise: Promise<Highlighter> | null = null;
+let highlighterPromise: Promise<HighlighterCore> | null = null;
 
 /// Lazily build a single shared Highlighter — shiki recommends one
 /// instance per app, and our grammars together weigh a few hundred KB
 /// we don't want to ship on first paint.
-export function getHighlighter(): Promise<Highlighter> {
+export function getHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
-    highlighterPromise = createHighlighter({
-      themes: [THEME],
-      langs: LANGS as unknown as string[],
+    highlighterPromise = createHighlighterCore({
+      themes: [import("@shikijs/themes/github-dark")],
+      langs: Object.values(GRAMMARS).map((load) => load()),
+      // JS regex engine over oniguruma-wasm: drops the ~600KB wasm chunk.
+      // Our grammars translate cleanly; a future grammar the JS engine can't
+      // express throws here loudly rather than mis-highlighting in silence.
+      engine: createJavaScriptRegexEngine(),
     });
   }
   return highlighterPromise;

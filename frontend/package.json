@@ -16,6 +16,8 @@
     "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
+    "@shikijs/langs": "^4.1.0",
+    "@shikijs/themes": "^4.1.0",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-query": "^5.100.11",
