@@ -9,18 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AppsAppidRouteImport } from './routes/apps.$appid'
 import { Route as AppsAppidIndexRouteImport } from './routes/apps.$appid.index'
 import { Route as AppsAppidDepotsDepotIdManifestsManifestIdRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId'
-import { Route as AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId_.file'
 import { Route as AppsAppidDepotsDepotIdManifestsManifestIdDiffRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId_.diff'
+import { Route as AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId_.file'
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -28,9 +28,9 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppsAppidRoute = AppsAppidRouteImport.update({
@@ -49,16 +49,16 @@ const AppsAppidDepotsDepotIdManifestsManifestIdRoute =
     path: '/depots/$depotId/manifests/$manifestId',
     getParentRoute: () => AppsAppidRoute,
   } as any)
-const AppsAppidDepotsDepotIdManifestsManifestIdFileRoute =
-  AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport.update({
-    id: '/depots/$depotId/manifests/$manifestId_/file',
-    path: '/depots/$depotId/manifests/$manifestId/file',
-    getParentRoute: () => AppsAppidRoute,
-  } as any)
 const AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute =
   AppsAppidDepotsDepotIdManifestsManifestIdDiffRouteImport.update({
     id: '/depots/$depotId/manifests/$manifestId_/diff',
     path: '/depots/$depotId/manifests/$manifestId/diff',
+    getParentRoute: () => AppsAppidRoute,
+  } as any)
+const AppsAppidDepotsDepotIdManifestsManifestIdFileRoute =
+  AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport.update({
+    id: '/depots/$depotId/manifests/$manifestId_/file',
+    path: '/depots/$depotId/manifests/$manifestId/file',
     getParentRoute: () => AppsAppidRoute,
   } as any)
 
@@ -133,11 +133,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -147,11 +147,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/apps/$appid': {
@@ -175,18 +175,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdRouteImport
       parentRoute: typeof AppsAppidRoute
     }
-    '/apps/$appid/depots/$depotId/manifests/$manifestId_/file': {
-      id: '/apps/$appid/depots/$depotId/manifests/$manifestId_/file'
-      path: '/depots/$depotId/manifests/$manifestId/file'
-      fullPath: '/apps/$appid/depots/$depotId/manifests/$manifestId/file'
-      preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport
-      parentRoute: typeof AppsAppidRoute
-    }
     '/apps/$appid/depots/$depotId/manifests/$manifestId_/diff': {
       id: '/apps/$appid/depots/$depotId/manifests/$manifestId_/diff'
       path: '/depots/$depotId/manifests/$manifestId/diff'
       fullPath: '/apps/$appid/depots/$depotId/manifests/$manifestId/diff'
       preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdDiffRouteImport
+      parentRoute: typeof AppsAppidRoute
+    }
+    '/apps/$appid/depots/$depotId/manifests/$manifestId_/file': {
+      id: '/apps/$appid/depots/$depotId/manifests/$manifestId_/file'
+      path: '/depots/$depotId/manifests/$manifestId/file'
+      fullPath: '/apps/$appid/depots/$depotId/manifests/$manifestId/file'
+      preLoaderRoute: typeof AppsAppidDepotsDepotIdManifestsManifestIdFileRouteImport
       parentRoute: typeof AppsAppidRoute
     }
   }
