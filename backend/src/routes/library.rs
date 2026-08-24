@@ -46,6 +46,14 @@ pub struct OwnedGame {
 pub async fn library(
     State(state): State<AppState>,
 ) -> Result<(CacheSeconds, Json<Vec<OwnedGame>>)> {
+    let games = fetch_owned_games(&state).await?;
+    // Owned-games changes are rare (new purchase, new playtime); 5min cache.
+    Ok((CacheSeconds(300), Json(games)))
+}
+
+/// Fetches the owned-games list directly from the Steam connection.
+/// Shared between the HTTP handler and the native menu bar.
+pub async fn fetch_owned_games(state: &AppState) -> Result<Vec<OwnedGame>> {
     let steam = state.steam()?;
     let req = CPlayer_GetOwnedGames_Request {
         steamid: Some(steam.connection.steam_id().into()),
@@ -66,8 +74,7 @@ pub async fn library(
         })
         .collect();
 
-    // Owned-games changes are rare (new purchase, new playtime); 5min cache.
-    Ok((CacheSeconds(300), Json(games)))
+    Ok(games)
 }
 
 #[derive(Serialize, ToSchema)]

@@ -59,10 +59,10 @@ fn main() -> Result<()> {
     tracing::info!(log_file = %log_path.display(), "Starting...");
 
     let runtime = tokio::runtime::Runtime::new()?;
-    let (addr, server) = runtime.block_on(start_server())?;
+    let (addr, server, state) = runtime.block_on(start_server())?;
 
     if args.window {
-        window::run(&format!("http://{addr}"));
+        window::run(&format!("http://{addr}"), state, runtime.handle().clone());
     }
 
     if args.open {
@@ -77,7 +77,7 @@ fn main() -> Result<()> {
     runtime.block_on(server)?
 }
 
-async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>)> {
+async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>, AppState)> {
     let state = AppState::init().await?;
 
     // Resume the session saved by the last successful login in the
@@ -116,7 +116,7 @@ async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>)> {
         .route("/api/docs", get(scalar_html))
         .fallback(static_files::serve)
         .layer(middleware::from_fn(http_log))
-        .with_state(state);
+        .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:6556").await?;
     let addr = listener.local_addr()?;
@@ -127,7 +127,7 @@ async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>)> {
         Ok(())
     });
 
-    Ok((addr, server))
+    Ok((addr, server, state))
 }
 
 async fn http_log(req: Request, next: Next) -> Response {

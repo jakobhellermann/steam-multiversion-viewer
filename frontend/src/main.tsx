@@ -36,6 +36,18 @@ declare module "@tanstack/react-router" {
   }
 }
 
+// Entry point for the native macOS menu bar, which has no other way to
+// navigate the SPA without forcing a full page reload.
+declare global {
+  interface Window {
+    __navigate?: (to: string) => void;
+  }
+}
+
+window.__navigate = (to) => {
+  void router.navigate({ to: to as never });
+};
+
 const rootElement = document.getElementById("app")!;
 
 if (!rootElement.innerHTML) {
