@@ -63,6 +63,9 @@ insta = { version = "1", features = ["yaml"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = "0.19"
+
 [package.metadata.packager]
 product-name = "Steam Multiversion Viewer"
 identifier = "io.github.jakobhellermann.steam-multiversion-viewer"
