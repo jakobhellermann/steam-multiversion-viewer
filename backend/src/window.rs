@@ -49,16 +49,18 @@ fn build_webview(window: &Window, url: &str) -> wry::WebView {
 /// Opens a native webview window on `url` and runs the event loop.
 /// Must be called on the main thread; exits the process when the
 /// window is closed.
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 pub fn run(url: &str, state: AppState, handle: tokio::runtime::Handle) -> ! {
     let event_loop: EventLoop<UserEvent> = EventLoopBuilder::with_user_event().build();
     let window = build_window(&event_loop);
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     let webview = build_webview(&window, url);
+    #[cfg(target_os = "macos")]
     let base_url = url.to_string();
 
     #[cfg(target_os = "macos")]
     let (_menu, library_menu) =
         macos::install_menu_bar(&event_loop.create_proxy()).expect("failed to install menu bar");
+    let teardown_state = state.clone();
     #[cfg(target_os = "macos")]
     macos::spawn_library_fetch(state, event_loop.create_proxy(), &handle);
 
@@ -80,6 +82,13 @@ pub fn run(url: &str, state: AppState, handle: tokio::runtime::Handle) -> ! {
             #[cfg(target_os = "macos")]
             Event::UserEvent(UserEvent::Library(games)) => {
                 macos::populate_library_menu(&library_menu, games);
+            }
+
+            // Closing the window ends the process without unwinding, so
+            // an active mount has to come down here or it outlives us
+            // and hangs every access to it.
+            Event::LoopDestroyed => {
+                handle.block_on(teardown_state.mount.stop_on_shutdown());
             }
 
             _ => {}

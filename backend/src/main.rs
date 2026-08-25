@@ -61,6 +61,8 @@ fn main() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let (addr, server, state) = runtime.block_on(start_server())?;
 
+    runtime.spawn(unmount_on_signal(state.clone()));
+
     if args.window {
         window::run(&format!("http://{addr}"), state, runtime.handle().clone());
     }
@@ -75,6 +77,34 @@ fn main() -> Result<()> {
     }
 
     runtime.block_on(server)?
+}
+
+/// A mount outlives the process that served it and then hangs every
+/// access to it, so a signalled shutdown unmounts before exiting.
+/// SIGKILL is not covered — the next start recovers such a mount.
+async fn unmount_on_signal(state: AppState) {
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(sigterm) => sigterm,
+                Err(e) => {
+                    tracing::warn!(%e, "cannot listen for SIGTERM; no unmount on shutdown");
+                    return;
+                }
+            };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    if tokio::signal::ctrl_c().await.is_err() {
+        return;
+    }
+    tracing::info!("signal received, unmounting before exit");
+    state.mount.stop_on_shutdown().await;
+    std::process::exit(0);
 }
 
 async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>, AppState)> {

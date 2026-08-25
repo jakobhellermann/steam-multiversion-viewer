@@ -197,6 +197,16 @@ impl MountManager {
         }
     }
 
+    /// Best-effort unmount for process teardown. A mount left behind
+    /// hangs every access to it until something forces it out, so this
+    /// runs on the way out and only logs what it can't fix.
+    pub async fn stop_on_shutdown(&self) {
+        match self.stop().await {
+            Ok(()) | Err(MountControlError::NotMounted | MountControlError::Unsupported) => {}
+            Err(e) => tracing::error!(%e, "unmounting on shutdown failed"),
+        }
+    }
+
     /// Unmount and drop the mount session. Returns `NotMounted` if
     /// nothing was mounted.
     pub async fn stop(&self) -> Result<(), MountControlError> {
@@ -499,6 +509,15 @@ mod tests {
             matches!(manager.reserve(), Err(MountControlError::AlreadyMounted)),
             "and the in-flight start keeps its claim",
         );
+    }
+
+    #[tokio::test]
+    async fn shutdown_teardown_tolerates_having_nothing_to_unmount() {
+        let manager = MountManager::new();
+        manager.stop_on_shutdown().await;
+        manager
+            .reserve()
+            .expect("an untouched slot is still free afterwards");
     }
 
     #[test]
