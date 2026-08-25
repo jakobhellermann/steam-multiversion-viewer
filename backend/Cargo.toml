@@ -59,12 +59,14 @@ wry = "0.56"
 tracing-timetree = { git = "https://github.com/jakobhellermann/tracing-timetree" }
 insta = { version = "1", features = ["yaml"] }
 
-# FUSE mount is linux-only.
+# Same crate, one back end per platform: FUSE where the kernel speaks it,
+# a loopback NFS server on macOS where it doesn't without macFUSE.
 [target.'cfg(target_os = "linux")'.dependencies]
-steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
+steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["fuse"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = "0.19"
+steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["nfs"] }
 
 [package.metadata.packager]
 product-name = "Steam Multiversion Viewer"

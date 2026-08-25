@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-//! `/api/mount/*` — toggle the FUSE filesystem and report its state.
+//! `/api/mount/*` — toggle the depot filesystem and report its state.
 
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ use crate::http::ApiError;
 use crate::state::AppState;
 use crate::state::mount::{MountControlError, MountStatus};
 
-/// Start FUSE mount
+/// Start depot mount
 #[utoipa::path(
     post,
     path = "/api/mount/start",
@@ -40,11 +40,12 @@ pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, A
             index_snapshot.into_iter(),
             &state.extra_manifests,
         )
+        .await
         .map_err(mount_err)?;
     Ok(Json(status))
 }
 
-/// Stop FUSE mount
+/// Stop depot mount
 #[utoipa::path(
     post,
     path = "/api/mount/stop",
@@ -53,11 +54,11 @@ pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, A
 )]
 #[tracing::instrument(skip_all)]
 pub async fn stop(State(state): State<AppState>) -> Result<Json<MountStatus>, ApiError> {
-    state.mount.stop().map_err(mount_err)?;
+    state.mount.stop().await.map_err(mount_err)?;
     Ok(Json(state.mount.status()))
 }
 
-/// FUSE mount status
+/// Depot mount status
 #[utoipa::path(
     get,
     path = "/api/mount/status",
