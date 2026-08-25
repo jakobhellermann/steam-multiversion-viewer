@@ -7,7 +7,7 @@
 //! registered lazily so the depot files appear at
 //! `<mountpoint>/<app_id>/<depot_id>/<manifest_gid>/…` without
 //! pre-fetching anything — the first filesystem op on a manifest
-//! triggers the actual `DepotStore::open_depot_manifest` call.
+//! triggers the actual manifest open.
 //!
 //! The active mount holds onto an [`Arc<SteamClient>`] and
 //! [`Arc<DepotStore>`] cloned out of `AppState`, so it survives
@@ -29,7 +29,9 @@ use serde_json::json;
 use steam_depot_vfs::DepotStore;
 use tokio::runtime::Handle;
 
+use super::downloads::ChunkService;
 use super::extra_manifests::ExtraManifestsStore;
+use crate::steam::chunk_store::TrackedChunkStore;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -43,7 +45,10 @@ use steam_depot_mount::{Mount, MountConfig, MountError};
 use steam_depot_mount::{NfsMount, NfsMountConfig};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-type ChunkStoreC = FsCacheStore<CdnChunkStore<SteamClient>>;
+/// Same stack the HTTP routes use, so what the mount pulls from the CDN
+/// is counted and marked present like any other read. `TrackedChunkStore`
+/// sits below the disk cache, so cache hits stay invisible.
+type ChunkStoreC = FsCacheStore<TrackedChunkStore<CdnChunkStore<SteamClient>>>;
 
 #[cfg(target_os = "linux")]
 type Backend = Mount<ChunkStoreC>;
@@ -68,6 +73,15 @@ enum Slot {
 struct Active {
     mount: Arc<Backend>,
     mountpoint: PathBuf,
+}
+
+/// What each lazy mount entry needs to open its manifest on first access.
+#[derive(Clone)]
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub struct MountDeps {
+    pub steam: Arc<SteamClient>,
+    pub store: Arc<DepotStore>,
+    pub downloads: Arc<ChunkService>,
 }
 
 impl MountManager {
@@ -125,8 +139,7 @@ impl MountManager {
         &self,
         mountpoint: PathBuf,
         rt: Handle,
-        steam: Arc<SteamClient>,
-        store: Arc<DepotStore>,
+        deps: MountDeps,
         index_snapshot: impl IntoIterator<Item = (AppId, DepotId, ManifestId)>,
         extra_manifests: &ExtraManifestsStore,
     ) -> Result<MountStatus, MountControlError> {
@@ -154,15 +167,7 @@ impl MountManager {
                 if !seen.insert((app_id, depot_id, manifest_id)) {
                     continue;
                 }
-                register_one(
-                    &mount,
-                    &steam,
-                    &store,
-                    app_id,
-                    depot_id,
-                    manifest_id,
-                    "public",
-                );
+                register_one(&mount, &deps, app_id, depot_id, manifest_id, "public");
                 registered += 1;
             }
             for (app_id, entries) in extra_manifests.get_all() {
@@ -173,8 +178,7 @@ impl MountManager {
                     let branch = e.branch.as_deref().unwrap_or("public").to_string();
                     register_one_with_branch(
                         &mount,
-                        &steam,
-                        &store,
+                        &deps,
                         app_id,
                         e.depot_id,
                         e.manifest_id,
@@ -396,8 +400,7 @@ fn run_fusermount(path: &std::path::Path, args: &[&str]) -> Result<(), std::io::
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn register_one(
     mount: &Backend,
-    steam: &Arc<SteamClient>,
-    store: &Arc<DepotStore>,
+    deps: &MountDeps,
     app_id: AppId,
     depot_id: DepotId,
     manifest_id: ManifestId,
@@ -405,8 +408,7 @@ fn register_one(
 ) {
     register_one_with_branch(
         mount,
-        steam,
-        store,
+        deps,
         app_id,
         depot_id,
         manifest_id,
@@ -417,22 +419,23 @@ fn register_one(
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn register_one_with_branch(
     mount: &Backend,
-    steam: &Arc<SteamClient>,
-    store: &Arc<DepotStore>,
+    deps: &MountDeps,
     app_id: AppId,
     depot_id: DepotId,
     manifest_id: ManifestId,
     branch: String,
 ) {
-    let steam = Arc::clone(steam);
-    let store = Arc::clone(store);
+    let deps = deps.clone();
     let res = mount.add_lazy(
         app_id.0,
         depot_id.0,
         manifest_id.0,
         move || {
-            let steam = Arc::clone(&steam);
-            let store = Arc::clone(&store);
+            let MountDeps {
+                steam,
+                store,
+                downloads,
+            } = deps.clone();
             let branch = branch.clone();
             async move {
                 tracing::info!(
@@ -440,7 +443,14 @@ fn register_one_with_branch(
                     "opening manifest on first access",
                 );
                 store
-                    .open_depot_manifest(steam, app_id.0, depot_id.0, manifest_id.0, &branch)
+                    .open_depot_manifest_with_chunks(
+                        steam,
+                        app_id.0,
+                        depot_id.0,
+                        manifest_id.0,
+                        &branch,
+                        move |cdn| TrackedChunkStore::new(cdn, downloads),
+                    )
                     .await
                     .map_err(|e| std::io::Error::other(e.to_string()))
             }

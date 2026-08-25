@@ -4,8 +4,7 @@
 //!
 //! Placed between [`CdnChunkStore`](steam_depot_vfs::chunk_store::CdnChunkStore)
 //! and [`FsCacheStore`](steam_depot_vfs::chunk_store::FsCacheStore) so
-//! disk-cache hits stay invisible. Constructed in
-//! [`crate::state::AppState::open_manifest`].
+//! disk-cache hits stay invisible.
 
 use std::sync::Arc;
 

@@ -8,7 +8,7 @@ use axum::extract::State;
 
 use crate::http::ApiError;
 use crate::state::AppState;
-use crate::state::mount::{MountControlError, MountStatus};
+use crate::state::mount::{MountControlError, MountDeps, MountStatus};
 
 /// Start depot mount
 #[utoipa::path(
@@ -35,8 +35,11 @@ pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, A
         .start_with(
             mountpoint,
             tokio::runtime::Handle::current(),
-            steam,
-            Arc::clone(&state.store),
+            MountDeps {
+                steam,
+                store: Arc::clone(&state.store),
+                downloads: Arc::clone(&state.downloads),
+            },
             index_snapshot.into_iter(),
             &state.extra_manifests,
         )
