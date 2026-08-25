@@ -70,7 +70,7 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
       </label>
 
       <label className="block">
-        <span className="text-sm text-slate-400">FUSE mountpoint</span>
+        <span className="text-sm text-slate-400">Mountpoint</span>
         <input
           type="text"
           value={mountpoint}

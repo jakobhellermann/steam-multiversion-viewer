@@ -35,7 +35,7 @@ use crate::state::AppState;
     description = "
 Browse Steam depot manifests across versions, branches, and apps — \
 list owned games, inspect manifest contents, diff files between \
-manifests, and (optionally) expose the depot as a FUSE mount.",
+manifests, and (optionally) mount the depot as a filesystem.",
 ))]
 struct ApiDoc;
 
