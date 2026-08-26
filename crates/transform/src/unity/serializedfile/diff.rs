@@ -1067,6 +1067,17 @@ fn matched_status<R: EnvResolver, P: TypeTreeProvider>(
         {
             NodeStatus::Unchanged
         }
+        // Behind the cheap compares: this one decodes the objects.
+        (Some(_), Some(_))
+            if crate::unity::game_specific::objects_equal(
+                base_file,
+                base_pid,
+                target_file,
+                target_pid,
+            ) == Some(true) =>
+        {
+            NodeStatus::Unchanged
+        }
         _ => NodeStatus::Changed,
     }
 }

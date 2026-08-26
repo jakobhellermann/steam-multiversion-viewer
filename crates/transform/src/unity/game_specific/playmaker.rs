@@ -57,6 +57,34 @@ pub trait GameContextSource {
     fn game_context(&self) -> Result<&GameContext>;
 }
 
+fn is_fsm<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    path_id: PathId,
+) -> Result<bool> {
+    let script = file.object_at::<MonoBehaviour>(path_id)?.mono_script()?;
+    Ok(script.is_some_and(|s| s.full_name() == SCRIPT_NAME))
+}
+
+/// Whether both objects are equal `PlayMakerFSM`s. Skips the name
+/// tables: they change what the text says, not whether the two agree.
+pub fn objects_equal<R: EnvResolver, P: TypeTreeProvider>(
+    base_file: &SerializedFileHandle<'_, R, P>,
+    base_path_id: PathId,
+    target_file: &SerializedFileHandle<'_, R, P>,
+    target_path_id: PathId,
+    class_id: ClassId,
+) -> Option<bool> {
+    if class_id != ClassId::MonoBehaviour {
+        return None;
+    }
+    if !is_fsm(base_file, base_path_id).ok()? || !is_fsm(target_file, target_path_id).ok()? {
+        return None;
+    }
+    let base = dump_pseudocode(base_file, base_path_id, None).ok()?;
+    let target = dump_pseudocode(target_file, target_path_id, None).ok()?;
+    Some(base == target)
+}
+
 /// Dump the object at `path_id` as pseudocode if it is a `PlayMakerFSM`,
 /// `None` for anything else.
 pub fn try_dump<R: EnvResolver, P: TypeTreeProvider>(
@@ -65,11 +93,7 @@ pub fn try_dump<R: EnvResolver, P: TypeTreeProvider>(
     path_id: PathId,
     opts: DumpOptions<'_>,
 ) -> Result<Option<(&'static str, String)>> {
-    if class_id != ClassId::MonoBehaviour {
-        return Ok(None);
-    }
-    let script = file.object_at::<MonoBehaviour>(path_id)?.mono_script()?;
-    if !script.is_some_and(|s| s.full_name() == SCRIPT_NAME) {
+    if class_id != ClassId::MonoBehaviour || !is_fsm(file, path_id)? {
         return Ok(None);
     }
     let pseudo = dump_pseudocode(file, path_id, opts.playmaker_game)?;
