@@ -101,14 +101,15 @@ export function ManifestSwitcher({
   );
   // Show the Unity game version instead of the raw manifest id when we can
   // detect it — same `/game_info` query shape as elsewhere, so it's a cache
-  // hit. Only fetched while the dropdown is open.
+  // hit. The current manifest is always fetched (it feeds the breadcrumb
+  // label); the rest only while the dropdown is open.
   const gameInfoQueries = useQueries({
     queries: visible.map((m) => ({
       // Branch omitted from the key on purpose — shared with the page +
       // compare menu (see the gameInfo query above).
       queryKey: ["game-info", appid, depotId, m.manifestId],
       queryFn: () => fetchGameInfo(appid, depotId, m.manifestId, m.branch),
-      enabled: open,
+      enabled: open || (m.manifestId === currentManifestId && m.branch === currentBranch),
       staleTime: Infinity,
       gcTime: 30 * 60 * 1000,
     })),
@@ -122,14 +123,17 @@ export function ManifestSwitcher({
     });
     return map;
   }, [visible, gameInfoQueries]);
+  // Prefer the detected game version in the breadcrumb, falling back to the
+  // date-or-"manifest" label the caller passed in.
+  const displayLabel = versionByKey.get(`${currentManifestId}|${currentBranch}`) ?? label;
 
   if (visible.length <= 1) {
     return onGoToManifest ? (
       <button type="button" onClick={onGoToManifest} className="hover:underline">
-        {label}
+        {displayLabel}
       </button>
     ) : (
-      <span className="font-medium text-slate-200">{label}</span>
+      <span className="font-medium text-slate-200">{displayLabel}</span>
     );
   }
   return (
@@ -137,7 +141,7 @@ export function ManifestSwitcher({
       {onGoToManifest ? (
         <>
           <button type="button" onClick={onGoToManifest} className="hover:underline">
-            {label}
+            {displayLabel}
           </button>
           <button
             type="button"
@@ -159,7 +163,7 @@ export function ManifestSwitcher({
           title="Switch to another manifest"
           className="flex items-center gap-1 font-medium text-slate-200 hover:text-white"
         >
-          {label}
+          {displayLabel}
           <span className="text-xs text-slate-500">▾</span>
         </button>
       )}
