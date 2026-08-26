@@ -81,3 +81,18 @@ export function parsePptrRef(
 export function projectRefToSide(nodeId: NodeId, side: "base" | "target"): NodeId | undefined {
   return pptrNodeKeys(nodeId).find((k) => k.side === side)?.key;
 }
+
+/// Like [`projectRefToSide`], but keeps the `base:`/`target:` tag so the
+/// ref stays unambiguous inside *another diff* that retains this side.
+/// The bare `obj:N` a single-file view wants would be dangerous there —
+/// path ids collide across manifests, so a bare ref could resolve to the
+/// *other* side's object with the same number. Tagging pins it to the
+/// retained side's index. `undefined` when the object isn't on `side`
+/// (the replaced-side case — caller should carry no hash rather than a
+/// wrong one).
+export function qualifyRefForSide(nodeId: NodeId, side: "base" | "target"): NodeId | undefined {
+  const key = pptrNodeKeys(nodeId).find((k) => k.side === side)?.key;
+  if (key === undefined) return undefined;
+  const [prefix, inner] = splitArchivePrefix(key);
+  return `${prefix}${side}:${inner}`;
+}

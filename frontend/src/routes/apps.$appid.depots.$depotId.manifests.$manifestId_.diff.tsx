@@ -18,7 +18,7 @@ import { formatDate } from "../lib/format";
 import { DiffView } from "./-file/DiffView";
 import { FilePreview } from "./-file/FilePreview";
 import { StructuredDiffView } from "./-file/StructuredDiffView";
-import { projectRefToSide } from "./-file/pptrRef";
+import { projectRefToSide, qualifyRefForSide } from "./-file/pptrRef";
 import type { FileLocator } from "./-file/types";
 
 type Search = {
@@ -188,7 +188,15 @@ function DiffPage() {
           appInfo={appInfoQuery.data}
           extras={extraQuery.data ?? []}
           statuses={switcherStatusQuery.data}
-          onSelect={(mid, br) =>
+          onSelect={(mid, br) => {
+            // The switcher swaps the base; the target manifest stays.
+            // Carry the focused object onto the new diff via its
+            // retained (target) side — side-tagged so it can't collide
+            // with a same-numbered base object. A base-only object has
+            // no target counterpart → no hash (focus resets rather than
+            // landing somewhere wrong).
+            const raw = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+            const hash = raw ? qualifyRefForSide(raw, "target") : undefined;
             navigate({
               params: { appid: appidParam, depotId: depotIdParam, manifestId: mid },
               search: {
@@ -198,8 +206,9 @@ function DiffPage() {
                 target_manifest_id: targetManifestId,
                 target_branch: targetBranch === "public" ? undefined : targetBranch,
               },
-            })
-          }
+              hash,
+            });
+          }}
           onGoToManifest={() =>
             navigate({
               to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
