@@ -7,7 +7,15 @@ edition = "2024"
 default = ["unity"]
 # Optional unity-asset support — serializedfile / bundle handling via
 # rabex. Disable to drop the rabex dep entirely.
-unity = ["dep:rabex-env", "dep:playmakerfsm", "dep:aes", "dep:ecb", "dep:base64", "dep:lz4_flex"]
+unity = [
+  "dep:rabex-env",
+  "dep:rabex-texture",
+  "dep:playmakerfsm",
+  "dep:aes",
+  "dep:ecb",
+  "dep:base64",
+  "dep:lz4_flex",
+]
 
 [dependencies]
 anyhow = "1.0"
@@ -25,6 +33,7 @@ zstd = "0.13.3"
 rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = [
   "tracing-instrument",
 ] }
+rabex-texture = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true }
 aes = { version = "0.9", optional = true }
 ecb = { version = "0.2", optional = true }
 base64 = { version = "0.22", optional = true }

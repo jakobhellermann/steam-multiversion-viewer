@@ -72,6 +72,9 @@ pub struct Node {
     /// shows a placeholder for those.
     #[serde(default, skip_serializing_if = "is_false")]
     pub has_content: bool,
+    /// Body MIME when known up front and not plain text (e.g. `"image/png"` for a texture).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_mime: Option<String>,
     /// Direct children. Empty for leaves.
     // utoipa's schema collector recurses through nested ToSchema types
     // to register their schemas; without this flag it stack-overflows
@@ -110,12 +113,18 @@ impl Node {
             facets: BTreeMap::new(),
             status: None,
             has_content: false,
+            content_mime: None,
             children: Vec::new(),
         }
     }
 
     pub fn with_badge(mut self, badge: impl Into<String>) -> Self {
         self.badge = Some(badge.into());
+        self
+    }
+
+    pub fn with_content_mime(mut self, mime: impl Into<String>) -> Self {
+        self.content_mime = Some(mime.into());
         self
     }
 

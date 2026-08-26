@@ -20,6 +20,14 @@ export function mediaKindForPath(path: string): MediaKind {
   return null;
 }
 
+/// Same, but from a MIME type instead of a filename.
+export function mediaKindForMime(mime: string): MediaKind {
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("video/")) return "video";
+  return null;
+}
+
 function extOf(path: string): string | null {
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   const name = slash >= 0 ? path.slice(slash + 1) : path;

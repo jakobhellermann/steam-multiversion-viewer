@@ -12,11 +12,13 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import {
   fetchFileStructured,
   fetchStructuredNodeContent,
+  structuredNodeImageUrl,
   type NodeStatus,
   type StructuredNode,
 } from "../../api";
+import { mediaKindForMime } from "../../lib/mediaKind";
 import { langForMime } from "../../lib/syntax";
-import { HighlightedPre } from "./FilePreview";
+import { HighlightedPre, MediaView } from "./FilePreview";
 import { makePostProcess } from "./markers";
 import { parsePptrRef, pptrNodeKeys } from "./pptrRef";
 import { focusUnlessSelecting, scopeSelectAll } from "./selection";
@@ -83,6 +85,7 @@ export function StructuredView({
         <NodeContentPanel
           locator={locator}
           nodeId={node.id}
+          contentMime={node.content_mime}
           isInTree={isInTree}
           onHashTarget={onHashTarget}
         />
@@ -1166,14 +1169,18 @@ function FacetDropdown({
 export function NodeContentPanel({
   locator,
   nodeId,
+  contentMime,
   isInTree,
   onHashTarget,
 }: {
   locator: FileLocator;
   nodeId: string;
+  /// The node's declared body MIME; `image/*` renders as an image.
+  contentMime?: string;
   isInTree: (id: string) => boolean;
   onHashTarget: (id: string) => void;
 }) {
+  const mediaKind = contentMime ? mediaKindForMime(contentMime) : null;
   const content = useQuery({
     queryKey: [
       "file-structured-node",
@@ -1193,6 +1200,8 @@ export function NodeContentPanel({
         locator.path,
         nodeId,
       ),
+    // Skip the text fetch for media bodies.
+    enabled: mediaKind == null,
     // Same rationale as the tree query — backend's immutable
     // Cache-Control makes a re-fetch cheap.
     staleTime: Infinity,
@@ -1284,6 +1293,25 @@ export function NodeContentPanel({
     },
     [onClick],
   );
+
+  if (mediaKind) {
+    // Flush (no frame); pixelated keeps atlas texels crisp.
+    return (
+      <MediaView
+        kind={mediaKind}
+        src={structuredNodeImageUrl(
+          locator.appid,
+          locator.depotId,
+          locator.manifestId,
+          locator.branch,
+          locator.path,
+          nodeId,
+        )}
+        alt={nodeId}
+        imgClassName="[image-rendering:pixelated]"
+      />
+    );
+  }
 
   if (!settled) return null;
   if (settled.kind === "err") {

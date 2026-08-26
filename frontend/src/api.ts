@@ -405,6 +405,8 @@ export type StructuredNode = {
   /// only group or summarise — frontend skips the content fetch and
   /// shows a placeholder.
   has_content?: boolean;
+  /// Body MIME when known up front and not plain text (e.g. `"image/png"` for a texture).
+  content_mime?: string;
   children: StructuredNode[];
 };
 
@@ -484,6 +486,19 @@ export async function fetchStructuredDiffNode(
   const ct = (r.headers.get("content-type") ?? "").split(";")[0].trim();
   const text = await r.text();
   return { mime: ct, text };
+}
+
+/// URL for a structured node's image body (a Texture2D as PNG).
+export function structuredNodeImageUrl(
+  appid: AppId,
+  depotId: number,
+  manifestId: string,
+  branch: string,
+  path: string,
+  nodeId: string,
+): string {
+  const qs = new URLSearchParams({ branch, path, node_id: nodeId });
+  return `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/structured/node/image?${qs}`;
 }
 
 /// Fetch the structured tree for a file. The path/branch identify the

@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::http::header;
+use axum::response::{IntoResponse as _, Response};
 use serde::Deserialize;
 
 use crate::http::{ApiError, ImmutableCache};
@@ -363,6 +365,80 @@ pub async fn manifest_file_structured_node(
         }
         _ => Err(ApiError::unsupported_media_type(
             "no structured view for this file",
+        )),
+    }
+}
+
+/// Structured tree node rendered as an image (Texture2D → PNG)
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured/node/image",
+    tag = "structured",
+    params(NodeContentQuery),
+    responses(
+        (status = 200, description = "PNG image of the texture", content_type = "image/png"),
+        (status = 415, description = "Node is not a renderable texture")
+    )
+)]
+#[tracing::instrument(skip_all, fields(path = %q.path, node_id = %q.node_id))]
+pub async fn manifest_file_structured_node_image(
+    State(state): State<AppState>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
+    Query(q): Query<NodeContentQuery>,
+) -> Result<Response> {
+    state.steam()?; // 401 if not logged in
+    let snapshot = Arc::new(
+        state
+            .open_manifest(appid, depot_id, manifest_id, &q.branch)
+            .await?,
+    );
+
+    match transform::tools::transformer_for(&q.path) {
+        #[cfg(feature = "unity")]
+        Some(Transformer::UnityBundle) => {
+            let Some((archive_entry, inner)) =
+                transform::unity::bundle::parse_archive_id(&q.node_id)
+            else {
+                return Err(ApiError::unsupported_media_type("not an object node"));
+            };
+            let Some(path_id) = transform::unity::serializedfile::tree::parse_object_node_id(inner)
+            else {
+                return Err(ApiError::unsupported_media_type("not an object node"));
+            };
+            let bundle_path = q.path.clone();
+            let archive_entry = archive_entry.to_string();
+            let scratch = state
+                .manifest_cache
+                .scratch(appid, depot_id, manifest_id, &q.branch);
+            let unity = scratch
+                .unity(snapshot.clone())
+                .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
+            let data_dir = unity.data_dir();
+            let scratch = scratch.clone();
+            let png = tokio::task::spawn_blocking(move || {
+                let unity = scratch
+                    .unity_already_initialized()
+                    .expect("unity scratch was initialised on the async side");
+                let env = &unity.env;
+                let relative = bundle_path
+                    .strip_prefix(&format!("{data_dir}/"))
+                    .unwrap_or(&bundle_path);
+                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
+                transform::unity::serializedfile::texture::render_bundle_texture_png(
+                    env,
+                    bundle_bytes,
+                    &archive_entry,
+                    path_id,
+                )
+            })
+            .await
+            .map_err(|e| ApiError::internal(format!("texture task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+            Ok((ImmutableCache, [(header::CONTENT_TYPE, "image/png")], png).into_response())
+        }
+        _ => Err(ApiError::unsupported_media_type(
+            "no texture preview for this file",
         )),
     }
 }

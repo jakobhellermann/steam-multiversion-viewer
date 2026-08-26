@@ -11,6 +11,26 @@ import { MediaPlayer } from "./MediaPlayer";
 import { StructuredView } from "./StructuredView";
 import type { FileLocator } from "./types";
 
+/// Render `src` as the native media element for `kind`.
+export function MediaView({
+  kind,
+  src,
+  alt,
+  imgClassName,
+}: {
+  kind: "image" | "audio" | "video";
+  src: string;
+  alt?: string;
+  /// Extra `<img>` classes; ignored for audio/video.
+  imgClassName?: string;
+}) {
+  if (kind === "image") {
+    // Functional layout only; the caller styles framing/background.
+    return <img src={src} alt={alt} className={`max-w-full ${imgClassName ?? ""}`} />;
+  }
+  return <MediaPlayer kind={kind} src={src} />;
+}
+
 /// Render `view` as the user expects: image/audio/video by extension,
 /// transformer output for known binaries (.dll, .so), syntax-highlighted
 /// text otherwise. `rawSrc` is the URL to the raw bytes (used for media
@@ -55,29 +75,16 @@ export function FilePreview({
   }
 
   const media = mediaKindForPath(view.path);
-  if (media === "image") {
+  if (media) {
     return (
       <section className={sectionClass}>
         {header}
-        <img
+        <MediaView
+          kind={media}
           src={rawSrc}
           alt={view.path}
-          className="max-w-full rounded border border-slate-800 bg-slate-950"
+          imgClassName="rounded border border-slate-800 bg-slate-950"
         />
-      </section>
-    );
-  } else if (media === "audio") {
-    return (
-      <section className={sectionClass}>
-        {header}
-        <MediaPlayer kind="audio" src={rawSrc} />
-      </section>
-    );
-  } else if (media === "video") {
-    return (
-      <section className={sectionClass}>
-        {header}
-        <MediaPlayer kind="video" src={rawSrc} />
       </section>
     );
   }

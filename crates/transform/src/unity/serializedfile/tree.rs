@@ -363,6 +363,9 @@ fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     let mut node = Node::leaf(format!("obj:{path_id}"), &display_label, "component")
         .with_facet("class", &class_label);
     node.has_content = true;
+    if matches!(class_id, ClassId::Texture2D) {
+        node.content_mime = Some("image/png".to_string());
+    }
     if loose && display_label != class_label {
         node = node.with_badge(class_label.clone());
     }

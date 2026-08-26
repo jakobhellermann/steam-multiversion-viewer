@@ -9,6 +9,7 @@ pub mod dump_value;
 pub mod format;
 pub mod markers;
 pub mod shader;
+pub mod texture;
 pub mod tree;
 
 #[cfg(test)]
