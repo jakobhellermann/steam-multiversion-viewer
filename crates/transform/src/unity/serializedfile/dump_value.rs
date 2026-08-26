@@ -342,6 +342,39 @@ pub fn dump_bundle_shader_program<R: EnvResolver, P: TypeTreeProvider>(
 ///   non-string keys),
 ///
 /// in that order of priority per map node. Everything else recurses.
+/// Replace a long run of raw scalars (byte blob or numeric array) with
+/// a `<N bytes>` / `<N values>` summary. These (index buffers, vertex
+/// data, bindposes, platform blobs) are unreadable as JSON and slow to
+/// highlight; the length is the only human-useful bit.
+fn collapse_scalar_blob(value: &mut Value) -> bool {
+    const MAX: usize = 16;
+    let summary = match value {
+        Value::Bytes(b) if b.len() > MAX => format!("<{} bytes>", b.len()),
+        Value::Seq(items) if items.len() > MAX && items.iter().all(is_scalar_number) => {
+            format!("<{} values>", items.len())
+        }
+        _ => return false,
+    };
+    *value = svalue_str(summary);
+    true
+}
+
+fn is_scalar_number(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::U8(_)
+            | Value::U16(_)
+            | Value::U32(_)
+            | Value::U64(_)
+            | Value::I8(_)
+            | Value::I16(_)
+            | Value::I32(_)
+            | Value::I64(_)
+            | Value::F32(_)
+            | Value::F64(_)
+    )
+}
+
 pub(crate) fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     data_dir: &str,
@@ -352,6 +385,9 @@ pub(crate) fn simplify_for_dump<R: EnvResolver, P: TypeTreeProvider>(
     local_ref_prefix: &str,
     value: &mut Value,
 ) {
+    if collapse_scalar_blob(value) {
+        return;
+    }
     match value {
         Value::Map(map) => {
             // Whole-map rewrites — short-circuit before recursing into
