@@ -21,6 +21,7 @@ use {
     rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache,
     rabex_env::resolver::EnvResolver,
     rabex_env_steam_depot_vfs::SteamDepotGameFiles,
+    transform::unity::game_specific::playmaker::GameContext,
 };
 
 const CAP: usize = 2;
@@ -54,6 +55,10 @@ pub struct UnityScratch {
     /// IL pattern doesn't match) is cached so a non-securecplayerprefs
     /// game doesn't reparse the DLL on every TextAsset preview.
     spp_key: OnceLock<Option<Vec<u8>>>,
+    /// Enum member and layer names for `PlayMakerFSM` params, read from
+    /// `Managed/`. The failure is cached too, so a manifest we can't read
+    /// them from doesn't reparse the assemblies per request.
+    playmaker_game: OnceLock<Result<GameContext, String>>,
 }
 
 #[cfg(feature = "unity")]
@@ -90,6 +95,22 @@ impl UnityScratch {
     }
 }
 
+/// Lazy-read the `PlayMakerFSM` name tables from this manifest's managed
+/// assemblies. Blocking, and parses `Assembly-CSharp.dll` in full, so the
+/// result is cached for the lifetime of the scratch.
+#[cfg(feature = "unity")]
+impl transform::unity::game_specific::playmaker::GameContextSource for UnityScratch {
+    fn game_context(&self) -> anyhow::Result<&GameContext> {
+        self.playmaker_game
+            .get_or_init(|| {
+                transform::unity::game_specific::playmaker::read_game_context(&self.env)
+                    .map_err(|err| format!("{err:#}"))
+            })
+            .as_ref()
+            .map_err(|err| anyhow::anyhow!(err.clone()))
+    }
+}
+
 #[cfg(feature = "unity")]
 impl ManifestScratch {
     /// Lazy-build the unity scratch for this manifest, or `None` if
@@ -102,6 +123,7 @@ impl ManifestScratch {
                     UnityScratch {
                         env: Arc::new(Environment::new(gf, tpk)),
                         spp_key: OnceLock::new(),
+                        playmaker_game: OnceLock::new(),
                     }
                 })
             })

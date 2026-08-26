@@ -4,6 +4,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useCallback, useRef } from "react";
 
 import { fetchStructuredDiff, fetchStructuredDiffNode, type StructuredNode } from "../../api";
+import { type Lang, langForMime } from "../../lib/syntax";
 import { HighlightedPre } from "./FilePreview";
 import { makeDiffPostProcess, makePostProcess } from "./markers";
 import { focusUnlessSelecting, scopeSelectAll } from "./selection";
@@ -138,9 +139,7 @@ function DiffNodeBody({
   // the last successful response in a ref. Loading shimmer for a
   // sub-second fetch is noisier than just leaving the previous body
   // up.
-  type Settled =
-    | { kind: "ok"; lang: "diff" | "csharp" | "json"; text: string }
-    | { kind: "err"; message: string };
+  type Settled = { kind: "ok"; lang: Lang | null; text: string } | { kind: "err"; message: string };
   const lastSettledRef = useRef<Settled | null>(null);
   if (!enabled) {
     // Section / group / namespace rows have no body — drop whatever
@@ -152,7 +151,7 @@ function DiffNodeBody({
   if (content.data) {
     lastSettledRef.current = {
       kind: "ok",
-      lang: content.data.kind,
+      lang: langForMime(content.data.mime),
       text: content.data.text,
     };
   } else if (content.error) {

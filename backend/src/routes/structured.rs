@@ -234,6 +234,7 @@ pub async fn manifest_file_structured_node(
                     None => {
                         let opts = dump_value::DumpOptions {
                             spp_key: unity.secure_player_prefs_key(),
+                            playmaker_game: Some(unity),
                         };
                         dump_value::dump_object_json(&unity.env, &data_dir, &path, path_id, opts)
                     }
@@ -310,6 +311,7 @@ pub async fn manifest_file_structured_node(
                     None => {
                         let opts = dump_value::DumpOptions {
                             spp_key: unity.secure_player_prefs_key(),
+                            playmaker_game: Some(unity),
                         };
                         dump_value::dump_bundle_object_json(
                             env,

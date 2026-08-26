@@ -448,12 +448,11 @@ export async function fetchStructuredDiff(
 }
 
 export type StructuredDiffNodeContent = {
-  /// `"diff"` when both sides resolved (unified diff text). For
-  /// one-sided nodes, falls through to the source kind of the
-  /// available side: `"csharp"` for `.dll` decompiles, `"json"` for
-  /// unity JSON dumps. Lets the renderer pick the right syntax
-  /// highlighter without rebuilding the diff machinery per format.
-  kind: "diff" | "csharp" | "json";
+  /// Content-Type of the body, without parameters: `text/x-diff` for a
+  /// two-sided unified diff, otherwise whatever the one available side
+  /// dumped as. Stays a mime rather than a grammar so this module does
+  /// not pull in the highlighter.
+  mime: string;
   text: string;
 };
 
@@ -482,14 +481,9 @@ export async function fetchStructuredDiffNode(
     `/api/apps/${appid}/depots/${baseDepotId}/manifests/${baseManifestId}/file/structured-diff/node?${qs}`,
   );
   if (!r.ok) throw new Error(await extractErrorMessage(r));
-  const ct = (r.headers.get("content-type") ?? "").toLowerCase();
+  const ct = (r.headers.get("content-type") ?? "").split(";")[0].trim();
   const text = await r.text();
-  const kind = ct.startsWith("text/x-diff")
-    ? "diff"
-    : ct.startsWith("text/x-csharp") || ct.startsWith("application/x-csharp")
-      ? "csharp"
-      : "json";
-  return { kind, text };
+  return { mime: ct, text };
 }
 
 /// Fetch the structured tree for a file. The path/branch identify the

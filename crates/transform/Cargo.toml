@@ -7,7 +7,7 @@ edition = "2024"
 default = ["unity"]
 # Optional unity-asset support — serializedfile / bundle handling via
 # rabex. Disable to drop the rabex dep entirely.
-unity = ["dep:rabex-env", "dep:aes", "dep:ecb", "dep:base64", "dep:lz4_flex"]
+unity = ["dep:rabex-env", "dep:playmakerfsm", "dep:aes", "dep:ecb", "dep:base64", "dep:lz4_flex"]
 
 [dependencies]
 anyhow = "1.0"
@@ -29,6 +29,7 @@ aes = { version = "0.9", optional = true }
 ecb = { version = "0.2", optional = true }
 base64 = { version = "0.22", optional = true }
 lz4_flex = { version = "0.13", optional = true }
+playmakerfsm = { git = "https://github.com/jakobhellermann/playmakerfsm", optional = true }
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }

@@ -60,6 +60,7 @@ export function langForPath(path: string): Lang | null {
 }
 
 const MIME_TO_LANG: Record<string, Lang> = {
+  "text/x-diff": "diff",
   "text/x-csharp": "csharp",
   "application/x-csharp": "csharp",
   "application/json": "json",

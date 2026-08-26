@@ -26,6 +26,8 @@ use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour};
 use serde_value::Value;
 
+use crate::unity::game_specific::{self, playmaker};
+
 use super::markers::{
     as_file_id, as_path_id, classref_marker, color_hex_from_map, color_marker, pptr_from_map,
     pptr_marker, shape_marker,
@@ -43,6 +45,9 @@ pub struct DumpOptions<'a> {
     /// `base64(AES-256-ECB-PKCS7(utf8))` under this key, the dump
     /// returns the decrypted plaintext instead of the JSON object.
     pub spp_key: Option<&'a [u8]>,
+    /// Resolves the enum and layer names a `PlayMakerFSM` carries as
+    /// bare integers. `None` leaves them numeric.
+    pub playmaker_game: Option<&'a dyn playmaker::GameContextSource>,
 }
 
 /// MIME type for a JSON object dump — the regular fall-through return
@@ -51,7 +56,7 @@ pub const MIME_JSON: &str = "application/json";
 
 /// MIME type for a decrypted TextAsset body that doesn't look like
 /// anything more specific.
-pub const MIME_PLAIN: &str = "text/plain; charset=utf-8";
+pub const MIME_PLAIN: &str = "text/plain";
 
 /// MIME type for a decrypted TextAsset body that starts with `<` and
 /// ends with `>` — most of the localised language sheets ship as XML
@@ -136,6 +141,9 @@ pub(crate) fn dump_object_json_from_handle<R: EnvResolver, P: TypeTreeProvider>(
         && let Some(json) = dump_shader(file, data_dir, local_ref_prefix, &mut value)
     {
         return Ok((MIME_JSON, json));
+    }
+    if let Some(dumped) = game_specific::try_dump(file, class_id, path_id, opts)? {
+        return Ok(dumped);
     }
     simplify_for_dump(file, data_dir, local_ref_prefix, &mut value);
     if class_id == ClassId::MonoScript {
@@ -249,6 +257,9 @@ pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
         && let Some(plain) = try_decrypt_textasset(&value, opts.spp_key)
     {
         return Ok((sniff_mime(&plain), plain));
+    }
+    if let Some(dumped) = game_specific::try_dump(&file, class_id, path_id, opts)? {
+        return Ok(dumped);
     }
     let archive_prefix = format!("archive:{archive_entry}/");
     let mut value = value;

@@ -1209,9 +1209,9 @@ async fn bundle_node_body(
         let dump_side =
             |side: Option<(Arc<crate::state::manifest_cache::ManifestScratch>, String)>,
              target: Option<(String, rabex_env::rabex::objects::pptr::PathId)>|
-             -> Option<anyhow::Result<String>> {
+             -> Option<anyhow::Result<Dumped>> {
                 let ((scratch, data_dir), (entry, pid)) = side.zip(target)?;
-                Some((|| -> anyhow::Result<String> {
+                Some((|| -> anyhow::Result<Dumped> {
                     let unity = scratch
                         .unity_already_initialized()
                         .expect("unity scratch was initialised on the async side");
@@ -1222,8 +1222,9 @@ async fn bundle_node_body(
                     let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
                     let opts = transform::unity::serializedfile::dump_value::DumpOptions {
                         spp_key: unity.secure_player_prefs_key(),
+                        playmaker_game: Some(unity),
                     };
-                    let (_mime, text) =
+                    let (mime, text) =
                         transform::unity::serializedfile::dump_value::dump_bundle_object_json(
                             env,
                             &data_dir,
@@ -1232,12 +1233,13 @@ async fn bundle_node_body(
                             pid,
                             opts,
                         )?;
-                    Ok(text)
+                    Ok(Dumped { mime, text })
                 })())
             };
-        let b = dump_side(base_side, base_target);
-        let t = dump_side(target_side, target_target);
-        (b, t)
+        (
+            dump_side(base_side, base_target),
+            dump_side(target_side, target_target),
+        )
     })
     .await
     .map_err(|e| ApiError::internal(format!("structured-diff/node task panicked: {e}")))?;
@@ -1250,37 +1252,11 @@ async fn bundle_node_body(
     let base_text = base_text.and_then(|r| r.ok());
     let target_text = target_text.and_then(|r| r.ok());
 
-    let body = match (base_text, target_text) {
-        (Some(b), Some(t)) => {
-            let base_label = diff_label(depot_id, manifest_id, base_ct);
-            let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
-            let text = transform::diff::unified_diff_text(&b, &t, &base_label, &target_label);
-            (
-                [(
-                    header::CONTENT_TYPE,
-                    "text/x-diff; charset=utf-8".to_string(),
-                )],
-                text,
-            )
-                .into_response()
-        }
-        (Some(b), None) => (
-            [(
-                header::CONTENT_TYPE,
-                "application/json; charset=utf-8".to_string(),
-            )],
-            b,
-        )
-            .into_response(),
-        (None, Some(t)) => (
-            [(
-                header::CONTENT_TYPE,
-                "application/json; charset=utf-8".to_string(),
-            )],
-            t,
-        )
-            .into_response(),
-        (None, None) => {
+    let base_label = diff_label(depot_id, manifest_id, base_ct);
+    let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
+    let body = match node_body_response(base_text, target_text, &base_label, &target_label) {
+        Some(body) => body,
+        None => {
             return Err(ApiError::bad_request(format!(
                 "bundle structured-diff/node could not resolve any side: {}",
                 q.node_id
@@ -1331,8 +1307,13 @@ async fn dll_node_body(
                     .open_manifest(appid, depot_id, manifest_id, &q.branch)
                     .await?,
             );
-            let ct = snap.manifest().creation_time;
-            Ok::<_, ApiError>(Some((dll_side_bytes(&snap, &q.path).await?, ct)))
+            let creation_time = snap.manifest().creation_time;
+            let (bytes, sha) = dll_side_bytes(&snap, &q.path).await?;
+            Ok::<_, ApiError>(Some(DllSide {
+                bytes,
+                sha,
+                creation_time,
+            }))
         } else {
             Ok(None)
         }
@@ -1349,8 +1330,13 @@ async fn dll_node_body(
                     )
                     .await?,
             );
-            let ct = snap.manifest().creation_time;
-            Ok::<_, ApiError>(Some((dll_side_bytes(&snap, &q.path).await?, ct)))
+            let creation_time = snap.manifest().creation_time;
+            let (bytes, sha) = dll_side_bytes(&snap, &q.path).await?;
+            Ok::<_, ApiError>(Some(DllSide {
+                bytes,
+                sha,
+                creation_time,
+            }))
         } else {
             Ok(None)
         }
@@ -1358,66 +1344,34 @@ async fn dll_node_body(
     let (base_side, target_side) = tokio::try_join!(base_fut, target_fut)?;
 
     let base_text = match (base_type, base_side.as_ref()) {
-        (Some(t), Some(((bytes, sha), _ct))) => Some(
-            transform::dll::decompile_type(&store_root, sha, bytes, t)
+        (Some(t), Some(side)) => Some(Dumped {
+            mime: MIME_CSHARP,
+            text: transform::dll::decompile_type(&store_root, &side.sha, &side.bytes, t)
                 .await
                 .map_err(|e| ApiError::internal(e.to_string()))?,
-        ),
+        }),
         _ => None,
     };
     let target_text = match (target_type, target_side.as_ref()) {
-        (Some(t), Some(((bytes, sha), _ct))) => Some(
-            transform::dll::decompile_type(&store_root, sha, bytes, t)
+        (Some(t), Some(side)) => Some(Dumped {
+            mime: MIME_CSHARP,
+            text: transform::dll::decompile_type(&store_root, &side.sha, &side.bytes, t)
                 .await
                 .map_err(|e| ApiError::internal(e.to_string()))?,
-        ),
+        }),
         _ => None,
     };
 
-    let body = match (base_text, target_text) {
-        (Some(b), Some(t)) => {
-            let base_label = diff_label(
-                depot_id,
-                manifest_id,
-                base_side.as_ref().map(|((_, _), ct)| *ct).unwrap_or(0),
-            );
-            let target_label = diff_label(
-                q.target_depot_id,
-                q.target_manifest_id,
-                target_side.as_ref().map(|((_, _), ct)| *ct).unwrap_or(0),
-            );
-            let text = transform::diff::unified_diff_text(&b, &t, &base_label, &target_label);
-            (
-                [(
-                    header::CONTENT_TYPE,
-                    "text/x-diff; charset=utf-8".to_string(),
-                )],
-                text,
-            )
-                .into_response()
-        }
-        (Some(b), None) => (
-            [(
-                header::CONTENT_TYPE,
-                "text/x-csharp; charset=utf-8".to_string(),
-            )],
-            b,
-        )
-            .into_response(),
-        (None, Some(t)) => (
-            [(
-                header::CONTENT_TYPE,
-                "text/x-csharp; charset=utf-8".to_string(),
-            )],
-            t,
-        )
-            .into_response(),
-        (None, None) => {
-            return Err(ApiError::bad_request(
-                "structured-diff/node could not resolve either side",
-            ));
-        }
-    };
+    let creation_time = |side: &Option<DllSide>| side.as_ref().map_or(0, |s| s.creation_time);
+    let base_label = diff_label(depot_id, manifest_id, creation_time(&base_side));
+    let target_label = diff_label(
+        q.target_depot_id,
+        q.target_manifest_id,
+        creation_time(&target_side),
+    );
+    let body = node_body_response(base_text, target_text, &base_label, &target_label).ok_or_else(
+        || ApiError::bad_request("structured-diff/node could not resolve either side"),
+    )?;
     Ok((crate::http::ImmutableCache, body))
 }
 
@@ -1436,6 +1390,57 @@ pub struct StructuredDiffNodeQuery {
     pub target_branch: String,
     /// Opaque node id from the diff tree's `id` field.
     pub node_id: String,
+}
+
+/// MIME type of a decompiled C# body.
+const MIME_CSHARP: &str = "text/x-csharp";
+
+/// One side of a Dll node: the assembly to decompile, the content sha
+/// the decompile cache is keyed on, and the manifest's creation time
+/// for the diff header.
+struct DllSide {
+    bytes: Vec<u8>,
+    sha: [u8; 20],
+    creation_time: u32,
+}
+
+/// One side's rendered object body plus the MIME the dump chose for it.
+/// The MIME has to reach the response, or a one-sided node is labelled
+/// as something it isn't.
+#[derive(Debug, PartialEq)]
+struct Dumped {
+    mime: &'static str,
+    text: String,
+}
+
+/// Build the per-node body: a unified diff when both sides are present,
+/// the available side verbatim when only one is, paired with the
+/// content type to send it under. `None` when neither side resolved.
+fn node_body(
+    base: Option<Dumped>,
+    target: Option<Dumped>,
+    base_label: &str,
+    target_label: &str,
+) -> Option<(String, String)> {
+    let (mime, text) = match (base, target) {
+        (Some(b), Some(t)) => (
+            "text/x-diff",
+            transform::diff::unified_diff_text(&b.text, &t.text, base_label, target_label),
+        ),
+        (Some(one), None) | (None, Some(one)) => (one.mime, one.text),
+        (None, None) => return None,
+    };
+    Some((format!("{mime}; charset=utf-8"), text))
+}
+
+fn node_body_response(
+    base: Option<Dumped>,
+    target: Option<Dumped>,
+    base_label: &str,
+    target_label: &str,
+) -> Option<Response> {
+    let (content_type, text) = node_body(base, target, base_label, target_label)?;
+    Some(([(header::CONTENT_TYPE, content_type)], text).into_response())
 }
 
 /// Resolves a diff-tree id into the per-side inner ids the format
@@ -1625,65 +1630,43 @@ async fn unity_serialized_node_body(
         let dump_side =
             |side: Option<(Arc<crate::state::manifest_cache::ManifestScratch>, String)>,
              pid: Option<rabex_env::rabex::objects::pptr::PathId>|
-             -> Option<anyhow::Result<String>> {
+             -> Option<anyhow::Result<Dumped>> {
                 let ((scratch, data_dir), pid) = side.zip(pid)?;
-                Some((|| -> anyhow::Result<String> {
+                Some((|| -> anyhow::Result<Dumped> {
                     let unity = scratch
                         .unity_already_initialized()
                         .expect("unity scratch was initialised on the async side");
                     let opts = transform::unity::serializedfile::dump_value::DumpOptions {
                         spp_key: unity.secure_player_prefs_key(),
+                        playmaker_game: Some(unity),
                     };
-                    let (_mime, text) =
+                    let (mime, text) =
                         transform::unity::serializedfile::dump_value::dump_object_json(
                             &unity.env, &data_dir, &path, pid, opts,
                         )?;
-                    Ok(text)
+                    Ok(Dumped { mime, text })
                 })())
             };
-        let b = dump_side(base_side, base_pid).transpose();
-        let t = dump_side(target_side, target_pid).transpose();
-        (b, t)
+        (
+            dump_side(base_side, base_pid),
+            dump_side(target_side, target_pid),
+        )
     })
     .await
     .map_err(|e| ApiError::internal(format!("structured-diff/node task panicked: {e}")))?;
 
-    let base_text = base_text.map_err(|e| ApiError::internal(e.to_string()))?;
-    let target_text = target_text.map_err(|e| ApiError::internal(e.to_string()))?;
+    let base_text = base_text
+        .transpose()
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let target_text = target_text
+        .transpose()
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    // One-sided node → return the available JSON verbatim. Both-sided
-    // → unified diff so the frontend can highlight with `lang="diff"`.
-    let body = match (base_text, target_text) {
-        (Some(b), Some(t)) => {
-            let base_label = diff_label(depot_id, manifest_id, base_ct);
-            let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
-            let text = transform::diff::unified_diff_text(&b, &t, &base_label, &target_label);
-            (
-                [(
-                    header::CONTENT_TYPE,
-                    "text/x-diff; charset=utf-8".to_string(),
-                )],
-                text,
-            )
-                .into_response()
-        }
-        (Some(b), None) => (
-            [(
-                header::CONTENT_TYPE,
-                "application/json; charset=utf-8".to_string(),
-            )],
-            b,
-        )
-            .into_response(),
-        (None, Some(t)) => (
-            [(
-                header::CONTENT_TYPE,
-                "application/json; charset=utf-8".to_string(),
-            )],
-            t,
-        )
-            .into_response(),
-        (None, None) => {
+    let base_label = diff_label(depot_id, manifest_id, base_ct);
+    let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
+    let body = match node_body_response(base_text, target_text, &base_label, &target_label) {
+        Some(body) => body,
+        None => {
             return Err(ApiError::bad_request(
                 "structured-diff/node ids did not parse to object ids",
             ));
@@ -1776,9 +1759,48 @@ fn unity_side_with_scratch(
     Ok((scratch, data_dir))
 }
 
-#[cfg(all(test, feature = "unity"))]
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_body_keeps_the_one_sided_mime() {
+        let one = Dumped {
+            mime: "text/x-playmaker-fsm",
+            text: "state Idle\n".to_string(),
+        };
+        assert_eq!(
+            node_body(Some(one), None, "base", "target"),
+            Some((
+                "text/x-playmaker-fsm; charset=utf-8".to_string(),
+                "state Idle\n".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn node_body_diffs_both_sides() {
+        let base = Dumped {
+            mime: "application/json",
+            text: "a\n".to_string(),
+        };
+        let target = Dumped {
+            mime: "application/json",
+            text: "b\n".to_string(),
+        };
+        assert_eq!(
+            node_body(Some(base), Some(target), "base", "target"),
+            Some((
+                "text/x-diff; charset=utf-8".to_string(),
+                "--- target\n+++ base\n@@ -1 +1 @@\n-b\n+a\n".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn node_body_is_none_without_a_resolved_side() {
+        assert_eq!(node_body(None, None, "base", "target"), None);
+    }
 
     #[test]
     fn split_diff_id_handles_side_prefixes() {
