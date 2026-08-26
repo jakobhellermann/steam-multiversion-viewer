@@ -253,10 +253,10 @@ function DiffPage() {
             className="font-mono text-rose-300 hover:underline"
           >
             {targetDepotId}/{targetManifestId}
+            {targetCreation > 0 && (
+              <span className="ml-1 text-rose-300/70">({formatDate(targetCreation)})</span>
+            )}
           </Link>
-          {targetCreation > 0 && (
-            <span className="ml-1 text-rose-300/70">({formatDate(targetCreation)})</span>
-          )}
           <span className="mx-2 text-slate-600">→</span>
           <Link
             to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
@@ -266,10 +266,10 @@ function DiffPage() {
             className="font-mono text-emerald-300 hover:underline"
           >
             {depotId}/{manifestId}
+            {baseCreation > 0 && (
+              <span className="ml-1 text-emerald-300/70">({formatDate(baseCreation)})</span>
+            )}
           </Link>
-          {baseCreation > 0 && (
-            <span className="ml-1 text-emerald-300/70">({formatDate(baseCreation)})</span>
-          )}
         </p>
       </div>
 
