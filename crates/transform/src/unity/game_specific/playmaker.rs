@@ -3,7 +3,7 @@
 //! typetree.
 //!
 //! Object-valued parameters come out as version-stable component paths, so the
-//! rendering doubles as the diff body: a moved or renamed target shows up as a
+//! dump doubles as the diff body: a moved or renamed target shows up as a
 //! changed line instead of a changed `m_PathID`.
 
 use std::path::Path;
@@ -12,17 +12,21 @@ use anyhow::{Context as _, Result};
 use playmakerfsm::component::ComponentFsm;
 use rabex_env::Environment;
 use rabex_env::handle::SerializedFileHandle;
+use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::PathId;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::MonoBehaviour;
 
-pub use playmakerfsm::component::SCRIPT_NAME;
+use crate::unity::serializedfile::dump_value::DumpOptions;
+
+use playmakerfsm::component::SCRIPT_NAME;
+
 pub use playmakerfsm::context::GameContext;
 
 /// MIME type of the pseudocode body. No shiki grammar maps to it yet, so the
 /// frontend renders it unhighlighted.
-pub const MIME: &str = "text/x-playmaker-fsm";
+const MIME: &str = "text/x-playmaker-fsm";
 
 /// Read what this game knows beyond its FSM data, out of its managed
 /// assemblies. `Assembly-CSharp.dll` holds all but a handful of a game's
@@ -53,14 +57,23 @@ pub trait GameContextSource {
     fn game_context(&self) -> Result<&GameContext>;
 }
 
-/// Whether the MonoBehaviour at `path_id` is a `PlayMakerFSM`. The
-/// `ClassId::MonoBehaviour` gate lives at the call site.
-pub fn is_fsm<R: EnvResolver, P: TypeTreeProvider>(
+/// Dump the object at `path_id` as pseudocode if it is a `PlayMakerFSM`,
+/// `None` for anything else.
+pub fn try_dump<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
+    class_id: ClassId,
     path_id: PathId,
-) -> Result<bool> {
+    opts: DumpOptions<'_>,
+) -> Result<Option<(&'static str, String)>> {
+    if class_id != ClassId::MonoBehaviour {
+        return Ok(None);
+    }
     let script = file.object_at::<MonoBehaviour>(path_id)?.mono_script()?;
-    Ok(script.is_some_and(|s| s.full_name() == SCRIPT_NAME))
+    if !script.is_some_and(|s| s.full_name() == SCRIPT_NAME) {
+        return Ok(None);
+    }
+    let pseudo = dump_pseudocode(file, path_id, opts.playmaker_game)?;
+    Ok(Some((MIME, pseudo)))
 }
 
 /// Decode the `PlayMakerFSM` at `path_id` and render it as pseudocode.

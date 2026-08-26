@@ -1210,8 +1210,7 @@ async fn bundle_node_body(
             |side: Option<(Arc<crate::state::manifest_cache::ManifestScratch>, String)>,
              target: Option<(String, rabex_env::rabex::objects::pptr::PathId)>|
              -> Option<anyhow::Result<Dumped>> {
-                let ((scratch, data_dir), (entry, pid)) = side.zip(target)?;
-                Some((|| -> anyhow::Result<Dumped> {
+                side.zip(target).map(|((scratch, data_dir), (entry, pid))| {
                     let unity = scratch
                         .unity_already_initialized()
                         .expect("unity scratch was initialised on the async side");
@@ -1234,7 +1233,7 @@ async fn bundle_node_body(
                             opts,
                         )?;
                     Ok(Dumped { mime, text })
-                })())
+                })
             };
         (
             dump_side(base_side, base_target),
@@ -1631,8 +1630,7 @@ async fn unity_serialized_node_body(
             |side: Option<(Arc<crate::state::manifest_cache::ManifestScratch>, String)>,
              pid: Option<rabex_env::rabex::objects::pptr::PathId>|
              -> Option<anyhow::Result<Dumped>> {
-                let ((scratch, data_dir), pid) = side.zip(pid)?;
-                Some((|| -> anyhow::Result<Dumped> {
+                side.zip(pid).map(|((scratch, data_dir), pid)| {
                     let unity = scratch
                         .unity_already_initialized()
                         .expect("unity scratch was initialised on the async side");
@@ -1645,7 +1643,7 @@ async fn unity_serialized_node_body(
                             &unity.env, &data_dir, &path, pid, opts,
                         )?;
                     Ok(Dumped { mime, text })
-                })())
+                })
             };
         (
             dump_side(base_side, base_pid),
