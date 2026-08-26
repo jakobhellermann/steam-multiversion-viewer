@@ -1,7 +1,26 @@
 // TODO(ai-review): review for style and correctness
 import { describe, expect, test } from "vitest";
 
-import { projectRefToSide, qualifyRefForSide } from "./pptrRef";
+import { parsePptrRef, pptrNodeKeys, projectRefToSide, qualifyRefForSide } from "./pptrRef";
+
+describe("negative path ids", () => {
+  const p = "archive:CAB-bf54a70ab04d641cdc3c945b2a30ad8d/";
+  test("pptrNodeKeys splits a mod pair with negative ids", () => {
+    expect(pptrNodeKeys(`${p}mod:obj:-9078353595027427756,obj:-3874018262522925614`)).toEqual([
+      { side: "base", key: `${p}obj:-9078353595027427756` },
+      { side: "target", key: `${p}obj:-3874018262522925614` },
+    ]);
+  });
+  test("parsePptrRef handles negative ids", () => {
+    expect(parsePptrRef("obj:-42")).toEqual({ side: "either", key: "obj:-42" });
+    expect(parsePptrRef("base:obj:-42")).toEqual({ side: "base", key: "obj:-42" });
+  });
+  test("project + qualify work for a negative mod pair", () => {
+    const ref = `${p}mod:obj:-9078353595027427756,obj:-3874018262522925614`;
+    expect(projectRefToSide(ref, "base")).toBe(`${p}obj:-9078353595027427756`);
+    expect(qualifyRefForSide(ref, "target")).toBe(`${p}target:obj:-3874018262522925614`);
+  });
+});
 
 describe("projectRefToSide", () => {
   test("matched pair answers to either side (bare + archive-prefixed)", () => {

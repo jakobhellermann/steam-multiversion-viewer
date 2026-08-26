@@ -38,7 +38,7 @@ function splitArchivePrefix(id: NodeId): [string, NodeId] {
 export function pptrNodeKeys(id: NodeId): Array<{ side: "base" | "target"; key: NodeId }> {
   const [prefix, inner] = splitArchivePrefix(id);
   let m: RegExpExecArray | null;
-  if ((m = /^(obj:\d+)$/.exec(inner))) {
+  if ((m = /^(obj:-?\d+)$/.exec(inner))) {
     // Matched on both sides with the same path id — answers to either.
     const key = prefix + m[1];
     return [
@@ -46,9 +46,9 @@ export function pptrNodeKeys(id: NodeId): Array<{ side: "base" | "target"; key: 
       { side: "target", key },
     ];
   }
-  if ((m = /^base:(obj:\d+)$/.exec(inner))) return [{ side: "base", key: prefix + m[1] }];
-  if ((m = /^target:(obj:\d+)$/.exec(inner))) return [{ side: "target", key: prefix + m[1] }];
-  if ((m = /^mod:(obj:\d+),(obj:\d+)$/.exec(inner))) {
+  if ((m = /^base:(obj:-?\d+)$/.exec(inner))) return [{ side: "base", key: prefix + m[1] }];
+  if ((m = /^target:(obj:-?\d+)$/.exec(inner))) return [{ side: "target", key: prefix + m[1] }];
+  if ((m = /^mod:(obj:-?\d+),(obj:-?\d+)$/.exec(inner))) {
     // `mod:obj:<base>,obj:<target>` — each side keys under its own id.
     return [
       { side: "base", key: prefix + m[1] },
@@ -66,9 +66,9 @@ export function parsePptrRef(
 ): { side: "base" | "target" | "either"; key: NodeId } | null {
   const [prefix, inner] = splitArchivePrefix(ref);
   let m: RegExpExecArray | null;
-  if ((m = /^base:(obj:\d+)$/.exec(inner))) return { side: "base", key: prefix + m[1] };
-  if ((m = /^target:(obj:\d+)$/.exec(inner))) return { side: "target", key: prefix + m[1] };
-  if ((m = /^(obj:\d+)$/.exec(inner))) return { side: "either", key: prefix + m[1] };
+  if ((m = /^base:(obj:-?\d+)$/.exec(inner))) return { side: "base", key: prefix + m[1] };
+  if ((m = /^target:(obj:-?\d+)$/.exec(inner))) return { side: "target", key: prefix + m[1] };
+  if ((m = /^(obj:-?\d+)$/.exec(inner))) return { side: "either", key: prefix + m[1] };
   return null;
 }
 
