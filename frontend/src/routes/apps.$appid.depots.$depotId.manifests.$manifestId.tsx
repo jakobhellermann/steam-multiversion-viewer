@@ -88,6 +88,9 @@ function ManifestDetail() {
           compare_to: next.size === 0 ? undefined : [...next].join(","),
         }),
         replace: true,
+        // In-place filter change: the router would otherwise treat the new
+        // search string as a fresh location and scroll the page to the top.
+        resetScroll: false,
       });
     },
     [navigate],
@@ -587,6 +590,7 @@ function FilesPanel({
           ext: next.size === 0 ? undefined : [...next].sort().join(","),
         }),
         replace: true,
+        resetScroll: false,
       });
     },
     [navigate],
@@ -669,6 +673,7 @@ function FilesPanel({
       navigate({
         search: (prev) => ({ ...prev, deep: next ? true : undefined }),
         replace: true,
+        resetScroll: false,
       });
     },
     [navigate],
