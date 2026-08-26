@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
@@ -209,13 +209,11 @@ function DiffPage() {
               hash,
             });
           }}
-          onGoToManifest={() =>
-            navigate({
-              to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
-              params: { appid: appidParam, depotId: depotIdParam, manifestId },
-              search: { branch: branch === "public" ? undefined : branch },
-            })
-          }
+          manifestLink={linkOptions({
+            to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
+            params: { appid: appidParam, depotId: depotIdParam, manifestId },
+            search: { branch: branch === "public" ? undefined : branch },
+          })}
         />
         <span className="text-slate-600">/</span>
         <Link

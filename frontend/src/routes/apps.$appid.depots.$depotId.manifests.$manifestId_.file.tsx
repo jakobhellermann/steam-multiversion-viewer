@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import {
@@ -234,13 +234,11 @@ function FileViewPage() {
               search: { branch: br === "public" ? undefined : br, path, compare_to },
             })
           }
-          onGoToManifest={() =>
-            navigate({
-              to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
-              params: { appid: appidParam, depotId: depotIdParam, manifestId },
-              search: { branch: branch === "public" ? undefined : branch, compare_to },
-            })
-          }
+          manifestLink={linkOptions({
+            to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
+            params: { appid: appidParam, depotId: depotIdParam, manifestId },
+            search: { branch: branch === "public" ? undefined : branch, compare_to },
+          })}
         />
         <span className="text-slate-600">/</span>
         <span className="truncate font-medium text-slate-200">{filenameOf(path)}</span>

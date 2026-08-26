@@ -1,5 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { useQueries } from "@tanstack/react-query";
+import { Link, type LinkComponentProps } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchGameInfo,
@@ -17,9 +18,9 @@ import { useBranchFilter } from "../lib/useBranchFilter";
 /// on selection via `onSelect` — typically staying on the current
 /// sub-page (file, diff) or jumping to the manifest overview.
 ///
-/// `onGoToManifest` (optional) makes the label a clickable link back to
-/// the manifest overview — used on sub-pages where the breadcrumb should
-/// still navigate "up" to the manifest detail page.
+/// `manifestLink` (optional) makes the label a real link back to the
+/// manifest overview — used on sub-pages where the breadcrumb should still
+/// navigate "up". A link (not a button) so ctrl/middle-click opens a new tab.
 export function ManifestSwitcher({
   label,
   appid,
@@ -30,7 +31,7 @@ export function ManifestSwitcher({
   extras,
   statuses,
   onSelect,
-  onGoToManifest,
+  manifestLink,
 }: {
   label: string;
   appid: number;
@@ -42,9 +43,9 @@ export function ManifestSwitcher({
   statuses: ManifestStatusEntry[] | undefined;
   /// Called when the user picks a manifest from the dropdown.
   onSelect: (manifestId: string, branch: string) => void;
-  /// Optional: makes the label a link back to the manifest overview.
+  /// Optional: link target for the manifest overview (build with `linkOptions`).
   /// Omit on the manifest page itself (the label is already the current page).
-  onGoToManifest?: () => void;
+  manifestLink?: LinkComponentProps;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -128,21 +129,21 @@ export function ManifestSwitcher({
   const displayLabel = versionByKey.get(`${currentManifestId}|${currentBranch}`) ?? label;
 
   if (visible.length <= 1) {
-    return onGoToManifest ? (
-      <button type="button" onClick={onGoToManifest} className="hover:underline">
+    return manifestLink ? (
+      <Link {...manifestLink} className="hover:underline">
         {displayLabel}
-      </button>
+      </Link>
     ) : (
       <span className="font-medium text-slate-200">{displayLabel}</span>
     );
   }
   return (
     <div ref={rootRef} className="relative flex items-center gap-0.5">
-      {onGoToManifest ? (
+      {manifestLink ? (
         <>
-          <button type="button" onClick={onGoToManifest} className="hover:underline">
+          <Link {...manifestLink} className="hover:underline">
             {displayLabel}
-          </button>
+          </Link>
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
