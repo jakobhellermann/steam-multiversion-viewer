@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { describe, expect, test } from "vitest";
 
-import { parsePptrRef, pptrNodeKeys } from "./StructuredView";
+import { parsePptrRef, pptrNodeKeys } from "./pptrRef";
 
 describe("pptrNodeKeys", () => {
   test("matched node answers to either side under its bare id", () => {

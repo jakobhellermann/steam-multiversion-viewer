@@ -18,6 +18,7 @@ import {
 import { langForMime } from "../../lib/syntax";
 import { HighlightedPre } from "./FilePreview";
 import { makePostProcess } from "./markers";
+import { parsePptrRef, pptrNodeKeys } from "./pptrRef";
 import { focusUnlessSelecting, scopeSelectAll } from "./selection";
 import type { FileLocator } from "./types";
 
@@ -870,60 +871,6 @@ export function singleChildExpandChain(
     ids.push(cur.id);
   }
   return ids;
-}
-
-/// Split a node id / ref into its bundle `archive:<entry>/` prefix (or
-/// `""` outside bundles) and the inner part.
-function splitArchivePrefix(id: string): [string, string] {
-  if (id.startsWith("archive:")) {
-    const slash = id.indexOf("/");
-    if (slash >= 0) return [id.slice(0, slash + 1), id.slice(slash + 1)];
-  }
-  return ["", id];
-}
-
-/// The (side, path-id key) entries this node id should be indexed under.
-/// A pptr ref carries the diff side it was dumped from but only a bare
-/// path id; the node carries the pairing-derived prefix. Indexing per
-/// side by `[archive:X/]<path-id>` lets [`resolveRef`] bridge them
-/// without the bare-`obj:N` ambiguity (a path id is unique within one
-/// side's file). Non-object rows (sections, class-stats, blobs) yield
-/// nothing.
-export function pptrNodeKeys(id: string): Array<{ side: "base" | "target"; key: string }> {
-  const [prefix, inner] = splitArchivePrefix(id);
-  let m: RegExpExecArray | null;
-  if ((m = /^(obj:\d+)$/.exec(inner))) {
-    // Matched on both sides with the same path id — answers to either.
-    const key = prefix + m[1];
-    return [
-      { side: "base", key },
-      { side: "target", key },
-    ];
-  }
-  if ((m = /^base:(obj:\d+)$/.exec(inner))) return [{ side: "base", key: prefix + m[1] }];
-  if ((m = /^target:(obj:\d+)$/.exec(inner))) return [{ side: "target", key: prefix + m[1] }];
-  if ((m = /^mod:(obj:\d+),(obj:\d+)$/.exec(inner))) {
-    // `mod:obj:<base>,obj:<target>` — each side keys under its own id.
-    return [
-      { side: "base", key: prefix + m[1] },
-      { side: "target", key: prefix + m[2] },
-    ];
-  }
-  return [];
-}
-
-/// Parse an incoming pptr ref into the index side + key to look up.
-/// `"either"` is a bare `obj:N` with no side hint (single-file view, or
-/// a hand-typed hash) — callers fall back across both sides.
-export function parsePptrRef(
-  ref: string,
-): { side: "base" | "target" | "either"; key: string } | null {
-  const [prefix, inner] = splitArchivePrefix(ref);
-  let m: RegExpExecArray | null;
-  if ((m = /^base:(obj:\d+)$/.exec(inner))) return { side: "base", key: prefix + m[1] };
-  if ((m = /^target:(obj:\d+)$/.exec(inner))) return { side: "target", key: prefix + m[1] };
-  if ((m = /^(obj:\d+)$/.exec(inner))) return { side: "either", key: prefix + m[1] };
-  return null;
 }
 
 function walkVisible(

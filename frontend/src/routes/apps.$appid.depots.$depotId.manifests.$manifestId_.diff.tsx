@@ -18,6 +18,7 @@ import { formatDate } from "../lib/format";
 import { DiffView } from "./-file/DiffView";
 import { FilePreview } from "./-file/FilePreview";
 import { StructuredDiffView } from "./-file/StructuredDiffView";
+import { projectRefToSide } from "./-file/pptrRef";
 import type { FileLocator } from "./-file/types";
 
 type Search = {
@@ -137,6 +138,31 @@ function DiffPage() {
   const missing =
     (baseView.data === null ? "base" : null) ?? (targetView.data === null ? "target" : null);
 
+  // Carry the focused diff node onto the single-file page a header link
+  // opens. The selection lives in `location.hash` (written by the tree
+  // via `replaceState`, so it never re-renders us) — read it live at
+  // click time and project it onto the link's side: a matched `obj:N`
+  // answers to either, `mod:obj:B,obj:T` hands back that side's id. No
+  // counterpart (a one-sided row, or nothing selected) → fall through
+  // to the Link's plain navigation without a hash.
+  const openSide = (
+    e: React.MouseEvent<HTMLAnchorElement>,
+    side: "base" | "target",
+    dest: { depotId: string; manifestId: string; branch: string },
+  ) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    const raw = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+    const hash = raw ? projectRefToSide(raw, side) : undefined;
+    if (!hash) return;
+    e.preventDefault();
+    navigate({
+      to: "/apps/$appid/depots/$depotId/manifests/$manifestId/file",
+      params: { appid: appidParam, depotId: dest.depotId, manifestId: dest.manifestId },
+      search: { branch: dest.branch === "public" ? undefined : dest.branch, path },
+      hash,
+    });
+  };
+
   return (
     <div className="mx-auto flex h-[calc(100dvh-var(--app-header-h,52px))] max-w-6xl flex-col p-8">
       <nav className="mb-4 flex items-center gap-2 text-sm text-slate-400">
@@ -208,6 +234,13 @@ function DiffPage() {
               manifestId: targetManifestId,
             }}
             search={{ branch: targetBranch === "public" ? undefined : targetBranch, path }}
+            onClick={(e) =>
+              openSide(e, "target", {
+                depotId: String(targetDepotId),
+                manifestId: targetManifestId,
+                branch: targetBranch,
+              })
+            }
             className="font-mono text-rose-300 hover:underline"
           >
             {targetDepotId}/{targetManifestId}
@@ -220,6 +253,7 @@ function DiffPage() {
             to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
             params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
             search={{ branch: branch === "public" ? undefined : branch, path }}
+            onClick={(e) => openSide(e, "base", { depotId: depotIdParam, manifestId, branch })}
             className="font-mono text-emerald-300 hover:underline"
           >
             {depotId}/{manifestId}
