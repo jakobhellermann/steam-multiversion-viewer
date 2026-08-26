@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -96,9 +96,15 @@ function ManifestDetail() {
     [navigate],
   );
 
+  const queryClient = useQueryClient();
+  // Switching manifests keeps the previous manifest's content on screen
+  // until the new one arrives, instead of flashing an empty "Loading…"
+  // state. Paired with `prefetchManifest` below (hover warms the target),
+  // the switch is usually instant.
   const info = useQuery({
     queryKey: ["manifest-info", appid, depotId, manifestId, branch],
     queryFn: () => fetchManifestInfo(appid, depotId, manifestId, branch),
+    placeholderData: keepPreviousData,
   });
   const gameInfo = useQuery({
     // Keyed by manifest_id only — game_info is content-addressed (same gid
@@ -107,11 +113,32 @@ function ManifestDetail() {
     // to the fetch (the backend needs it to open the manifest).
     queryKey: ["game-info", appid, depotId, manifestId],
     queryFn: () => fetchGameInfo(appid, depotId, manifestId, branch),
+    placeholderData: keepPreviousData,
   });
   const files = useQuery({
     queryKey: ["manifest-files", appid, depotId, manifestId, branch],
     queryFn: () => fetchManifestFiles(appid, depotId, manifestId, branch),
+    placeholderData: keepPreviousData,
   });
+  // Warm the target manifest's queries when the user hovers a switcher
+  // entry, so the click lands on cached data. Same keys/fns as above.
+  const prefetchManifest = useCallback(
+    (targetManifestId: string, targetBranch: string) => {
+      queryClient.prefetchQuery({
+        queryKey: ["manifest-info", appid, depotId, targetManifestId, targetBranch],
+        queryFn: () => fetchManifestInfo(appid, depotId, targetManifestId, targetBranch),
+      });
+      queryClient.prefetchQuery({
+        queryKey: ["manifest-files", appid, depotId, targetManifestId, targetBranch],
+        queryFn: () => fetchManifestFiles(appid, depotId, targetManifestId, targetBranch),
+      });
+      queryClient.prefetchQuery({
+        queryKey: ["game-info", appid, depotId, targetManifestId],
+        queryFn: () => fetchGameInfo(appid, depotId, targetManifestId, targetBranch),
+      });
+    },
+    [queryClient, appid, depotId],
+  );
   // Needed by the "compare to…" menu so the user can pick any other
   // manifest in the app (official or user-tracked) as a diff target.
   const appInfoQuery = useQuery({
@@ -199,48 +226,57 @@ function ManifestDetail() {
               search: { branch: br === "public" ? undefined : br },
             })
           }
+          onPrefetch={prefetchManifest}
         />
       </nav>
 
       {info.isPending && <p className="text-slate-400">Loading manifest…</p>}
       {info.error && <ErrorBox title="Failed to load manifest" error={info.error as Error} />}
-      {info.data && (
-        <ManifestHeader
-          info={info.data}
-          gameInfo={gameInfo.data}
-          gameInfoPending={gameInfo.isPending}
-          gameInfoError={gameInfo.error as Error | null}
-          appid={appid}
-          appName={appInfoQuery.data?.name}
-          branch={branch}
-          onDownload={() => {
-            markShowImmediately();
-            downloadAll.mutate();
-          }}
-          downloadPending={downloadAll.isPending}
-          downloadError={downloadAll.error as Error | null}
-          cachedStatus={selfStatus}
-        />
-      )}
-
-      <section className="mt-8">
-        {files.error && <ErrorBox title="Failed to load files" error={files.error as Error} />}
-        {files.isPending && <p className="text-sm text-slate-400">Loading files…</p>}
-        {files.data && (
-          <FilesPanel
-            allFiles={files.data.files}
-            appid={appidParam}
-            depotId={depotIdParam}
-            manifestId={manifestId}
+      {/* While switching to another manifest we keep the previous content
+          on screen (see `placeholderData` above) and dim it, rather than
+          unmounting to an empty loading state. */}
+      <div
+        aria-busy={info.isPlaceholderData}
+        className={`transition-opacity duration-150 ${info.isPlaceholderData ? "opacity-50" : ""}`}
+      >
+        {info.data && (
+          <ManifestHeader
+            info={info.data}
+            gameInfo={gameInfo.data}
+            gameInfoPending={gameInfo.isPending}
+            gameInfoError={gameInfo.error as Error | null}
+            appid={appid}
+            appName={appInfoQuery.data?.name}
             branch={branch}
-            appInfo={appInfoQuery.data}
-            extras={extraQuery.data ?? []}
-            statuses={statusQuery.data}
-            diffTargets={diffTargets}
-            setDiffTargets={setDiffTargets}
+            onDownload={() => {
+              markShowImmediately();
+              downloadAll.mutate();
+            }}
+            downloadPending={downloadAll.isPending}
+            downloadError={downloadAll.error as Error | null}
+            cachedStatus={selfStatus}
           />
         )}
-      </section>
+
+        <section className="mt-8">
+          {files.error && <ErrorBox title="Failed to load files" error={files.error as Error} />}
+          {files.isPending && <p className="text-sm text-slate-400">Loading files…</p>}
+          {files.data && (
+            <FilesPanel
+              allFiles={files.data.files}
+              appid={appidParam}
+              depotId={depotIdParam}
+              manifestId={manifestId}
+              branch={branch}
+              appInfo={appInfoQuery.data}
+              extras={extraQuery.data ?? []}
+              statuses={statusQuery.data}
+              diffTargets={diffTargets}
+              setDiffTargets={setDiffTargets}
+            />
+          )}
+        </section>
+      </div>
     </div>
   );
 }

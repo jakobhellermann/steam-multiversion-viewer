@@ -31,6 +31,7 @@ export function ManifestSwitcher({
   extras,
   statuses,
   onSelect,
+  onPrefetch,
   manifestLink,
 }: {
   label: string;
@@ -43,6 +44,9 @@ export function ManifestSwitcher({
   statuses: ManifestStatusEntry[] | undefined;
   /// Called when the user picks a manifest from the dropdown.
   onSelect: (manifestId: string, branch: string) => void;
+  /// Optional: warm the target's data when an entry is hovered/focused,
+  /// so the click lands on cached data instead of an empty load.
+  onPrefetch?: (manifestId: string, branch: string) => void;
   /// Optional: link target for the manifest overview (build with `linkOptions`).
   /// Omit on the manifest page itself (the label is already the current page).
   manifestLink?: LinkComponentProps;
@@ -178,6 +182,10 @@ export function ManifestSwitcher({
                   <a
                     role="button"
                     tabIndex={0}
+                    onMouseEnter={
+                      isCurrent ? undefined : () => onPrefetch?.(m.manifestId, m.branch)
+                    }
+                    onFocus={isCurrent ? undefined : () => onPrefetch?.(m.manifestId, m.branch)}
                     onClick={(e) => {
                       e.preventDefault();
                       onSelect(m.manifestId, m.branch);
