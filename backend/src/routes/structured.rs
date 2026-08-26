@@ -437,6 +437,36 @@ pub async fn manifest_file_structured_node_image(
 
             Ok((ImmutableCache, [(header::CONTENT_TYPE, "image/png")], png).into_response())
         }
+        #[cfg(feature = "unity")]
+        Some(Transformer::UnitySerialized) => {
+            let Some(path_id) =
+                transform::unity::serializedfile::tree::parse_object_node_id(&q.node_id)
+            else {
+                return Err(ApiError::unsupported_media_type("not an object node"));
+            };
+            let path = q.path.clone();
+            let scratch = state
+                .manifest_cache
+                .scratch(appid, depot_id, manifest_id, &q.branch);
+            let unity = scratch
+                .unity(snapshot.clone())
+                .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
+            let data_dir = unity.data_dir();
+            let scratch = scratch.clone();
+            let png = tokio::task::spawn_blocking(move || {
+                let unity = scratch
+                    .unity_already_initialized()
+                    .expect("unity scratch was initialised on the async side");
+                transform::unity::serializedfile::texture::render_serialized_texture_png(
+                    &unity.env, &data_dir, &path, path_id,
+                )
+            })
+            .await
+            .map_err(|e| ApiError::internal(format!("texture task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+
+            Ok((ImmutableCache, [(header::CONTENT_TYPE, "image/png")], png).into_response())
+        }
         _ => Err(ApiError::unsupported_media_type(
             "no texture preview for this file",
         )),

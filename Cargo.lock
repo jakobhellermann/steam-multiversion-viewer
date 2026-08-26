@@ -27,7 +27,7 @@ checksum = "f8eb277bec05f56a0e0591f155a484cbd0f4f07ff2905051a48c72f004f7ed58"
 dependencies = [
  "cipher 0.5.2",
  "cpubits",
- "cpufeatures 0.3.0",
+ "cpufeatures 0.3.1",
 ]
 
 [[package]]
@@ -581,7 +581,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d524456ba66e72eb8b115ff89e01e497f8e6d11d78b70b1aa13c0fbd97540a81"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.3.0",
+ "cpufeatures 0.3.1",
  "rand_core 0.10.1",
 ]
 
@@ -779,9 +779,9 @@ dependencies = [
 
 [[package]]
 name = "cpufeatures"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
+checksum = "5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566"
 dependencies = [
  "libc",
 ]
@@ -3417,7 +3417,7 @@ dependencies = [
 [[package]]
 name = "rabex-env"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#280cab394fa0ce4b0b7e5467d0dfadf55deec7b8"
+source = "git+https://github.com/jakobhellermann/rabex-env#5502726e1fe2df36eb10e20ae17728546402eab7"
 dependencies = [
  "anyhow",
  "base64",
@@ -3439,7 +3439,7 @@ dependencies = [
 [[package]]
 name = "rabex-env-steam-depot-vfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#280cab394fa0ce4b0b7e5467d0dfadf55deec7b8"
+source = "git+https://github.com/jakobhellermann/rabex-env#5502726e1fe2df36eb10e20ae17728546402eab7"
 dependencies = [
  "anyhow",
  "rabex-env",
@@ -3452,7 +3452,7 @@ dependencies = [
 [[package]]
 name = "rabex-texture"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#280cab394fa0ce4b0b7e5467d0dfadf55deec7b8"
+source = "git+https://github.com/jakobhellermann/rabex-env#5502726e1fe2df36eb10e20ae17728546402eab7"
 dependencies = [
  "anyhow",
  "image",
@@ -4105,7 +4105,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.3.0",
+ "cpufeatures 0.3.1",
  "digest 0.11.3",
 ]
 
@@ -4127,7 +4127,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.3.0",
+ "cpufeatures 0.3.1",
  "digest 0.11.3",
 ]
 
