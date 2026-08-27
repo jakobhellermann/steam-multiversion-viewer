@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use steam_vent_depot::{DepotFile, FileKind};
 use tokio::sync::Semaphore;
+use tracing::Instrument as _;
 use utoipa::ToSchema;
 
 use crate::http::ApiError;
@@ -793,6 +794,7 @@ pub async fn manifest_file_structured_diff(
 /// both sides' chunks and runs the per-format differ. Shared by the
 /// single-file endpoint and the deep manifest filter.
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip_all, fields(path = %path))]
 async fn build_structured_diff_tree(
     state: &AppState,
     appid: AppId,
@@ -846,6 +848,7 @@ async fn build_structured_diff_tree(
                     &path,
                 )
             })
+            .instrument(tracing::info_span!("diff_build", kind = "unity_serialized"))
             .await
             .map_err(|e| ApiError::internal(format!("structured-diff task panicked: {e}")))?
             .map_err(|e| ApiError::internal(e.to_string()))?
@@ -885,6 +888,7 @@ async fn build_structured_diff_tree(
                     &path,
                 )
             })
+            .instrument(tracing::info_span!("diff_build", kind = "unity_bundle"))
             .await
             .map_err(|e| ApiError::internal(format!("structured-diff task panicked: {e}")))?
             .map_err(|e| ApiError::internal(e.to_string()))?
@@ -908,6 +912,7 @@ async fn build_structured_diff_tree(
                 &to_bytes,
                 path,
             )
+            .instrument(tracing::info_span!("diff_build", kind = "dll"))
             .await
             .map_err(ApiError::from_transform)?;
             // Kick `ilspycmd -p` for both DLLs in the background.
@@ -1680,6 +1685,7 @@ async fn unity_serialized_node_body(
 /// Open a manifest, find the file, enqueue its chunks for download
 /// and wait. Returns the (Arc'd) snapshot, ready to be handed to a
 /// blocking task that needs `chunk_store` access.
+#[tracing::instrument(skip_all, fields(depot_id = %depot_id, manifest_id = %manifest_id))]
 async fn prepare_structured_side(
     state: &AppState,
     appid: AppId,
