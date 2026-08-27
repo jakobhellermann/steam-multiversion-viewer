@@ -18,7 +18,9 @@ use crate::structured::{Node, NodeStatus, StructuredTree};
 use crate::unity::serializedfile::diff::diff_sections;
 use crate::unity::serializedfile::tree::build_root_node;
 
-use super::{ARCHIVE_ID_PREFIX, archive_prefix, blob_node, human_bytes, insert_archive_entry};
+use crate::structured::human_bytes;
+
+use super::{ARCHIVE_ID_PREFIX, archive_prefix, blob_node, insert_archive_entry};
 
 /// Build the structured diff for a bundle path between two prebuilt
 /// envs. Per-entry: SF↔SF runs through [`diff_sections`], blob↔blob

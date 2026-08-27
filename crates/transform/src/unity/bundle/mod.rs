@@ -67,25 +67,10 @@ pub(super) fn blob_node(entry_path: &str, size: i64) -> Node {
         id: format!("blob:{entry_path}"),
         label: entry_path.to_string(),
         kind: "blob".to_string(),
-        badge: Some(human_bytes(size.max(0) as u64)),
+        badge: Some(crate::structured::human_bytes(size.max(0) as u64)),
         default_collapsed: false,
         children: Vec::new(),
         ..Default::default()
-    }
-}
-
-pub(super) fn human_bytes(n: u64) -> String {
-    const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut v = n as f64;
-    let mut i = 0;
-    while v >= 1024.0 && i < UNITS.len() - 1 {
-        v /= 1024.0;
-        i += 1;
-    }
-    if i == 0 {
-        format!("{n} B")
-    } else {
-        format!("{v:.1} {}", UNITS[i])
     }
 }
 

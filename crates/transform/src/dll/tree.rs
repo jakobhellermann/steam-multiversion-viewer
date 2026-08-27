@@ -30,14 +30,16 @@ use super::EntityKind;
 use crate::TransformError;
 use crate::structured::{Node, StructuredTree};
 
-/// Build the namespace-grouped tree for `dll_bytes`. Calls
-/// `ilspycmd -l` under the hood (cached by sha).
+/// Build the tree for `dll_bytes`; falls back to [`super::native`] if it isn't managed.
 pub async fn build_tree(
     store_root: &Utf8Path,
     dll_sha: &[u8; 20],
     dll_bytes: &[u8],
     file_label: &str,
 ) -> Result<StructuredTree, TransformError> {
+    if !super::is_managed_pe(dll_bytes) {
+        return super::native::build_tree(dll_bytes, file_label);
+    }
     let entities = super::list_entities(store_root, dll_sha, dll_bytes).await?;
     Ok(StructuredTree {
         root: build_root(file_label, &entities),

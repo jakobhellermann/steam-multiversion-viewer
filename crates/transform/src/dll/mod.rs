@@ -29,6 +29,7 @@ use tokio::process::Command;
 use crate::{TempInput, TransformError, tempfile_for};
 
 pub mod diff;
+pub mod native;
 pub mod tree;
 
 #[cfg(test)]
@@ -247,6 +248,9 @@ async fn run_ilspy(bytes: &[u8], args: &[&str]) -> Result<String, TransformError
 /// function returns immediately. Errors are logged via `tracing` and
 /// don't propagate.
 pub fn warm_full_decompile(store_root: &Utf8Path, dll_sha: [u8; 20], dll_bytes: Vec<u8>) {
+    if !is_managed_pe(&dll_bytes) {
+        return;
+    }
     {
         let mut guard = warmups_lock();
         let set = guard.get_or_insert_with(HashSet::new);
