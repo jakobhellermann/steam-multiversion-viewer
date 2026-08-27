@@ -965,12 +965,23 @@ fn class_id_counts(items: &[RawLoose]) -> std::collections::HashMap<ClassId, usi
     m
 }
 
+/// `m_Name` alone, for [`collect_loose`]. The typetree deserializer stops
+/// reading as soon as every requested field is filled (see
+/// `FieldStructDeserializer::next_key_seed` in `rabex`), so this reads just
+/// the leading string field instead of the generic-`Value` path materializing
+/// a whole Mesh/Texture/AudioClip payload just to look at one field.
+#[derive(serde::Deserialize, Default)]
+#[allow(non_snake_case)]
+struct NameOnly {
+    #[serde(default)]
+    m_Name: String,
+}
+
 #[tracing::instrument(skip_all)]
 fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     covered: &HashSet<PathId>,
 ) -> Result<Vec<RawLoose>> {
-    use serde_value::Value;
     let mut out: Vec<RawLoose> = Vec::new();
     for obj in file.file.objects() {
         let path_id = obj.m_PathID;
@@ -979,27 +990,17 @@ fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
         }
         let class_id = obj.m_ClassID;
         let _obj_span = tracing::info_span!("loose_object", ?class_id, path_id).entered();
-        // Try to read `m_Name` for the typical asset shape. Failure
-        // is OK — we fall back to a per-pid synthetic name later.
+        // Failure is OK — we fall back to a per-pid synthetic name later.
         let name = file
-            .object_at::<Value>(path_id)
+            .object_at::<NameOnly>(path_id)
             .ok()
             .and_then(|h| h.read().ok())
-            .and_then(|v| match v {
-                Value::Map(map) => {
-                    map.get(&Value::String("m_Name".to_string()))
-                        .and_then(|n| match n {
-                            Value::String(s) => Some(s.clone()),
-                            _ => None,
-                        })
-                }
-                _ => None,
-            })
+            .map(|n| n.m_Name)
             .unwrap_or_default();
         let label = if class_id == ClassId::MonoBehaviour {
-            file.object_at::<Value>(path_id)
+            file.object_at::<MonoBehaviour>(path_id)
                 .ok()
-                .and_then(|h| h.cast::<MonoBehaviour>().mono_script().ok().flatten())
+                .and_then(|h| h.mono_script().ok().flatten())
                 .map(|s| s.full_name().into_owned())
                 .unwrap_or_else(|| format!("{class_id:?}"))
         } else {
