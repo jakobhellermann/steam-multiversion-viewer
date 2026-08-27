@@ -364,7 +364,6 @@ export type RichView = "transformed" | "structured";
 export type StructuredNode = {
   id: string;
   label: string;
-  kind: string;
   badge?: string;
   /// When true, the backend wants this node collapsed by default.
   /// Frontend honors the flag verbatim — never decides expansion
@@ -397,7 +396,6 @@ export type StructuredNode = {
 };
 
 export type StructuredTree = {
-  kind: string;
   root: StructuredNode;
 };
 

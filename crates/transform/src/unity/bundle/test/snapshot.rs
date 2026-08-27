@@ -28,50 +28,41 @@ fn bundle_tree_one_sf_one_blob() {
     root:
       id: "file:level0.bundle"
       label: level0.bundle
-      kind: bundle
       badge: 2 entries
       children:
         - id: "archive:CAB-scene"
           label: CAB-scene
-          kind: archive
           badge: 2 objects
           children:
             - id: "archive:CAB-scene/section:class-stats"
               label: Class stats
-              kind: section
               badge: 2 objects
               default_collapsed: true
               children:
                 - id: "archive:CAB-scene/class:GameObject"
                   label: GameObject
-                  kind: class-stat
                   badge: ×1
                   children: []
                 - id: "archive:CAB-scene/class:Transform"
                   label: Transform
-                  kind: class-stat
                   badge: ×1
                   children: []
             - id: "archive:CAB-scene/section:hierarchy"
               label: Hierarchy
-              kind: section
               badge: 1 root
               children:
                 - id: "archive:CAB-scene/obj:1"
                   label: Player
-                  kind: gameobject
                   default_collapsed: true
                   include_descendants_on_match: true
                   has_content: true
                   children: []
             - id: "archive:CAB-scene/section:loose"
               label: Loose components
-              kind: section
               badge: "0"
               children: []
         - id: "blob:CAB-scene.resS"
           label: CAB-scene.resS
-          kind: blob
           badge: 4.0 KiB
           children: []
     "#);
@@ -103,38 +94,32 @@ fn bundle_diff_added_changed_unchanged() {
     root:
       id: "file:level0.bundle"
       label: level0.bundle
-      kind: bundle
       badge: 3 entries
       status: changed
       children:
         - id: "archive:CAB-scene"
           label: CAB-scene
-          kind: archive
           status: changed
           children:
             - id: "archive:CAB-scene/section:hierarchy"
               label: Hierarchy
-              kind: section
               badge: 1 root
               status: changed
               children:
                 - id: "archive:CAB-scene/base:obj:1"
                   label: Player
-                  kind: gameobject
                   default_collapsed: true
                   status: added
                   has_content: true
                   children: []
                 - id: "archive:CAB-scene/target:obj:1"
                   label: PlayerV2
-                  kind: gameobject
                   default_collapsed: true
                   status: removed
                   has_content: true
                   children: []
         - id: "blob:CAB-scene.resS"
           label: CAB-scene.resS
-          kind: blob
           badge: 4.0 KiB
           status: added
           children: []

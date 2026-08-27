@@ -40,71 +40,59 @@ fn tree_small_scene() {
     root:
       id: "file:level0"
       label: level0
-      kind: file
       badge: 9 objects
       children:
         - id: "section:class-stats"
           label: Class stats
-          kind: section
           badge: 9 objects
           default_collapsed: true
           children:
             - id: "class:GameObject"
               label: GameObject
-              kind: class-stat
               badge: ×4
               children: []
             - id: "class:Transform"
               label: Transform
-              kind: class-stat
               badge: ×4
               children: []
             - id: "class:AssetBundle"
               label: AssetBundle
-              kind: class-stat
               badge: ×1
               children: []
         - id: "section:hierarchy"
           label: Hierarchy
-          kind: section
           badge: 2 roots
           children:
             - id: "obj:2"
               label: Player
-              kind: gameobject
               default_collapsed: true
               include_descendants_on_match: true
               has_content: true
               children:
                 - id: "obj:4"
                   label: Camera
-                  kind: gameobject
                   default_collapsed: true
                   include_descendants_on_match: true
                   has_content: true
                   children: []
                 - id: "obj:6"
                   label: Weapon
-                  kind: gameobject
                   default_collapsed: true
                   include_descendants_on_match: true
                   has_content: true
                   children: []
             - id: "obj:8"
               label: Light
-              kind: gameobject
               default_collapsed: true
               include_descendants_on_match: true
               has_content: true
               children: []
         - id: "section:loose"
           label: Loose components
-          kind: section
           badge: "1"
           children:
             - id: "obj:1"
               label: test_bundle
-              kind: component
               badge: AssetBundle
               facets:
                 class: AssetBundle
@@ -149,59 +137,50 @@ fn diff_added_removed_renamed() {
     root:
       id: "file:level0"
       label: level0
-      kind: file
       status: changed
       children:
         - id: "section:hierarchy"
           label: Hierarchy
-          kind: section
           badge: 2 roots
           status: changed
           children:
             - id: "obj:2"
               label: Player
-              kind: gameobject
               default_collapsed: true
               status: changed
               has_content: true
               children:
                 - id: "base:obj:4"
                   label: Camera
-                  kind: gameobject
                   default_collapsed: true
                   status: added
                   has_content: true
                   children: []
                 - id: "base:obj:6"
                   label: Weapon
-                  kind: gameobject
                   default_collapsed: true
                   status: added
                   has_content: true
                   children: []
                 - id: "target:obj:4"
                   label: Sword
-                  kind: gameobject
                   default_collapsed: true
                   status: removed
                   has_content: true
                   children: []
                 - id: "target:obj:6"
                   label: Hat
-                  kind: gameobject
                   default_collapsed: true
                   status: removed
                   has_content: true
                   children: []
         - id: "section:loose"
           label: Loose components
-          kind: section
           badge: 1 object
           status: changed
           children:
             - id: "obj:1"
               label: AssetBundle
-              kind: component
               badge: "[1]"
               facets:
                 class: AssetBundle
@@ -617,43 +596,35 @@ fn tree_with_monobehaviours() {
     root:
       id: "file:level0"
       label: level0
-      kind: file
       badge: 9 objects
       children:
         - id: "section:class-stats"
           label: Class stats
-          kind: section
           badge: 9 objects
           default_collapsed: true
           children:
             - id: "class:GameObject"
               label: GameObject
-              kind: class-stat
               badge: ×2
               children: []
             - id: "class:Transform"
               label: Transform
-              kind: class-stat
               badge: ×2
               children: []
             - id: "class:MonoBehaviour"
               label: MonoBehaviour
-              kind: class-stat
               badge: ×3
               children: []
             - id: "class:MonoScript"
               label: MonoScript
-              kind: class-stat
               badge: ×2
               children: []
         - id: "section:hierarchy"
           label: Hierarchy
-          kind: section
           badge: 2 roots
           children:
             - id: "obj:1"
               label: Player
-              kind: gameobject
               badge: 2 components
               default_collapsed: true
               include_descendants_on_match: true
@@ -661,21 +632,18 @@ fn tree_with_monobehaviours() {
               children:
                 - id: "obj:3"
                   label: Game.Player.PlayerController
-                  kind: component
                   facets:
                     class: Game.Player.PlayerController
                   has_content: true
                   children: []
                 - id: "obj:4"
                   label: Game.Player.Inventory
-                  kind: component
                   facets:
                     class: Game.Player.Inventory
                   has_content: true
                   children: []
             - id: "obj:7"
               label: Enemy
-              kind: gameobject
               badge: 1 component
               default_collapsed: true
               include_descendants_on_match: true
@@ -683,19 +651,16 @@ fn tree_with_monobehaviours() {
               children:
                 - id: "obj:9"
                   label: Game.Player.PlayerController
-                  kind: component
                   facets:
                     class: Game.Player.PlayerController
                   has_content: true
                   children: []
         - id: "section:loose"
           label: Loose components
-          kind: section
           badge: "2"
           children:
             - id: "obj:5"
               label: PlayerController
-              kind: component
               badge: MonoScript
               facets:
                 class: MonoScript
@@ -703,7 +668,6 @@ fn tree_with_monobehaviours() {
               children: []
             - id: "obj:6"
               label: Inventory
-              kind: component
               badge: MonoScript
               facets:
                 class: MonoScript
@@ -754,7 +718,6 @@ fn diff_identical_same_named_siblings_prunes_clean() {
     root:
       id: "file:level0"
       label: level0
-      kind: file
       status: unchanged
       children: []
     "#);
@@ -783,7 +746,6 @@ fn diff_identical_is_unchanged() {
     root:
       id: "file:level0"
       label: level0
-      kind: file
       status: unchanged
       children: []
     "#);

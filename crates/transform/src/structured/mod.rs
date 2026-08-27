@@ -17,8 +17,7 @@ use serde_json::json;
 use utoipa::ToSchema;
 
 /// One entry in a structured tree. Nodes are recursive — children
-/// follow the same shape — and frontend-opaque: the only thing the UI
-/// knows about `kind` is what icon to show.
+/// follow the same shape.
 #[derive(Debug, Clone, Default, Serialize, ToSchema)]
 pub struct Node {
     /// Stable identifier inside its `StructuredTree`, used by the
@@ -27,9 +26,10 @@ pub struct Node {
     pub id: String,
     /// Human-readable label shown in the tree row.
     pub label: String,
-    /// Free-form type tag — e.g. `"gameobject"`, `"component"`,
-    /// `"section"`. Frontend maps known kinds to icons and ignores the
-    /// rest.
+    /// Free-form type tag builders key decisions off internally (e.g.
+    /// `"gameobject"` collapsing, bundle-diff matching) — not sent to
+    /// the frontend.
+    #[serde(skip_serializing)]
     pub kind: String,
     /// Optional inline suffix (e.g. `"4 components"`) rendered to the
     /// right of the label.
@@ -152,15 +152,13 @@ impl Node {
     "root": {
         "id": "file:level0",
         "label": "level0",
-        "kind": "file",
         "badge": "4 objects",
         "children": [
             {
                 "id": "section:hierarchy",
                 "label": "Hierarchy",
-                "kind": "section",
                 "children": [
-                    {"id": "obj:1", "label": "Player", "kind": "gameobject", "has_content": true, "children": []}
+                    {"id": "obj:1", "label": "Player", "has_content": true, "children": []}
                 ]
             }
         ]

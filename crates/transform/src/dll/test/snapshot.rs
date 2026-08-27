@@ -31,51 +31,43 @@ fn tree_namespace_grouping_with_unnamespaced_bucket() {
     root:
       id: "file:Assembly-CSharp.dll"
       label: Assembly-CSharp.dll
-      kind: file
       badge: 4 entities
       children:
         - id: "ns:-"
           label: "-"
-          kind: namespace
           badge: "1"
           default_collapsed: true
           children:
             - id: "type:<Module>"
               label: "<Module>"
-              kind: class
               facets:
                 kind: class
               has_content: true
               children: []
         - id: "ns:UnityEngine"
           label: UnityEngine
-          kind: namespace
           badge: "3"
           default_collapsed: true
           children:
             - id: "type:UnityEngine.Vector3"
               label: Vector3
-              kind: class
               facets:
                 kind: class
               has_content: true
               children: []
             - id: "ns:UnityEngine.UI"
               label: UI
-              kind: namespace
               badge: "2"
               default_collapsed: true
               children:
                 - id: "type:UnityEngine.UI.Image"
                   label: Image
-                  kind: class
                   facets:
                     kind: class
                   has_content: true
                   children: []
                 - id: "type:UnityEngine.UI.Text"
                   label: Text
-                  kind: class
                   facets:
                     kind: class
                   has_content: true
@@ -101,25 +93,21 @@ fn tree_nested_types_attach_to_outer() {
     root:
       id: "file:x"
       label: x
-      kind: file
       badge: 4 entities
       children:
         - id: "ns:-"
           label: "-"
-          kind: namespace
           badge: "1"
           default_collapsed: true
           children:
             - id: "type:AchievementHandler"
               label: AchievementHandler
-              kind: class
               facets:
                 kind: class
               has_content: true
               children:
                 - id: "type:AchievementHandler.AchievementAwarded"
                   label: AchievementAwarded
-                  kind: delegate
                   hide_unless_matched: true
                   facets:
                     kind: delegate
@@ -127,26 +115,22 @@ fn tree_nested_types_attach_to_outer() {
                   children: []
         - id: "ns:UnityEngine"
           label: UnityEngine
-          kind: namespace
           badge: "2"
           default_collapsed: true
           children:
             - id: "ns:UnityEngine.UI"
               label: UI
-              kind: namespace
               badge: "2"
               default_collapsed: true
               children:
                 - id: "type:UnityEngine.UI.Button"
                   label: Button
-                  kind: class
                   facets:
                     kind: class
                   has_content: true
                   children:
                     - id: "type:UnityEngine.UI.Button.ButtonClickedEvent"
                       label: ButtonClickedEvent
-                      kind: enum
                       hide_unless_matched: true
                       facets:
                         kind: enum
@@ -191,20 +175,17 @@ fn diff_added_removed_changed_unchanged() {
     root:
       id: "file:Assembly-CSharp.dll"
       label: Assembly-CSharp.dll
-      kind: file
       badge: 6 entities
       status: changed
       children:
         - id: "ns:Demo"
           label: Demo
-          kind: namespace
           badge: "4"
           default_collapsed: true
           status: changed
           children:
             - id: "target:type:Demo.Gone"
               label: Gone
-              kind: class
               facets:
                 kind: class
               status: removed
@@ -212,7 +193,6 @@ fn diff_added_removed_changed_unchanged() {
               children: []
             - id: "base:type:Demo.New"
               label: New
-              kind: class
               facets:
                 kind: class
               status: added
@@ -220,7 +200,6 @@ fn diff_added_removed_changed_unchanged() {
               children: []
             - id: "type:Demo.Touched"
               label: Touched
-              kind: class
               facets:
                 kind: class
               status: changed
@@ -243,7 +222,6 @@ fn diff_identical_collapses_to_empty() {
     root:
       id: "file:x"
       label: x
-      kind: file
       badge: 2 entities
       status: unchanged
       children: []

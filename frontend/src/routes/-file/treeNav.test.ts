@@ -11,7 +11,7 @@ import type { StructuredNode } from "../../api";
 
 // Minimal node — only the fields the nav logic reads.
 function node(id: string, children: StructuredNode[] = []): StructuredNode {
-  return { id, label: id, kind: "x", children };
+  return { id, label: id, children };
 }
 
 function row(n: StructuredNode, depth: number, hasVisibleChildren: boolean): VisibleRow {
