@@ -28,6 +28,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use transform::Transformer;
 use transform::structured::{NodeStatus, StructuredTree};
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 const APP_ID: u32 = 1030300;
 const DEPOT_ID: u32 = 1030303;
 const BASE_MANIFEST: u64 = 7921642076658611197;
@@ -36,14 +40,31 @@ const BRANCH: &str = "public";
 
 type Env = Environment<SteamDepotGameFiles, TypeTreeCache<TpkTypeTreeBlob>>;
 
+/// `$name` env var, parsed, or `default` if unset.
+fn env_or<T: std::str::FromStr>(name: &str, default: T) -> T {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "warn,steam_multiversion_viewer=info,transform=info".into());
     tracing_subscriber::registry()
         .with(filter)
         .with(tracing_timetree::layer().with_min(Duration::from_millis(10)))
         .init();
+
+    let app_id: u32 = env_or("APP_ID", APP_ID);
+    let depot_id: u32 = env_or("DEPOT_ID", DEPOT_ID);
+    let base_manifest: u64 = env_or("BASE_MANIFEST", BASE_MANIFEST);
+    let target_manifest: u64 = env_or("TARGET_MANIFEST", TARGET_MANIFEST);
+    let branch = std::env::var("BRANCH").unwrap_or_else(|_| BRANCH.to_string());
 
     let auth = Arc::new(
         LazyCachedAuth::prepare(
@@ -58,12 +79,12 @@ async fn main() -> Result<()> {
     let store = DepotStore::new(config.store_root.as_std_path().to_path_buf());
     let base = Arc::new(
         store
-            .open_depot_manifest(auth.clone(), APP_ID, DEPOT_ID, BASE_MANIFEST, BRANCH)
+            .open_depot_manifest(auth.clone(), app_id, depot_id, base_manifest, &branch)
             .await?,
     );
     let target = Arc::new(
         store
-            .open_depot_manifest(auth, APP_ID, DEPOT_ID, TARGET_MANIFEST, BRANCH)
+            .open_depot_manifest(auth, app_id, depot_id, target_manifest, &branch)
             .await?,
     );
 

@@ -13,6 +13,7 @@ default = ["unity"]
 unity = ["transform/unity", "dep:rabex-env", "dep:rabex-env-steam-depot-vfs"]
 # Launch in a native webview window by default
 windowed = []
+dhat-heap = []
 
 [dependencies]
 anyhow = "1.0"
@@ -58,6 +59,7 @@ wry = "0.56"
 [dev-dependencies]
 tracing-timetree = { git = "https://github.com/jakobhellermann/tracing-timetree" }
 insta = { version = "1", features = ["yaml"] }
+dhat = "0.3"
 
 # Same crate, one back end per platform: FUSE where the kernel speaks it,
 # a loopback NFS server on macOS where it doesn't without macFUSE.
