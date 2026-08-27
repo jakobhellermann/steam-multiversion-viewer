@@ -1028,9 +1028,9 @@ function TreeRow({
     >
       <span
         aria-hidden="true"
-        className={`inline-block w-3 text-slate-500 ${hasChildren ? "" : "opacity-30"}`}
+        className={`inline-block w-3 font-glyph text-slate-500 ${hasChildren ? "" : "opacity-30"}`}
       >
-        {hasChildren ? (expanded ? "▼︎" : "▶︎") : "·"}
+        {hasChildren ? (expanded ? "▼" : "▶") : "·"}
       </span>
       <DiffStatusGlyph status={node.status} />
       <span className={`flex-1 truncate ${statusLabelClass}`}>

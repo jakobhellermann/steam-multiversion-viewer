@@ -327,7 +327,7 @@ function DepotCard({
             onClick={() => setImportOpen(true)}
             className="ml-auto text-xs text-slate-500 hover:text-sky-400 hover:underline"
           >
-            import history from SteamDB ↗︎
+            import history from SteamDB <span className="font-glyph">↗</span>
           </button>
         )}
       </div>
@@ -453,7 +453,7 @@ function ExtrasSection({
         className="col-span-full grid cursor-pointer grid-cols-subgrid border-t border-slate-800 bg-slate-900/40 text-xs text-slate-500 select-none hover:bg-slate-900/60 hover:text-slate-300"
       >
         <div className="col-span-4 flex items-center gap-1 px-4 py-1.5">
-          <span className="inline-block w-3 text-slate-500">{expanded ? "▼︎" : "▶︎"}</span>
+          <span className="inline-block w-3 font-glyph text-slate-500">{expanded ? "▼" : "▶"}</span>
           <span>
             Additional manifests <span className="tabular-nums">({extras.length})</span>
           </span>

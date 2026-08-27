@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+@theme {
+  /* excludes emoji fonts so glyphs like U+25B6 don't fall back to a color emoji glyph */
+  --font-glyph: ui-sans-serif, system-ui, sans-serif;
+}
+
 * {
   box-sizing: border-box;
 }
