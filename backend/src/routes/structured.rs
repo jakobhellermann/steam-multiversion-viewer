@@ -119,7 +119,7 @@ pub async fn manifest_file_structured(
             let bytes = snapshot.read_full(&path).await?;
             let tree = transform::dll::tree::build_tree(&cfg.store_root, &file_sha, &bytes, &path)
                 .await
-                .map_err(|e| ApiError::internal(e.to_string()))?;
+                .map_err(ApiError::from_transform)?;
             // Kick off the bulk `-p` decompile in the background so
             // follow-up type clicks become cache hits. Dedups per-sha
             // inside the warmer.

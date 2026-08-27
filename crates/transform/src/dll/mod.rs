@@ -98,6 +98,11 @@ pub async fn list_entities(
     dll_sha: &[u8; 20],
     dll_bytes: &[u8],
 ) -> Result<Vec<EntityEntry>, TransformError> {
+    if !is_managed_pe(dll_bytes) {
+        return Err(TransformError::Unsupported(
+            "not a managed .NET assembly (no CLR header)".to_string(),
+        ));
+    }
     let raw = if let Some(cached) = crate::read_cached_artifact(store_root, dll_sha, "list")? {
         cached
     } else {
@@ -217,6 +222,14 @@ fn type_artifact_name(type_name: &str) -> String {
         out.push(if ok { c } else { '_' });
     }
     out
+}
+
+/// `.exe`/`.dll` is also the extension for native code, which crashes
+/// `ilspycmd` instead of failing cleanly. Container-level check only
+/// (no metadata resolution), so a managed PE with corrupt metadata
+/// still gets a shot at `ilspycmd`.
+fn is_managed_pe(bytes: &[u8]) -> bool {
+    dll_diff::dotnetdll::dll::DLL::parse(bytes).is_ok()
 }
 
 async fn run_ilspy(bytes: &[u8], args: &[&str]) -> Result<String, TransformError> {
@@ -421,6 +434,18 @@ async fn spawn_ilspy(tmp: &TempInput, args: &[&str]) -> Result<String, Transform
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_managed_pe_true_for_real_assembly() {
+        let bytes = include_bytes!("../../../dll-diff/tests/fixtures/add_type/from.dll");
+        assert!(is_managed_pe(bytes));
+    }
+
+    #[test]
+    fn is_managed_pe_false_for_garbage() {
+        assert!(!is_managed_pe(b""));
+        assert!(!is_managed_pe(b"not a PE file at all"));
+    }
 
     #[test]
     fn parses_simple_lines() {

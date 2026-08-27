@@ -66,8 +66,15 @@ impl Transformer {
 #[derive(Debug)]
 pub enum TransformError {
     Io(std::io::Error),
-    ToolNotFound { cmd: &'static str },
-    ToolFailed { cmd: &'static str, stderr: String },
+    ToolNotFound {
+        cmd: &'static str,
+    },
+    ToolFailed {
+        cmd: &'static str,
+        stderr: String,
+    },
+    /// Wrong file kind, discovered only after reading the bytes — 415, not 500.
+    Unsupported(String),
     Other(String),
 }
 
@@ -77,6 +84,7 @@ impl std::fmt::Display for TransformError {
             Self::Io(e) => write!(f, "io: {e}"),
             Self::ToolNotFound { cmd } => write!(f, "{cmd} not found on PATH"),
             Self::ToolFailed { cmd, stderr } => write!(f, "{cmd} failed: {stderr}"),
+            Self::Unsupported(msg) => f.write_str(msg),
             Self::Other(msg) => f.write_str(msg),
         }
     }

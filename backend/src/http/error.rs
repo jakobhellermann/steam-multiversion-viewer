@@ -36,6 +36,13 @@ impl ApiError {
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
     }
+
+    pub fn from_transform(err: transform::TransformError) -> Self {
+        match err {
+            transform::TransformError::Unsupported(msg) => Self::unsupported_media_type(msg),
+            other => Self::internal(other.to_string()),
+        }
+    }
 }
 
 #[derive(Serialize)]

@@ -909,7 +909,7 @@ async fn build_structured_diff_tree(
                 path,
             )
             .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+            .map_err(ApiError::from_transform)?;
             // Kick `ilspycmd -p` for both DLLs in the background.
             // Per-type lazy decompile calls from the node endpoint then
             // hit the cache instead of spawning a fresh `ilspycmd -t`.
@@ -1347,7 +1347,7 @@ async fn dll_node_body(
             mime: MIME_CSHARP,
             text: transform::dll::decompile_type(&store_root, &side.sha, &side.bytes, t)
                 .await
-                .map_err(|e| ApiError::internal(e.to_string()))?,
+                .map_err(ApiError::from_transform)?,
         }),
         _ => None,
     };
@@ -1356,7 +1356,7 @@ async fn dll_node_body(
             mime: MIME_CSHARP,
             text: transform::dll::decompile_type(&store_root, &side.sha, &side.bytes, t)
                 .await
-                .map_err(|e| ApiError::internal(e.to_string()))?,
+                .map_err(ApiError::from_transform)?,
         }),
         _ => None,
     };
