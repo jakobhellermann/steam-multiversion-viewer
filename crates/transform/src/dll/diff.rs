@@ -31,6 +31,9 @@ pub async fn build_tree(
     to_bytes: &[u8],
     file_label: &str,
 ) -> Result<StructuredTree, TransformError> {
+    if !super::is_managed_pe(from_bytes) || !super::is_managed_pe(to_bytes) {
+        return super::native::build_diff_tree(from_bytes, to_bytes, file_label);
+    }
     // Both `ilspycmd -l` invocations are cached on dll-sha — repeats
     // are a single file read each, so we can serialise them without
     // pulling in another `try_join`.
