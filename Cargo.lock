@@ -2716,7 +2716,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 2.0.2",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4285,7 +4285,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "steam-depot-mount"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-depot-vfs#bd8e7c9f62ec28be414fa8acbe40772703fe6978"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#8c0cedffafe90cf44f0afde7e9857cbc3a64cfd9"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4304,7 +4304,7 @@ dependencies = [
 [[package]]
 name = "steam-depot-vfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-depot-vfs#bd8e7c9f62ec28be414fa8acbe40772703fe6978"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#8c0cedffafe90cf44f0afde7e9857cbc3a64cfd9"
 dependencies = [
  "bytes",
  "directories",
