@@ -244,7 +244,7 @@ fn parse_subprogram(sub: &[u8], version: Version) -> Option<SubProgram<'_>> {
     for _ in 0..global_keywords {
         r.skip_string()?;
     }
-    if (2019, 1, 0) <= version && version < (2021, 2, 0) {
+    if ((2019, 1, 0)..(2021, 2, 0)).contains(&version) {
         let local_keywords = r.i32_as_usize()?;
         for _ in 0..local_keywords {
             r.skip_string()?;
@@ -276,15 +276,15 @@ fn unwrap_metal(data: &[u8]) -> Option<&[u8]> {
 /// https://github.com/nesrak1/USCSandbox/blob/main/USCSandbox/GPUPlatform.cs
 fn gpu_platform(t: i64) -> Option<u32> {
     Some(match t {
-        1 => 0,          // GLLegacy → openGL
-        5 => 5,          // GLES → gles
-        2 | 3 | 4 => 9,  // GLES31AEP / GLES31 / GLES3 → gles3
-        6 | 7 | 8 => 15, // GLCore32/41/43 → glcore
-        9..=12 => 1,     // DX9* → d3d9
-        13 | 14 => 8,    // DX10Level9* → d3d11_9x
-        15..=22 => 4,    // DX11* → d3d11
-        23 | 24 => 14,   // MetalVS / MetalFS → metal
-        25 => 18,        // SPIRV → vulkan
+        1 => 0,        // GLLegacy → openGL
+        5 => 5,        // GLES → gles
+        2..=4 => 9,    // GLES31AEP / GLES31 / GLES3 → gles3
+        6..=8 => 15,   // GLCore32/41/43 → glcore
+        9..=12 => 1,   // DX9* → d3d9
+        13 | 14 => 8,  // DX10Level9* → d3d11_9x
+        15..=22 => 4,  // DX11* → d3d11
+        23 | 24 => 14, // MetalVS / MetalFS → metal
+        25 => 18,      // SPIRV → vulkan
         _ => return None,
     })
 }

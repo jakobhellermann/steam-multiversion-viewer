@@ -5,11 +5,10 @@
 //! self-contained executable.
 //!
 //! Routing:
-//!   - `/`                → `index.html`
-//!   - `/<asset>`         → byte-identical asset if present in `dist`
-//!   - anything else      → `index.html` (SPA fallback so deep links
-//!                          like `/apps/.../file` survive a reload —
-//!                          the client-side router takes over)
+//! - `/` → `index.html`
+//! - `/<asset>` → byte-identical asset if present in `dist`
+//! - anything else → `index.html` (SPA fallback so deep links like
+//!   `/apps/.../file` survive a reload; the client-side router takes over)
 //!
 //! The /api/* tree is mounted *before* this fallback in `main.rs`, so
 //! the SPA catch-all never shadows backend routes.

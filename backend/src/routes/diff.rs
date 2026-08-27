@@ -1470,8 +1470,12 @@ fn split_diff_id(node_id: &str) -> (Option<&str>, Option<&str>) {
 ///
 /// Either side is `None` when that side has no parseable object id
 /// (section headers, class-stats rows, malformed input).
+/// (archive entry name, object path-id).
 #[cfg(feature = "unity")]
-fn parse_bundle_node_id(node_id: &str) -> (Option<(String, i64)>, Option<(String, i64)>) {
+type ArchiveObjectRef = (String, i64);
+
+#[cfg(feature = "unity")]
+fn parse_bundle_node_id(node_id: &str) -> (Option<ArchiveObjectRef>, Option<ArchiveObjectRef>) {
     let Some((entry, inner)) = transform::unity::bundle::parse_archive_id(node_id) else {
         return (None, None);
     };
