@@ -48,8 +48,7 @@ fn default_true() -> bool {
     "content_kind": "unknown",
     "content": null,
     "preview_cap_bytes": 67108864,
-    "transformer": null,
-    "structured": null
+    "rich_view": null
 }))]
 pub struct FileView {
     pub path: String,
@@ -72,28 +71,17 @@ pub struct FileView {
     /// applied (so the caller can surface "this file is X MiB, cap is
     /// Y MiB" without hardcoding the limit).
     pub preview_cap_bytes: u64,
-    /// Set when a text transformer is registered for this file's
-    /// extension — callers should treat it as "the `/file/transformed`
-    /// endpoint will yield text for this file" rather than guessing
-    /// from the extension themselves.
-    pub transformer: Option<TransformerInfo>,
-    /// Set when the backend can build a [`transform::structured::StructuredTree`]
-    /// for this file. The frontend uses it to decide whether to render
-    /// the tree view instead of (or alongside) the plain preview.
-    pub structured: Option<StructuredInfo>,
+    /// Which rich view (if any) this file gets, mutually exclusive by
+    /// construction: `transformed` -> `/file/transformed`, `structured`
+    /// -> `/file/structured`.
+    pub rich_view: Option<RichView>,
 }
 
-#[derive(Serialize, ToSchema, Clone, Debug)]
-pub struct TransformerInfo {
-    /// MIME type of the transformer's output (e.g. `text/x-csharp`).
-    pub mime: String,
-}
-
-#[derive(Serialize, ToSchema, Clone, Debug)]
-pub struct StructuredInfo {
-    /// Renderer hint matching `StructuredTree::kind` (e.g.
-    /// `"unity-serialized"`).
-    pub kind: String,
+#[derive(Serialize, ToSchema, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RichView {
+    Transformed,
+    Structured,
 }
 
 #[derive(Serialize, ToSchema, Clone, Copy, Debug)]
@@ -219,10 +207,7 @@ pub async fn manifest_file(
         chunk_shas.iter().filter(|sha| index.has_chunk(sha)).count() as u32
     };
 
-    let transformer = transform::tools::transformer_for(&file_path).map(|t| TransformerInfo {
-        mime: t.output_mime().to_string(),
-    });
-    let structured = structured_info_for(&file_path);
+    let rich_view = rich_view_for(&file_path);
 
     Ok(Json(FileView {
         path: file_path,
@@ -235,24 +220,17 @@ pub async fn manifest_file(
         content_kind,
         content,
         preview_cap_bytes: PREVIEW_CAP_BYTES,
-        transformer,
-        structured,
+        rich_view,
     }))
 }
 
-/// Probe whether the backend has a structured-tree builder for this
-/// file. Keeps the route layer out of feature-cfg territory.
-fn structured_info_for(path: &str) -> Option<StructuredInfo> {
+fn rich_view_for(path: &str) -> Option<RichView> {
     use transform::Transformer;
-    match transform::tools::transformer_for(path) {
+    match transform::tools::transformer_for(path)? {
+        Transformer::Cli(_) => Some(RichView::Transformed),
         #[cfg(feature = "unity")]
-        Some(Transformer::UnitySerialized | Transformer::UnityBundle) => Some(StructuredInfo {
-            kind: transform::unity::serializedfile::tree::TREE_KIND.to_string(),
-        }),
-        Some(Transformer::Dll) => Some(StructuredInfo {
-            kind: transform::dll::tree::TREE_KIND.to_string(),
-        }),
-        _ => None,
+        Transformer::UnitySerialized | Transformer::UnityBundle => Some(RichView::Structured),
+        Transformer::Dll => Some(RichView::Structured),
     }
 }
 

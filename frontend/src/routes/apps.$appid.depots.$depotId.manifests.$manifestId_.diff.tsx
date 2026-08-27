@@ -317,7 +317,7 @@ function DiffBody({
   baseLocator: FileLocator;
   targetLocator: FileLocator;
 }) {
-  if (base.structured && target.structured) {
+  if (base.rich_view === "structured" && target.rich_view === "structured") {
     return (
       <StructuredDiffView
         appid={baseLocator.appid}
@@ -363,7 +363,7 @@ function DiffBody({
 
 function canDiffText(view: FileView): boolean {
   if (view.kind !== "file") return false;
-  return view.content_kind === "text" || view.transformer != null;
+  return view.content_kind === "text" || view.rich_view === "transformed";
 }
 
 function filenameOf(path: string): string {

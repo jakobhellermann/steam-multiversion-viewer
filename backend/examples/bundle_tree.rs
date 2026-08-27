@@ -61,9 +61,8 @@ async fn main() -> Result<()> {
     })
     .await??;
     println!(
-        "\nbuild_tree: {:?} kind={} entries={}",
+        "\nbuild_tree: {:?} entries={}",
         started.elapsed(),
-        tree.kind,
         tree.root.children.len()
     );
 

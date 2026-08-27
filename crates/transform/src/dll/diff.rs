@@ -20,11 +20,6 @@ use super::EntityKind;
 use crate::TransformError;
 use crate::structured::{Node, NodeStatus, StructuredTree};
 
-/// Tree-`kind` identifier used in [`StructuredTree::kind`]. Same
-/// renderer as the non-diff dll tree; the frontend keys behaviour on
-/// the presence of `status` on nodes, not on the tree kind itself.
-pub const TREE_KIND: &str = super::tree::TREE_KIND;
-
 /// Build the namespace-grouped diff tree between two .NET assemblies.
 /// Runs `dll_diff::diff` on `from_bytes` vs `to_bytes`, fetches the
 /// entity listing for both sides, and merges into one tree.
@@ -59,7 +54,6 @@ pub async fn build_tree(
         .collect();
 
     Ok(StructuredTree {
-        kind: TREE_KIND.to_string(),
         root: build_root(file_label, &from_entities, &to_entities, &statuses),
     })
 }

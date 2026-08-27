@@ -25,7 +25,6 @@ fn bundle_tree_one_sf_one_blob() {
         build_tree_from_bundle(env, bundle, BUNDLE_PATH).unwrap()
     });
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: unity-serialized
     root:
       id: "file:level0.bundle"
       label: level0.bundle
@@ -101,7 +100,6 @@ fn bundle_diff_added_changed_unchanged() {
         })
     });
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: unity-serialized
     root:
       id: "file:level0.bundle"
       label: level0.bundle

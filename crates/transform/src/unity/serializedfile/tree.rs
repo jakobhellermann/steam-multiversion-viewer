@@ -44,10 +44,6 @@ fn pluralize(n: usize, word: &str) -> String {
     }
 }
 
-/// Tree-`kind` identifier used in [`StructuredTree::kind`]. The
-/// frontend keys off this to pick renderer behaviour.
-pub const TREE_KIND: &str = "unity-serialized";
-
 /// Resolve a node id (as built by [`build_tree`]) back to its
 /// path-id. Returns `None` for ids that don't refer to a specific
 /// object (section headers, class-stats rows).
@@ -68,10 +64,7 @@ pub fn build_tree<R: EnvResolver, P: TypeTreeProvider>(
     let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
     let file = env.load_serialized(relative)?;
     let root = build_root_node(&file, path)?;
-    Ok(StructuredTree {
-        kind: TREE_KIND.to_string(),
-        root,
-    })
+    Ok(StructuredTree { root })
 }
 
 /// Build the per-file root node (class-stats / hierarchy / loose). The

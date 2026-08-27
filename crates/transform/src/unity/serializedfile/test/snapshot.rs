@@ -14,7 +14,7 @@ use super::fixtures::{
 };
 use crate::structured::{NodeStatus, StructuredTree};
 use crate::unity::serializedfile::diff::diff_sections;
-use crate::unity::serializedfile::tree::{TREE_KIND, build_root_node};
+use crate::unity::serializedfile::tree::build_root_node;
 
 const PATH: &str = "level0";
 
@@ -34,13 +34,9 @@ fn tree_small_scene() {
     let bytes = small_scene().write();
     let tree = with_handle(PATH, bytes, |handle| {
         let root = build_root_node(handle, PATH).unwrap();
-        StructuredTree {
-            kind: TREE_KIND.to_string(),
-            root,
-        }
+        StructuredTree { root }
     });
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: unity-serialized
     root:
       id: "file:level0"
       label: level0
@@ -138,7 +134,6 @@ fn diff_added_removed_renamed() {
         with_handle(PATH, target_bytes, |target| {
             let (children, status) = diff_sections(base, target).unwrap();
             StructuredTree {
-                kind: TREE_KIND.to_string(),
                 root: crate::structured::Node {
                     id: format!("file:{PATH}"),
                     label: PATH.to_string(),
@@ -151,7 +146,6 @@ fn diff_added_removed_renamed() {
         })
     });
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: unity-serialized
     root:
       id: "file:level0"
       label: level0
@@ -617,13 +611,9 @@ fn tree_with_monobehaviours() {
         .write();
     let tree = with_handle(PATH, bytes, |handle| {
         let root = build_root_node(handle, PATH).unwrap();
-        StructuredTree {
-            kind: TREE_KIND.to_string(),
-            root,
-        }
+        StructuredTree { root }
     });
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: unity-serialized
     root:
       id: "file:level0"
       label: level0
@@ -749,7 +739,6 @@ fn diff_identical_same_named_siblings_prunes_clean() {
         with_handle(PATH, target_bytes, |target| {
             let (children, status) = diff_sections(base, target).unwrap();
             StructuredTree {
-                kind: TREE_KIND.to_string(),
                 root: crate::structured::Node {
                     id: format!("file:{PATH}"),
                     label: PATH.to_string(),
@@ -762,7 +751,6 @@ fn diff_identical_same_named_siblings_prunes_clean() {
         })
     });
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: unity-serialized
     root:
       id: "file:level0"
       label: level0
@@ -780,7 +768,6 @@ fn diff_identical_is_unchanged() {
         with_handle(PATH, bytes_b, |target| {
             let (children, status) = diff_sections(base, target).unwrap();
             StructuredTree {
-                kind: TREE_KIND.to_string(),
                 root: crate::structured::Node {
                     id: format!("file:{PATH}"),
                     label: PATH.to_string(),
@@ -793,7 +780,6 @@ fn diff_identical_is_unchanged() {
         })
     });
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: unity-serialized
     root:
       id: "file:level0"
       label: level0

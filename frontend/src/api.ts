@@ -355,25 +355,11 @@ export type FileView = {
   content_kind: FileContentKind;
   content: string | null;
   preview_cap_bytes: number;
-  /// Set when the backend has a registered text transformer for this
-  /// file's extension. The frontend decides "show a decompile-spinner"
-  /// purely from this field — never from the file extension.
-  transformer: TransformerInfo | null;
-  /// Set when the backend can build a structured tree (e.g. unity
-  /// serialized files). Frontend toggles to the tree renderer when set.
-  structured: StructuredInfo | null;
+  /// Which rich view (if any) this file gets — mutually exclusive.
+  rich_view: RichView | null;
 };
 
-export type TransformerInfo = {
-  /// MIME type of the transformer's output — frontend uses it to pick
-  /// a syntax highlighter for the result.
-  mime: string;
-};
-
-export type StructuredInfo = {
-  /// Renderer hint — currently always `"unity-serialized"`.
-  kind: string;
-};
+export type RichView = "transformed" | "structured";
 
 export type StructuredNode = {
   id: string;

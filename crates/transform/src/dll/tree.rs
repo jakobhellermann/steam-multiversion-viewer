@@ -30,10 +30,6 @@ use super::EntityKind;
 use crate::TransformError;
 use crate::structured::{Node, StructuredTree};
 
-/// Tree-`kind` identifier used in [`StructuredTree::kind`]. The
-/// frontend keys off this to pick renderer behaviour.
-pub const TREE_KIND: &str = "dll-types";
-
 /// Build the namespace-grouped tree for `dll_bytes`. Calls
 /// `ilspycmd -l` under the hood (cached by sha).
 pub async fn build_tree(
@@ -44,7 +40,6 @@ pub async fn build_tree(
 ) -> Result<StructuredTree, TransformError> {
     let entities = super::list_entities(store_root, dll_sha, dll_bytes).await?;
     Ok(StructuredTree {
-        kind: TREE_KIND.to_string(),
         root: build_root(file_label, &entities),
     })
 }

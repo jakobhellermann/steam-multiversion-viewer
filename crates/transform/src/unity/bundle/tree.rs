@@ -15,7 +15,7 @@ use rabex_env::resolver::EnvResolver;
 use tracing::info_span;
 
 use crate::structured::{Node, StructuredTree};
-use crate::unity::serializedfile::tree::{TREE_KIND, build_root_node};
+use crate::unity::serializedfile::tree::build_root_node;
 
 use super::{ARCHIVE_ID_PREFIX, archive_prefix, blob_node, insert_archive_entry};
 
@@ -82,10 +82,7 @@ where
         ..Default::default()
     };
 
-    Ok(StructuredTree {
-        kind: TREE_KIND.to_string(),
-        root,
-    })
+    Ok(StructuredTree { root })
 }
 
 /// Build the subtree for one SerializedFile-flagged bundle entry. The

@@ -38,7 +38,6 @@ use serde_value::Value;
 use crate::structured::{Node, NodeStatus, StructuredTree};
 
 use super::markers::pptr_from_map;
-use super::tree::TREE_KIND;
 
 /// Per-file index: path-id → on-disk object bytes. Built once per side
 /// so component/loose body comparisons stay O(1) instead of scanning
@@ -155,10 +154,7 @@ pub fn build_diff<R: EnvResolver, P: TypeTreeProvider>(
         children,
         ..Default::default()
     };
-    Ok(StructuredTree {
-        kind: TREE_KIND.to_string(),
-        root,
-    })
+    Ok(StructuredTree { root })
 }
 
 /// Build the three section nodes (class-stats / hierarchy / loose) for

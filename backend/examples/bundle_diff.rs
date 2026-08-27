@@ -150,8 +150,8 @@ async fn main() -> Result<()> {
     let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
     walk(&tree.root, &mut counts);
     println!(
-        "\nbuild_diff: {:?} kind={} root_status={:?}",
-        elapsed, tree.kind, tree.root.status
+        "\nbuild_diff: {:?} root_status={:?}",
+        elapsed, tree.root.status
     );
     for (k, v) in counts {
         println!("  {k:<10} {v}");

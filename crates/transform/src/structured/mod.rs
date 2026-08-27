@@ -146,13 +146,9 @@ impl Node {
     }
 }
 
-/// Top-level response for `/file/structured`. `kind` lets the frontend
-/// pick a renderer if it wants format-specific behaviour; for V1 the
-/// shared generic renderer reads it as `"unity-serialized"` (or
-/// similar) and just shows the tree.
+/// Top-level response for `/file/structured`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[schema(example = json!({
-    "kind": "unity-serialized",
     "root": {
         "id": "file:level0",
         "label": "level0",
@@ -171,7 +167,6 @@ impl Node {
     }
 }))]
 pub struct StructuredTree {
-    pub kind: String,
     pub root: Node,
 }
 

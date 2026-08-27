@@ -10,10 +10,7 @@ use crate::dll::EntityKind;
 use crate::structured::{NodeStatus, StructuredTree};
 
 fn wrap(root: crate::structured::Node) -> StructuredTree {
-    StructuredTree {
-        kind: crate::dll::tree::TREE_KIND.to_string(),
-        root,
-    }
+    StructuredTree { root }
 }
 
 #[test]
@@ -31,7 +28,6 @@ fn tree_namespace_grouping_with_unnamespaced_bucket() {
         &entities,
     ));
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: dll-types
     root:
       id: "file:Assembly-CSharp.dll"
       label: Assembly-CSharp.dll
@@ -102,7 +98,6 @@ fn tree_nested_types_attach_to_outer() {
     ];
     let tree = wrap(crate::dll::tree::build_root("x", &entities));
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: dll-types
     root:
       id: "file:x"
       label: x
@@ -193,7 +188,6 @@ fn diff_added_removed_changed_unchanged() {
         &statuses,
     ));
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: dll-types
     root:
       id: "file:Assembly-CSharp.dll"
       label: Assembly-CSharp.dll
@@ -246,7 +240,6 @@ fn diff_identical_collapses_to_empty() {
     statuses.insert("Demo.B".into(), NodeStatus::Unchanged);
     let tree = wrap(crate::dll::diff::build_root("x", &from, &to, &statuses));
     insta::assert_yaml_snapshot!(tree, @r#"
-    kind: dll-types
     root:
       id: "file:x"
       label: x

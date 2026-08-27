@@ -63,7 +63,7 @@ export function FilePreview({
   // (unity scenes, eventually bundles) are useless as raw text. It
   // renders its own "Preview" header alongside the match counter so
   // both pieces of info live in one row.
-  if (view.structured) {
+  if (view.rich_view === "structured") {
     // Take the remaining vertical space inside the file route so
     // StructuredView can fill it. Without `min-h-0` the flex item
     // would refuse to shrink below its intrinsic content height.
@@ -90,7 +90,7 @@ export function FilePreview({
   }
 
   if (view.content_kind === "binary") {
-    if (view.transformer != null) {
+    if (view.rich_view === "transformed") {
       return (
         <section className={sectionClass}>
           {header}
