@@ -18,7 +18,7 @@ use futures_util::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use serde_json::json;
-use steam_vent_depot::{DepotFile, FileHash, FileType};
+use steam_vent_depot::{DepotFile, DepotFileKind, FileHash};
 use tokio::sync::Semaphore;
 use tracing::Instrument as _;
 use utoipa::ToSchema;
@@ -32,6 +32,21 @@ use crate::steam::{AppId, DepotId, ManifestId};
 use super::Result;
 use super::files::FileViewQuery;
 use super::library::ManifestRef;
+
+#[derive(PartialEq, Eq)]
+enum ContentId<'a> {
+    File(FileHash),
+    Symlink(&'a str),
+    Directory,
+}
+
+fn content_id(f: &DepotFile) -> ContentId<'_> {
+    match &f.kind {
+        DepotFileKind::File { sha, .. } => ContentId::File(*sha),
+        DepotFileKind::Symlink { target } => ContentId::Symlink(target),
+        DepotFileKind::Directory => ContentId::Directory,
+    }
+}
 
 #[derive(Deserialize, ToSchema)]
 pub struct ManifestDiffRequest {
@@ -140,10 +155,6 @@ pub async fn manifest_diff(
 
     // Identity tuple used to decide "same content". Files without a sha
     // (e.g. symlinks) still get a stable fingerprint via the rest.
-    fn fp(f: &DepotFile) -> (FileType, u64, Option<FileHash>, Option<&str>) {
-        (f.file_type(), f.size, f.sha(), f.linktarget())
-    }
-
     // Two passes per `other`:
     //  1. For each base path: is it absent here? → bump toward `Added`.
     //  2. For each path the `other` *and* base share: do fingerprints
@@ -164,7 +175,7 @@ pub async fn manifest_diff(
             }
             other_paths.insert(f.path.as_str());
             if let Some(base_f) = base_by_path.get(f.path.as_str())
-                && fp(base_f) != fp(f)
+                && content_id(base_f) != content_id(f)
             {
                 changed.insert(f.path.clone());
             }
@@ -269,15 +280,7 @@ pub async fn file_diff_targets(
         .find(|f| f.path == body.path)
         .cloned();
 
-    // Identity tuple — same as manifest_diff, scoped to one file.
-    let base_fp = base_file.as_ref().map(|f| {
-        (
-            f.file_type(),
-            f.size,
-            f.sha(),
-            f.linktarget().map(str::to_owned),
-        )
-    });
+    let base_fp = base_file.as_ref().map(|f| content_id(f));
 
     let sem = Arc::new(Semaphore::new(8));
     let mut fu = FuturesUnordered::new();
@@ -305,20 +308,12 @@ pub async fn file_diff_targets(
     while let Some((depot_id, manifest_id, result)) = fu.next().await {
         let status = match result {
             Ok(snap) => {
-                let file = snap
+                let other_fp = snap
                     .manifest()
                     .files
                     .iter()
                     .find(|f| f.path == path)
-                    .cloned();
-                let other_fp = file.map(|f| {
-                    (
-                        f.file_type(),
-                        f.size,
-                        f.sha(),
-                        f.linktarget().map(str::to_owned),
-                    )
-                });
+                    .map(content_id);
                 match (&base_fp, &other_fp) {
                     (Some(b), Some(o)) if b == o => FileDiffStatus::Same,
                     (None, None) => FileDiffStatus::Same,
@@ -430,10 +425,6 @@ pub async fn manifest_diff_targets(
     }
 
     // Identity tuple — same as manifest_diff.
-    fn fp(f: &DepotFile) -> (FileType, u64, Option<FileHash>, Option<&str>) {
-        (f.file_type(), f.size, f.sha(), f.linktarget())
-    }
-
     // Open every distinct `other` in parallel. Self-comparisons skip.
     let sem = Arc::new(Semaphore::new(8));
     let mut fu = FuturesUnordered::new();
@@ -492,7 +483,7 @@ pub async fn manifest_diff_targets(
                     break;
                 }
                 Some(other_f) => {
-                    if fp(base_f) != fp(other_f) {
+                    if content_id(base_f) != content_id(other_f) {
                         has_diff = true;
                         break;
                     }
@@ -627,108 +618,97 @@ async fn resolve_diff_text(
     );
 
     let creation_time = snapshot.manifest().creation_time;
-    let (file_path, file_sha, chunks_for_dl) = {
-        let manifest = snapshot.manifest();
-        let file = manifest
-            .files
-            .iter()
-            .find(|f| f.path == path)
-            .ok_or_else(|| {
-                ApiError::not_found(format!(
-                    "file not in manifest {depot_id}/{manifest_id}: {path}"
-                ))
-            })?;
-        let sha = file
-            .sha()
-            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {path}")))?
-            .0;
-        (
-            file.path.clone(),
-            sha,
-            file.chunks()
-                .iter()
-                .map(|c| (c.sha, u64::from(c.size_compressed)))
-                .collect::<Vec<_>>(),
-        )
-    };
+    let (file_path, file_sha, chunks_for_dl) = file_download_info(&snapshot, path)?;
+    let transformer = transform::tools::transformer_for(&file_path);
 
-    if let Some(transformer) = transform::tools::transformer_for(&file_path) {
-        let cfg = state.config.load();
-        if let Some(cached) = transform::read_cached(&cfg.store_root, &file_sha)? {
-            return Ok(DiffSide {
-                text: cached,
-                creation_time,
-            });
+    // These formats have no single text dump; bail before downloading anything.
+    match transformer {
+        Some(transform::Transformer::Dll) => {
+            return Err(ApiError::unsupported_media_type(
+                ".NET assemblies have no text-diff representation yet",
+            ));
         }
-        state
-            .downloads
-            .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
-            .await;
-        let text = match transformer {
-            transform::Transformer::Cli(tool) => {
-                let bytes = snapshot.read_full(&file_path).await?;
-                transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
-                    .await
-                    .map_err(|e| ApiError::internal(e.to_string()))?
-            }
-            #[cfg(feature = "unity")]
-            transform::Transformer::UnitySerialized => {
-                let (env, data_dir) = unity_side(
-                    state,
-                    appid,
-                    depot_id,
-                    manifest_id,
-                    branch,
-                    snapshot.clone(),
-                )?;
-                let file_path = file_path.clone();
-                tokio::task::spawn_blocking(move || {
-                    transform::unity::dump_unity_serialized(&env, &data_dir, &file_path)
-                })
-                .await
-                .map_err(|e| ApiError::internal(format!("unity dump task panicked: {e}")))?
-                .map_err(|e| ApiError::internal(e.to_string()))?
-            }
-            transform::Transformer::Dll => {
-                // .NET assemblies don't have a single text dump to
-                // diff — they're inherently per-type. A future
-                // structured-diff endpoint can cover this; for now
-                // the file falls through to the byte-equality view.
-                return Err(ApiError::unsupported_media_type(
-                    ".NET assemblies have no text-diff representation yet",
-                ));
-            }
-            #[cfg(feature = "unity")]
-            transform::Transformer::UnityBundle => {
-                // Bundles contain multiple SerializedFiles; a single
-                // text dump for diff is awkward and the structured
-                // tree carries the actual signal. Punt for now.
-                return Err(ApiError::unsupported_media_type(
-                    "Unity bundles have no text-diff representation yet",
-                ));
-            }
-        };
+        #[cfg(feature = "unity")]
+        Some(transform::Transformer::UnityBundle) => {
+            return Err(ApiError::unsupported_media_type(
+                "Unity bundles have no text-diff representation yet",
+            ));
+        }
+        _ => {}
+    }
+
+    let cfg = state.config.load();
+    if transformer.is_some()
+        && let Some(cached) = transform::read_cached(&cfg.store_root, &file_sha)?
+    {
         return Ok(DiffSide {
-            text,
+            text: cached,
             creation_time,
         });
     }
 
-    // No transformer — only useful for files we can read as UTF-8.
     state
         .downloads
         .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
         .await;
-    let bytes = snapshot.read_full(&file_path).await?;
-    let text = String::from_utf8(bytes.to_vec()).map_err(|_| {
-        ApiError::unsupported_media_type(format!(
-            "file is binary and has no registered transformer: {file_path}"
-        ))
-    })?;
+
+    let text = match transformer {
+        None => {
+            let bytes = snapshot.read_full(&file_path).await?;
+            String::from_utf8(bytes.to_vec()).map_err(|_| {
+                ApiError::unsupported_media_type(format!(
+                    "file is binary and has no registered transformer: {file_path}"
+                ))
+            })?
+        }
+        Some(transform::Transformer::Cli(tool)) => {
+            let bytes = snapshot.read_full(&file_path).await?;
+            transform::run_and_cache(&cfg.store_root, tool, &file_sha, &bytes)
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?
+        }
+        #[cfg(feature = "unity")]
+        Some(transform::Transformer::UnitySerialized) => {
+            let (env, data_dir) =
+                unity_side(state, appid, depot_id, manifest_id, branch, snapshot.clone())?;
+            tokio::task::spawn_blocking(move || {
+                transform::unity::dump_unity_serialized(&env, &data_dir, &file_path)
+            })
+            .await
+            .map_err(|e| ApiError::internal(format!("unity dump task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?
+        }
+        Some(transform::Transformer::Dll) => unreachable!("Dll bailed above"),
+        #[cfg(feature = "unity")]
+        Some(transform::Transformer::UnityBundle) => unreachable!("UnityBundle bailed above"),
+    };
     Ok(DiffSide {
         text,
         creation_time,
     })
+}
+
+/// A file's path, content sha, and chunk (sha, compressed-size) list for download.
+fn file_download_info(
+    snapshot: &crate::state::Snapshot,
+    path: &str,
+) -> Result<(String, [u8; 20], Vec<(steam_vent_depot::ChunkHash, u64)>)> {
+    let file = snapshot
+        .manifest()
+        .files
+        .iter()
+        .find(|f| f.path == path)
+        .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {path}")))?;
+    let DepotFileKind::File { sha, chunks, .. } = &file.kind else {
+        return Err(ApiError::bad_request(format!(
+            "file has no content sha: {path}"
+        )));
+    };
+    let chunks_for_dl = chunks
+        .iter()
+        .map(|c| (c.sha, u64::from(c.size_compressed)))
+        .collect();
+    Ok((file.path.clone(), sha.0, chunks_for_dl))
 }
 
 /// Query string for the structured-diff endpoint. Extends
@@ -1019,10 +999,6 @@ pub async fn manifest_diff_deep(
         )
         .await?;
 
-    fn fp(f: &DepotFile) -> (FileType, u64, Option<FileHash>, Option<&str>) {
-        (f.file_type(), f.size, f.sha(), f.linktarget())
-    }
-
     let target = target_snap.manifest();
     let mut target_by_path: HashMap<&str, &DepotFile> = HashMap::with_capacity(target.files.len());
     for f in &target.files {
@@ -1041,7 +1017,7 @@ pub async fn manifest_diff_deep(
         }
         match target_by_path.get(f.path.as_str()) {
             None => added.push(f.path.clone()),
-            Some(tf) if fp(f) != fp(tf) => changed_candidates.push(f.path.clone()),
+            Some(tf) if content_id(f) != content_id(tf) => changed_candidates.push(f.path.clone()),
             Some(_) => {}
         }
     }
