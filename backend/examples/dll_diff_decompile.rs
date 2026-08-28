@@ -220,8 +220,9 @@ async fn read_dll(
         .find(|f| f.path == DLL_PATH)
         .with_context(|| format!("file not in manifest: {DLL_PATH}"))?;
     let sha = file
-        .sha
-        .with_context(|| format!("file has no content sha: {DLL_PATH}"))?;
+        .sha()
+        .with_context(|| format!("file has no content sha: {DLL_PATH}"))?
+        .0;
     let bytes = manifest.read_full(DLL_PATH).await?.to_vec();
     Ok((bytes, sha))
 }

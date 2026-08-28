@@ -65,7 +65,7 @@ pub async fn manifest_download(
                 continue;
             }
             matched.insert(f.path.as_str());
-            for c in &f.chunks {
+            for c in f.chunks() {
                 if seen.insert(c.sha) {
                     chunks.push((c.sha, u64::from(c.size_compressed)));
                 }
@@ -83,7 +83,7 @@ pub async fn manifest_download(
         }
     } else {
         for f in &manifest.files {
-            for c in &f.chunks {
+            for c in f.chunks() {
                 if seen.insert(c.sha) {
                     chunks.push((c.sha, u64::from(c.size_compressed)));
                 }

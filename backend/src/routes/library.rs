@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use serde_json::json;
 use steam_vent::ConnectionTrait;
-use steam_vent_depot::FileKind;
+use steam_vent_depot::FileType;
 use steam_vent_proto::steammessages_player_steamclient::CPlayer_GetOwnedGames_Request;
 use tokio::sync::Semaphore;
 use utoipa::{IntoParams, ToSchema};
@@ -316,12 +316,12 @@ pub enum ManifestFileKind {
     Symlink,
 }
 
-impl From<FileKind> for ManifestFileKind {
-    fn from(value: FileKind) -> Self {
+impl From<FileType> for ManifestFileKind {
+    fn from(value: FileType) -> Self {
         match value {
-            FileKind::File => Self::File,
-            FileKind::Directory => Self::Directory,
-            FileKind::Symlink => Self::Symlink,
+            FileType::File => Self::File,
+            FileType::Directory => Self::Directory,
+            FileType::Symlink => Self::Symlink,
         }
     }
 }
@@ -356,11 +356,7 @@ pub async fn manifest_info(
             size_compressed: m.size_compressed,
             // Directories are implicit in file paths, so don't count
             // them — keeps the value consistent with the listing route.
-            file_count: m
-                .files
-                .iter()
-                .filter(|f| !matches!(f.kind, FileKind::Directory))
-                .count(),
+            file_count: m.files.iter().filter(|f| !f.is_dir()).count(),
         }),
     ))
 }
@@ -390,13 +386,13 @@ pub async fn manifest_files(
     let files = m
         .files
         .iter()
-        .filter(|f| !matches!(f.kind, FileKind::Directory))
+        .filter(|f| !f.is_dir())
         .map(|f| ManifestFile {
             path: f.path.clone(),
             size: f.size,
-            kind: f.kind.into(),
-            chunk_count: f.chunks.len() as u32,
-            linktarget: f.linktarget.clone(),
+            kind: f.file_type().into(),
+            chunk_count: f.chunks().len() as u32,
+            linktarget: f.linktarget().map(str::to_owned),
         })
         .collect();
 

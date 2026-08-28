@@ -18,7 +18,7 @@ use futures_util::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use serde_json::json;
-use steam_vent_depot::{DepotFile, FileKind};
+use steam_vent_depot::{DepotFile, FileHash, FileType};
 use tokio::sync::Semaphore;
 use tracing::Instrument as _;
 use utoipa::ToSchema;
@@ -132,7 +132,7 @@ pub async fn manifest_diff(
     let base = base_snap.manifest();
     let mut base_by_path: HashMap<&str, &DepotFile> = HashMap::with_capacity(base.files.len());
     for f in &base.files {
-        if matches!(f.kind, FileKind::Directory) {
+        if f.is_dir() {
             continue;
         }
         base_by_path.insert(f.path.as_str(), f);
@@ -140,8 +140,8 @@ pub async fn manifest_diff(
 
     // Identity tuple used to decide "same content". Files without a sha
     // (e.g. symlinks) still get a stable fingerprint via the rest.
-    fn fp(f: &DepotFile) -> (FileKind, u64, Option<[u8; 20]>, Option<&str>) {
-        (f.kind, f.size, f.sha, f.linktarget.as_deref())
+    fn fp(f: &DepotFile) -> (FileType, u64, Option<FileHash>, Option<&str>) {
+        (f.file_type(), f.size, f.sha(), f.linktarget())
     }
 
     // Two passes per `other`:
@@ -159,7 +159,7 @@ pub async fn manifest_diff(
         let other = snap.manifest();
         let mut other_paths: HashSet<&str> = HashSet::with_capacity(other.files.len());
         for f in &other.files {
-            if matches!(f.kind, FileKind::Directory) {
+            if f.is_dir() {
                 continue;
             }
             other_paths.insert(f.path.as_str());
@@ -270,9 +270,14 @@ pub async fn file_diff_targets(
         .cloned();
 
     // Identity tuple — same as manifest_diff, scoped to one file.
-    let base_fp = base_file
-        .as_ref()
-        .map(|f| (f.kind, f.size, f.sha, f.linktarget.clone()));
+    let base_fp = base_file.as_ref().map(|f| {
+        (
+            f.file_type(),
+            f.size,
+            f.sha(),
+            f.linktarget().map(str::to_owned),
+        )
+    });
 
     let sem = Arc::new(Semaphore::new(8));
     let mut fu = FuturesUnordered::new();
@@ -306,7 +311,14 @@ pub async fn file_diff_targets(
                     .iter()
                     .find(|f| f.path == path)
                     .cloned();
-                let other_fp = file.map(|f| (f.kind, f.size, f.sha, f.linktarget));
+                let other_fp = file.map(|f| {
+                    (
+                        f.file_type(),
+                        f.size,
+                        f.sha(),
+                        f.linktarget().map(str::to_owned),
+                    )
+                });
                 match (&base_fp, &other_fp) {
                     (Some(b), Some(o)) if b == o => FileDiffStatus::Same,
                     (None, None) => FileDiffStatus::Same,
@@ -405,7 +417,7 @@ pub async fn manifest_diff_targets(
     let base = base_snap.manifest();
     let mut base_subset: HashMap<&str, &DepotFile> = HashMap::with_capacity(base.files.len());
     for f in &base.files {
-        if matches!(f.kind, FileKind::Directory) {
+        if f.is_dir() {
             continue;
         }
         if !tokens.is_empty() {
@@ -418,8 +430,8 @@ pub async fn manifest_diff_targets(
     }
 
     // Identity tuple — same as manifest_diff.
-    fn fp(f: &DepotFile) -> (FileKind, u64, Option<[u8; 20]>, Option<&str>) {
-        (f.kind, f.size, f.sha, f.linktarget.as_deref())
+    fn fp(f: &DepotFile) -> (FileType, u64, Option<FileHash>, Option<&str>) {
+        (f.file_type(), f.size, f.sha(), f.linktarget())
     }
 
     // Open every distinct `other` in parallel. Self-comparisons skip.
@@ -467,7 +479,7 @@ pub async fn manifest_diff_targets(
         let mut other_by_path: HashMap<&str, &DepotFile> =
             HashMap::with_capacity(other.files.len());
         for f in &other.files {
-            if matches!(f.kind, FileKind::Directory) {
+            if f.is_dir() {
                 continue;
             }
             other_by_path.insert(f.path.as_str(), f);
@@ -627,12 +639,13 @@ async fn resolve_diff_text(
                 ))
             })?;
         let sha = file
-            .sha
-            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {path}")))?;
+            .sha()
+            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {path}")))?
+            .0;
         (
             file.path.clone(),
             sha,
-            file.chunks
+            file.chunks()
                 .iter()
                 .map(|c| (c.sha, u64::from(c.size_compressed)))
                 .collect::<Vec<_>>(),
@@ -1006,14 +1019,14 @@ pub async fn manifest_diff_deep(
         )
         .await?;
 
-    fn fp(f: &DepotFile) -> (FileKind, u64, Option<[u8; 20]>, Option<&str>) {
-        (f.kind, f.size, f.sha, f.linktarget.as_deref())
+    fn fp(f: &DepotFile) -> (FileType, u64, Option<FileHash>, Option<&str>) {
+        (f.file_type(), f.size, f.sha(), f.linktarget())
     }
 
     let target = target_snap.manifest();
     let mut target_by_path: HashMap<&str, &DepotFile> = HashMap::with_capacity(target.files.len());
     for f in &target.files {
-        if matches!(f.kind, FileKind::Directory) {
+        if f.is_dir() {
             continue;
         }
         target_by_path.insert(f.path.as_str(), f);
@@ -1023,7 +1036,7 @@ pub async fn manifest_diff_deep(
     let mut added: Vec<String> = Vec::new();
     let mut changed_candidates: Vec<String> = Vec::new();
     for f in &base.files {
-        if matches!(f.kind, FileKind::Directory) {
+        if f.is_dir() {
             continue;
         }
         match target_by_path.get(f.path.as_str()) {
@@ -1116,8 +1129,9 @@ async fn dll_side_bytes(
         .files
         .iter()
         .find(|f| f.path == path)
-        .and_then(|f| f.sha)
-        .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {path}")))?;
+        .and_then(|f| f.sha())
+        .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {path}")))?
+        .0;
     let bytes = snap.read_full(path).await?.to_vec();
     Ok((bytes, sha))
 }
@@ -1710,7 +1724,7 @@ async fn prepare_structured_side(
                     "file not in manifest {depot_id}/{manifest_id}: {path}"
                 ))
             })?;
-        file.chunks
+        file.chunks()
             .iter()
             .map(|c| (c.sha, u64::from(c.size_compressed)))
             .collect()

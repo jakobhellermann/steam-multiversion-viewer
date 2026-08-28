@@ -59,11 +59,12 @@ pub async fn manifest_file_structured(
             .find(|f| f.path == q.path)
             .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
         let sha = file
-            .sha
-            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {}", q.path)))?;
+            .sha()
+            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {}", q.path)))?
+            .0;
         (
             sha,
-            file.chunks
+            file.chunks()
                 .iter()
                 .map(|c| (c.sha, u64::from(c.size_compressed)))
                 .collect::<Vec<_>>(),
@@ -185,7 +186,8 @@ pub async fn manifest_file_structured_node(
         .files
         .iter()
         .find(|f| f.path == q.path)
-        .and_then(|f| f.sha)
+        .and_then(|f| f.sha())
+        .map(|h| h.0)
         .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
 
     match transform::tools::transformer_for(&q.path) {

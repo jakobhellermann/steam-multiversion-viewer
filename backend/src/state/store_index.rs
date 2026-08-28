@@ -75,7 +75,7 @@ impl StoreIndex {
             return false;
         }
         for file in &m.files {
-            for chunk in &file.chunks {
+            for chunk in file.chunks() {
                 *self.chunk_refcount.entry(chunk.sha).or_insert(0) += 1;
             }
         }
@@ -104,7 +104,7 @@ impl StoreIndex {
         let mut seen = HashSet::new();
         let mut s = ManifestStats::default();
         for file in &m.files {
-            for chunk in &file.chunks {
+            for chunk in file.chunks() {
                 if !seen.insert(chunk.sha) {
                     continue;
                 }

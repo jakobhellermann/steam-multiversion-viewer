@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use camino::{Utf8Path, Utf8PathBuf};
 use futures_util::FutureExt as _;
 use serde::Serialize;
-use steam_vent_depot::{FileKind, Manifest};
+use steam_vent_depot::{DepotFileKind, Manifest};
 use tokio::io::AsyncWriteExt;
 use utoipa::ToSchema;
 
@@ -268,29 +268,26 @@ impl Plan {
         };
         for f in &manifest.files {
             let path = check_relative_path(&f.path)?;
-            match f.kind {
-                FileKind::Directory => plan.dirs.push(path.to_owned()),
-                FileKind::File => {
+            match &f.kind {
+                DepotFileKind::Directory => plan.dirs.push(path.to_owned()),
+                DepotFileKind::File {
+                    chunks, executable, ..
+                } => {
                     plan.bytes_total += f.size;
                     plan.files.push(PlanFile {
                         path: path.to_owned(),
                         size: f.size,
-                        executable: f.executable || runnable.contains(path),
-                        chunks: f
-                            .chunks
+                        executable: *executable || runnable.contains(path),
+                        chunks: chunks
                             .iter()
                             .map(|c| (c.sha, u64::from(c.size_compressed)))
                             .collect(),
                     });
                 }
-                FileKind::Symlink => {
-                    let target = f
-                        .linktarget
-                        .clone()
-                        .ok_or_else(|| ExportError::UnsafePath(f.path.clone()))?;
+                DepotFileKind::Symlink { target } => {
                     plan.symlinks.push(PlanSymlink {
                         path: path.to_owned(),
-                        target,
+                        target: target.clone(),
                     });
                 }
             }
@@ -318,7 +315,7 @@ impl RunnablePaths {
             let target = target.trim_end_matches('/').replace('\\', "/");
             let bundle_bin = format!("{target}/Contents/MacOS/");
             for f in &manifest.files {
-                if !matches!(f.kind, FileKind::File) {
+                if !f.is_file() {
                     continue;
                 }
                 let in_bundle = f
@@ -392,9 +389,9 @@ fn create_symlink(_target: &str, at: &Utf8Path) -> Result<(), ExportError> {
 #[cfg(test)]
 mod tests {
     use super::{RunnablePaths, check_relative_path, check_single_component};
-    use steam_vent_depot::{DepotFile, FileKind, Manifest};
+    use steam_vent_depot::{DepotFile, DepotFileKind, FileHash, FileType, Manifest};
 
-    fn manifest(paths: &[(&str, FileKind)]) -> Manifest {
+    fn manifest(paths: &[(&str, FileType)]) -> Manifest {
         Manifest {
             depot_id: 1,
             manifest_id: 1,
@@ -406,11 +403,17 @@ mod tests {
                 .map(|(path, kind)| DepotFile {
                     path: (*path).to_owned(),
                     size: 0,
-                    kind: *kind,
-                    executable: false,
-                    sha: None,
-                    linktarget: None,
-                    chunks: Vec::new(),
+                    kind: match kind {
+                        FileType::File => DepotFileKind::File {
+                            sha: FileHash([0; 20]),
+                            executable: false,
+                            chunks: Vec::new(),
+                        },
+                        FileType::Directory => DepotFileKind::Directory,
+                        FileType::Symlink => DepotFileKind::Symlink {
+                            target: String::new(),
+                        },
+                    },
                 })
                 .collect(),
         }
@@ -419,12 +422,12 @@ mod tests {
     #[test]
     fn macos_launch_target_resolves_to_the_bundle_binary() {
         let m = manifest(&[
-            ("game.app", FileKind::Directory),
-            ("game.app/Contents/MacOS/game", FileKind::File),
-            ("game.app/Contents/MacOS/helper", FileKind::File),
-            ("game.app/Contents/MacOS/nested/deep", FileKind::File),
-            ("game.app/Contents/Info.plist", FileKind::File),
-            ("game.app/Contents/Resources/data", FileKind::File),
+            ("game.app", FileType::Directory),
+            ("game.app/Contents/MacOS/game", FileType::File),
+            ("game.app/Contents/MacOS/helper", FileType::File),
+            ("game.app/Contents/MacOS/nested/deep", FileType::File),
+            ("game.app/Contents/Info.plist", FileType::File),
+            ("game.app/Contents/Resources/data", FileType::File),
         ]);
         let runnable = RunnablePaths::new(&m, &["game.app".into()]);
 
@@ -439,9 +442,9 @@ mod tests {
     #[test]
     fn plain_launch_target_matches_the_file_itself() {
         let m = manifest(&[
-            ("game.x86_64", FileKind::File),
-            ("game.exe", FileKind::File),
-            ("data/blob", FileKind::File),
+            ("game.x86_64", FileType::File),
+            ("game.exe", FileType::File),
+            ("data/blob", FileType::File),
         ]);
         // Targets for other platforms simply don't exist in this manifest.
         let runnable = RunnablePaths::new(&m, &["game.x86_64".into(), "other.exe".into()]);

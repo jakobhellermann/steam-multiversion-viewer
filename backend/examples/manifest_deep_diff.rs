@@ -22,7 +22,7 @@ use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
-use steam_vent_depot::{DepotFile, FileKind};
+use steam_vent_depot::{DepotFile, FileHash, FileType};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use transform::Transformer;
@@ -89,19 +89,19 @@ async fn main() -> Result<()> {
     );
 
     // Candidates: same fingerprint test as the route, 1:1.
-    fn fp(f: &DepotFile) -> (FileKind, u64, Option<[u8; 20]>, Option<&str>) {
-        (f.kind, f.size, f.sha, f.linktarget.as_deref())
+    fn fp(f: &DepotFile) -> (FileType, u64, Option<FileHash>, Option<&str>) {
+        (f.file_type(), f.size, f.sha(), f.linktarget())
     }
     let mut target_by_path = std::collections::HashMap::new();
     for f in &target.manifest().files {
-        if !matches!(f.kind, FileKind::Directory) {
+        if !f.is_dir() {
             target_by_path.insert(f.path.as_str(), f);
         }
     }
     let mut changed = 0usize;
     let mut candidates: Vec<String> = Vec::new();
     for f in &base.manifest().files {
-        if matches!(f.kind, FileKind::Directory) {
+        if f.is_dir() {
             continue;
         }
         let Some(tf) = target_by_path.get(f.path.as_str()) else {

@@ -155,15 +155,15 @@ pub async fn manifest_file(
         (
             file.path.clone(),
             file.size,
-            ManifestFileKind::from(file.kind),
-            file.linktarget.clone(),
-            file.sha.map(hex_encode),
-            file.chunks.len() as u32,
-            file.chunks
+            ManifestFileKind::from(file.file_type()),
+            file.linktarget().map(str::to_owned),
+            file.sha().map(|h| hex_encode(h.0)),
+            file.chunks().len() as u32,
+            file.chunks()
                 .iter()
                 .map(|c| (c.sha, u64::from(c.size_compressed)))
                 .collect::<Vec<_>>(),
-            file.chunks.iter().map(|c| c.sha).collect::<Vec<_>>(),
+            file.chunks().iter().map(|c| c.sha).collect::<Vec<_>>(),
         )
     };
 
@@ -280,8 +280,8 @@ pub async fn manifest_file_raw(
             .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
         (
             file.path.clone(),
-            ManifestFileKind::from(file.kind),
-            file.chunks
+            ManifestFileKind::from(file.file_type()),
+            file.chunks()
                 .iter()
                 .map(|c| (c.sha, u64::from(c.size_compressed)))
                 .collect::<Vec<_>>(),
@@ -348,12 +348,13 @@ pub async fn manifest_file_transformed(
             .find(|f| f.path == q.path)
             .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
         let sha = file
-            .sha
-            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {}", q.path)))?;
+            .sha()
+            .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {}", q.path)))?
+            .0;
         (
             file.path.clone(),
             sha,
-            file.chunks
+            file.chunks()
                 .iter()
                 .map(|c| (c.sha, u64::from(c.size_compressed)))
                 .collect::<Vec<_>>(),

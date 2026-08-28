@@ -572,7 +572,7 @@ impl ChunkService {
             for f in &manifest.files {
                 let mut touched = false;
                 let mut present = 0u32;
-                for c in &f.chunks {
+                for c in f.chunks() {
                     if batch.shas.contains(&c.sha) {
                         touched = true;
                     }
