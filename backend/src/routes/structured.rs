@@ -417,7 +417,7 @@ pub async fn manifest_file_structured_node_image(
             })
             .await
             .map_err(|e| ApiError::internal(format!("texture task panicked: {e}")))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+            .map_err(texture_error_status)?;
 
             Ok((ImmutableCache, [(header::CONTENT_TYPE, "image/png")], png).into_response())
         }
@@ -447,12 +447,20 @@ pub async fn manifest_file_structured_node_image(
             })
             .await
             .map_err(|e| ApiError::internal(format!("texture task panicked: {e}")))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+            .map_err(texture_error_status)?;
 
             Ok((ImmutableCache, [(header::CONTENT_TYPE, "image/png")], png).into_response())
         }
         _ => Err(ApiError::unsupported_media_type(
             "no texture preview for this file",
         )),
+    }
+}
+
+#[cfg(feature = "unity")]
+fn texture_error_status(e: anyhow::Error) -> ApiError {
+    match e.downcast_ref::<transform::unity::serializedfile::texture::TextureUnsupported>() {
+        Some(_) => ApiError::unsupported_media_type(e.to_string()),
+        None => ApiError::internal(e.to_string()),
     }
 }

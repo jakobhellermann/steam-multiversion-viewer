@@ -19,6 +19,19 @@ use rabex_texture::Texture2D;
 
 use crate::unity::bundle::insert_archive_entry;
 
+/// Marks a texture-decode error as expected (no pixel data, unsupported
+/// format), not a bug, so the route can 415 instead of 500.
+#[derive(Debug)]
+pub struct TextureUnsupported(pub String);
+
+impl std::fmt::Display for TextureUnsupported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for TextureUnsupported {}
+
 /// Decode the `Texture2D` at `path_id` in `archive_entry` and encode it as PNG.
 #[tracing::instrument(skip_all, fields(archive_entry, path_id))]
 pub fn render_bundle_texture_png<R: EnvResolver, P: TypeTreeProvider>(
@@ -71,8 +84,7 @@ fn decode_texture<R: EnvResolver, P: TypeTreeProvider>(
         let stream = &tex.m_StreamData;
         ensure!(
             !stream.path.is_empty(),
-            "texture {} has no pixel data",
-            tex.m_Name
+            TextureUnsupported(format!("texture {} has no pixel data", tex.m_Name))
         );
         let bytes = read_ress(&stream.path)?;
         let (offset, size) = (stream.offset as usize, stream.size as usize);
@@ -83,6 +95,13 @@ fn decode_texture<R: EnvResolver, P: TypeTreeProvider>(
         );
         bytes[offset..offset + size].to_vec()
     };
+    ensure!(
+        rabex_texture::TextureFormat::from_id(tex.m_TextureFormat).is_some(),
+        TextureUnsupported(format!(
+            "unsupported Texture2D format {}",
+            tex.m_TextureFormat
+        ))
+    );
     rabex_texture::to_png(&rabex_texture::decode(
         tex.m_TextureFormat,
         tex.m_Width as u32,
