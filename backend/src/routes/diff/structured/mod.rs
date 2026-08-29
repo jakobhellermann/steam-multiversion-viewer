@@ -108,37 +108,33 @@ pub(super) async fn build_structured_diff_tree(
     let diff = match kind {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
-            build_unity_serialized_diff(
+            let (base_env, base_data_dir) =
+                unity_env(state, appid, depot_id, manifest_id, branch, base)?;
+            let (target_env, target_data_dir) = unity_env(
                 state,
                 appid,
-                depot_id,
-                manifest_id,
-                branch,
-                base,
                 target_depot_id,
                 target_manifest_id,
                 target_branch,
                 target,
-                path,
-            )
-            .await?
+            )?;
+            build_unity_serialized_diff(base_env, base_data_dir, target_env, target_data_dir, path)
+                .await?
         }
         #[cfg(feature = "unity")]
         Some(Transformer::UnityBundle) => {
-            build_unity_bundle_diff(
+            let (base_env, base_data_dir) =
+                unity_env(state, appid, depot_id, manifest_id, branch, base)?;
+            let (target_env, target_data_dir) = unity_env(
                 state,
                 appid,
-                depot_id,
-                manifest_id,
-                branch,
-                base,
                 target_depot_id,
                 target_manifest_id,
                 target_branch,
                 target,
-                path,
-            )
-            .await?
+            )?;
+            build_unity_bundle_diff(base_env, base_data_dir, target_env, target_data_dir, path)
+                .await?
         }
         Some(Transformer::Dll) => build_dll_diff(state, &base, &target, path).await?,
         _ => return Ok(None),
@@ -147,32 +143,16 @@ pub(super) async fn build_structured_diff_tree(
     Ok(Some(diff))
 }
 
-/// Build the structured diff for a Unity SerializedFile.
+/// Build the structured diff for a Unity SerializedFile from already-resolved envs.
 #[cfg(feature = "unity")]
-#[allow(clippy::too_many_arguments)]
-async fn build_unity_serialized_diff(
-    state: &AppState,
-    appid: AppId,
-    depot_id: DepotId,
-    manifest_id: ManifestId,
-    branch: &str,
-    base: Arc<Snapshot>,
-    target_depot_id: DepotId,
-    target_manifest_id: ManifestId,
-    target_branch: &str,
-    target: Arc<Snapshot>,
+pub(super) async fn build_unity_serialized_diff(
+    base_env: Arc<Environment>,
+    base_data_dir: String,
+    target_env: Arc<Environment>,
+    target_data_dir: String,
     path: &str,
 ) -> Result<StructuredTree> {
     let path = path.to_owned();
-    let (base_env, base_data_dir) = unity_env(state, appid, depot_id, manifest_id, branch, base)?;
-    let (target_env, target_data_dir) = unity_env(
-        state,
-        appid,
-        target_depot_id,
-        target_manifest_id,
-        target_branch,
-        target,
-    )?;
     tokio::task::spawn_blocking(move || {
         transform::unity::serializedfile::diff::build_diff(
             &base_env,
@@ -188,33 +168,17 @@ async fn build_unity_serialized_diff(
     .map_err(|e| ApiError::internal(e.to_string()))
 }
 
-/// Build the structured diff for a Unity asset bundle.
+/// Build the structured diff for a Unity asset bundle from already-resolved envs.
 #[cfg(feature = "unity")]
-#[allow(clippy::too_many_arguments)]
-async fn build_unity_bundle_diff(
-    state: &AppState,
-    appid: AppId,
-    depot_id: DepotId,
-    manifest_id: ManifestId,
-    branch: &str,
-    base: Arc<Snapshot>,
-    target_depot_id: DepotId,
-    target_manifest_id: ManifestId,
-    target_branch: &str,
-    target: Arc<Snapshot>,
+pub(super) async fn build_unity_bundle_diff(
+    base_env: Arc<Environment>,
+    base_data_dir: String,
+    target_env: Arc<Environment>,
+    target_data_dir: String,
     path: &str,
 ) -> Result<StructuredTree> {
     use rabex_env::resolver::EnvResolver;
     let path = path.to_owned();
-    let (base_env, base_data_dir) = unity_env(state, appid, depot_id, manifest_id, branch, base)?;
-    let (target_env, target_data_dir) = unity_env(
-        state,
-        appid,
-        target_depot_id,
-        target_manifest_id,
-        target_branch,
-        target,
-    )?;
     tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let base_relative = path
             .strip_prefix(&format!("{base_data_dir}/"))
@@ -273,7 +237,7 @@ async fn build_dll_diff(
 
 /// Open a manifest, find the file, enqueue and await its chunks; returns the snapshot as an `Arc` for later blocking-task use.
 #[tracing::instrument(skip_all, fields(depot_id = %depot_id, manifest_id = %manifest_id))]
-async fn prepare_structured_side(
+pub(super) async fn prepare_structured_side(
     state: &AppState,
     appid: AppId,
     depot_id: DepotId,
@@ -340,4 +304,117 @@ async fn dll_side_bytes(snap: &Arc<Snapshot>, path: &str) -> Result<(Vec<u8>, [u
         .0;
     let bytes = snap.read_full(path).await?.to_vec();
     Ok((bytes, sha))
+}
+
+/// Both manifests' unity envs, built once outside the shared per-manifest cache, which never evicts.
+#[cfg(feature = "unity")]
+#[derive(Clone)]
+pub(super) struct UnityEnvPair {
+    base: (Arc<Environment>, String),
+    target: (Arc<Environment>, String),
+}
+
+#[cfg(feature = "unity")]
+pub(super) fn build_unity_env_pair(
+    base_snapshot: Arc<Snapshot>,
+    target_snapshot: Arc<Snapshot>,
+) -> Result<UnityEnvPair, ApiError> {
+    Ok(UnityEnvPair {
+        base: private_unity_env(base_snapshot)?,
+        target: private_unity_env(target_snapshot)?,
+    })
+}
+
+#[cfg(feature = "unity")]
+fn private_unity_env(snapshot: Arc<Snapshot>) -> Result<(Arc<Environment>, String), ApiError> {
+    use rabex_env::rabex::tpk::TpkTypeTreeBlob;
+    use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
+    use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
+
+    let game_files = SteamDepotGameFiles::new(snapshot)
+        .map_err(|_| ApiError::unsupported_media_type("manifest is not a unity game"))?;
+    let data_dir = game_files
+        .data_dir()
+        .to_str()
+        .expect("data_dir is not valid UTF-8")
+        .to_owned();
+    let env = Arc::new(Environment::new(
+        game_files,
+        TypeTreeCache::new(TpkTypeTreeBlob::embedded()),
+    ));
+    Ok((env, data_dir))
+}
+
+/// A side still shared at this checkpoint contributes 0 rather than failing the whole measurement.
+#[cfg(feature = "unity")]
+pub(super) fn cached_bytes(envs: &mut UnityEnvPair) -> u64 {
+    let mut total = 0;
+    for (side, env) in [("base", &mut envs.base.0), ("target", &mut envs.target.0)] {
+        match Arc::get_mut(env) {
+            Some(env) => total += env.cached_bytes() as u64,
+            None => tracing::warn!(
+                side,
+                "deep diff: env still shared at checkpoint, skipping cache measure"
+            ),
+        }
+    }
+    total
+}
+
+#[cfg(feature = "unity")]
+pub(super) fn evict_cache(envs: &mut UnityEnvPair) {
+    for (side, env) in [("base", &mut envs.base.0), ("target", &mut envs.target.0)] {
+        match Arc::get_mut(env) {
+            Some(env) => env.clear_cache(),
+            None => tracing::warn!(
+                side,
+                "deep diff: env still shared at checkpoint, skipping cache evict"
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "unity")]
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn deep_unity_diff(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    branch: &str,
+    target_depot_id: DepotId,
+    target_manifest_id: ManifestId,
+    target_branch: &str,
+    path: &str,
+    envs: &UnityEnvPair,
+) -> Result<StructuredTree> {
+    use transform::Transformer;
+
+    tokio::try_join!(
+        prepare_structured_side(state, appid, depot_id, manifest_id, path, branch),
+        prepare_structured_side(
+            state,
+            appid,
+            target_depot_id,
+            target_manifest_id,
+            path,
+            target_branch,
+        ),
+    )?;
+
+    let UnityEnvPair {
+        base: (base_env, base_data_dir),
+        target: (target_env, target_data_dir),
+    } = envs.clone();
+    match transform::tools::transformer_for(path) {
+        Some(Transformer::UnitySerialized) => {
+            build_unity_serialized_diff(base_env, base_data_dir, target_env, target_data_dir, path)
+                .await
+        }
+        Some(Transformer::UnityBundle) => {
+            build_unity_bundle_diff(base_env, base_data_dir, target_env, target_data_dir, path)
+                .await
+        }
+        _ => unreachable!("deep diff only calls this for is_deep_comparable paths"),
+    }
 }

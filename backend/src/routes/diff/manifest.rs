@@ -20,7 +20,6 @@ use utoipa::ToSchema;
 use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
-use super::structured::build_structured_diff_tree;
 use crate::routes::Result;
 use crate::routes::library::ManifestRef;
 
@@ -442,45 +441,24 @@ pub async fn manifest_diff_deep(
         }
     }
 
-    // Deep-check each candidate in parallel: keep non-structured files as-is, keep structured ones only if non-empty, and keep on error too (better a spurious row than a hidden change).
+    // Private env pair for the sweep, evicted at checkpoints; the shared per-manifest cache never evicts.
+    #[cfg(feature = "unity")]
+    let mut unity_envs = if changed_candidates.iter().any(|p| is_deep_comparable(p)) {
+        Some(super::structured::build_unity_env_pair(
+            Arc::new(base_snap),
+            Arc::new(target_snap),
+        )?)
+    } else {
+        None
+    };
+    #[cfg(not(feature = "unity"))]
+    let _ = (base_snap, target_snap);
+
+    // Chunk size is just a drain granularity; eviction below decides from the real measured cache size, not a file-size estimate.
+    const CHECKPOINT_LEN: usize = 32;
+    const CACHE_BYTES_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
     let started = std::time::Instant::now();
     let total_changed = changed_candidates.len();
-    let sem = Arc::new(Semaphore::new(8));
-    let mut fu = FuturesUnordered::new();
-    for path in changed_candidates {
-        let state = &state;
-        let sem = sem.clone();
-        let branch = q.branch.clone();
-        let target_branch = q.target_branch.clone();
-        let target_depot_id = q.target_depot_id;
-        let target_manifest_id = q.target_manifest_id;
-        fu.push(async move {
-            let _permit = sem.acquire().await.expect("semaphore not closed");
-            if !is_deep_comparable(&path) {
-                return Some(path);
-            }
-            match build_structured_diff_tree(
-                state,
-                appid,
-                depot_id,
-                manifest_id,
-                &branch,
-                target_depot_id,
-                target_manifest_id,
-                &target_branch,
-                &path,
-            )
-            .await
-            {
-                Ok(Some(tree)) if structured_diff_is_empty(&tree) => None,
-                Ok(_) => Some(path),
-                Err(err) => {
-                    tracing::warn!(%path, reason = ?err, "deep diff: structured diff failed; keeping");
-                    Some(path)
-                }
-            }
-        });
-    }
 
     let mut entries: Vec<ManifestDiffEntry> = Vec::new();
     for path in added {
@@ -489,15 +467,95 @@ pub async fn manifest_diff_deep(
             status: ManifestDiffStatus::Added,
         });
     }
+    tracing::info!(total_changed, "deep diff: starting sweep");
     let mut kept_changed = 0usize;
-    while let Some(result) = fu.next().await {
-        if let Some(path) = result {
-            kept_changed += 1;
-            entries.push(ManifestDiffEntry {
-                path,
-                status: ManifestDiffStatus::Changed,
+    let mut done_changed = 0usize;
+    for (checkpoint_index, chunk) in changed_candidates.chunks(CHECKPOINT_LEN).enumerate() {
+        let sem = Arc::new(Semaphore::new(8));
+        let mut fu = FuturesUnordered::new();
+        for path in chunk {
+            let path = path.clone();
+            let sem = sem.clone();
+            #[cfg(feature = "unity")]
+            let unity_ctx = (
+                &state,
+                q.branch.clone(),
+                q.target_branch.clone(),
+                q.target_depot_id,
+                q.target_manifest_id,
+                unity_envs.clone(),
+            );
+            fu.push(async move {
+                let _permit = sem.acquire().await.expect("semaphore not closed");
+                if !is_deep_comparable(&path) {
+                    return Some(path);
+                }
+                #[cfg(feature = "unity")]
+                {
+                    let (state, branch, target_branch, target_depot_id, target_manifest_id, envs) =
+                        unity_ctx;
+                    let envs = envs
+                        .as_ref()
+                        .expect("is_deep_comparable implies unity_envs was built");
+                    return match super::structured::deep_unity_diff(
+                        state,
+                        appid,
+                        depot_id,
+                        manifest_id,
+                        &branch,
+                        target_depot_id,
+                        target_manifest_id,
+                        &target_branch,
+                        &path,
+                        envs,
+                    )
+                    .await
+                    {
+                        Ok(tree) if structured_diff_is_empty(&tree) => None,
+                        Ok(_) => Some(path),
+                        Err(err) => {
+                            tracing::warn!(%path, reason = ?err, "deep diff: structured diff failed; keeping");
+                            Some(path)
+                        }
+                    };
+                }
+                #[cfg(not(feature = "unity"))]
+                unreachable!("is_deep_comparable is always false without the unity feature")
             });
         }
+        while let Some(result) = fu.next().await {
+            if let Some(path) = result {
+                kept_changed += 1;
+                entries.push(ManifestDiffEntry {
+                    path,
+                    status: ManifestDiffStatus::Changed,
+                });
+            }
+        }
+        #[allow(unused_mut)]
+        let mut cached_bytes = 0u64;
+        #[cfg(feature = "unity")]
+        if let Some(envs) = &mut unity_envs {
+            cached_bytes = super::structured::cached_bytes(envs);
+        }
+        let evicted = cached_bytes > CACHE_BYTES_LIMIT;
+        if evicted {
+            #[cfg(feature = "unity")]
+            if let Some(envs) = &mut unity_envs {
+                super::structured::evict_cache(envs);
+            }
+        }
+        done_changed += chunk.len();
+        tracing::info!(
+            checkpoint_index,
+            chunk_len = chunk.len(),
+            cached_bytes,
+            evicted,
+            done_changed,
+            total_changed,
+            elapsed = ?started.elapsed(),
+            "deep diff: checkpoint"
+        );
     }
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     tracing::info!(
@@ -574,10 +632,37 @@ fn is_deep_comparable(path: &str) -> bool {
 }
 
 /// True when a structured diff has no actual difference: unchanged root, no children.
+#[cfg(feature = "unity")]
 fn structured_diff_is_empty(tree: &transform::structured::StructuredTree) -> bool {
     tree.root.children.is_empty()
         && matches!(
             tree.root.status,
             None | Some(transform::structured::NodeStatus::Unchanged)
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Confirms `Arc::get_mut` sees refcount 1 once a `FuturesUnordered` fully drains.
+    #[tokio::test]
+    async fn arc_get_mut_succeeds_after_drain() {
+        let mut shared = Arc::new(0i32);
+        for _ in 0..5 {
+            let mut fu = FuturesUnordered::new();
+            for _ in 0..8 {
+                let clone = shared.clone();
+                fu.push(async move {
+                    tokio::task::spawn_blocking(move || {
+                        let _keep_alive = clone;
+                    })
+                    .await
+                    .unwrap();
+                });
+            }
+            while (fu.next().await).is_some() {}
+            assert!(Arc::get_mut(&mut shared).is_some());
+        }
+    }
 }

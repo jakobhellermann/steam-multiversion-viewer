@@ -11,3 +11,7 @@ dotnetdll = { git = "https://github.com/jakobhellermann/dotnetdll", branch = "wi
 [patch."https://github.com/jakobhellermann/steam-depot-vfs"]
 # steam-depot-vfs = { path = "../steam-depot-vfs/crates/steam-depot-vfs" }
 # steam-depot-mount = { path = "../steam-depot-vfs/crates/steam-depot-mount" }
+[patch."https://github.com/jakobhellermann/rabex-env"]
+# rabex-env = { path = "../rabex-env" }
+# rabex-env-steam-depot-vfs = { path = "../rabex-env/crates/rabex-env-steam-depot-vfs" }
+# rabex-texture = { path = "../rabex-env/crates/rabex-texture" }
