@@ -20,7 +20,7 @@ fn main() {
     }
 
     for chunk in &bank.chunks {
-        print_chunk(chunk, &bytes, bank.string_table.as_ref(), 0);
+        print_chunk(chunk, 0);
     }
 
     let fsb5 = bank.embedded_fsb5().expect("resolve SNDH offsets");
@@ -41,37 +41,44 @@ fn main() {
     }
 }
 
-fn print_chunk(
-    chunk: &Chunk,
-    whole_file: &[u8],
-    strings: Option<&fmod::StringTable>,
-    depth: usize,
-) {
+fn print_chunk(chunk: &Chunk, depth: usize) {
     let indent = "  ".repeat(depth);
     let list_id = chunk
         .list_id_str()
         .map(|id| format!(" [{id}]"))
         .unwrap_or_default();
 
-    // Best-effort label: most `*BODY` chunks lead with a 16-byte GUID
-    // (confirmed for the handful checked against the FModBankParser
-    // reference — EventNode, WaveformResourceNode, ParameterNode — but
-    // not verified for every chunk type), so peeking at the first 16
-    // bytes and resolving it against the string table is a heuristic,
-    // not a guaranteed-correct decode of the payload.
-    let guessed_name = strings.and_then(|t| {
-        let payload = chunk.bytes(whole_file);
-        let guid: [u8; 16] = payload.get(..16)?.try_into().ok()?;
-        t.lookup(&guid).map(str::to_owned)
-    });
-    let label = guessed_name.map(|n| format!(" -> {n}")).unwrap_or_default();
-
+    // No per-chunk name label here: guessing a chunk's GUID by peeking
+    // at its first 16 bytes (see `guess_chunk_name` below) is unverified
+    // beyond the one BNKI chunk it happened to look right for — left
+    // unused rather than risk a label that reads as a decoded fact.
     println!(
-        "{indent}{}{list_id} ({} bytes){label}",
+        "{indent}{}{list_id} ({} bytes)",
         chunk.tag_str(),
         chunk.size()
     );
     for child in &chunk.children {
-        print_chunk(child, whole_file, strings, depth + 1);
+        print_chunk(child, depth + 1);
     }
+}
+
+/// UNVERIFIED, not called from `main`: peeking at a chunk's first 16
+/// bytes as a GUID and resolving it via the string table only checked
+/// out for one real chunk (`BNKI`, in `Master Bank.strings.bank`) — not
+/// confirmed for `*BODY` chunks generally, whose actual layout (per
+/// FModBankParser) is a fixed, per-node-type, per-FMOD-version struct
+/// that a blind 16-byte peek can't tell apart from one that doesn't
+/// lead with a GUID at all.
+#[allow(dead_code)]
+fn guess_chunk_name(
+    _chunk: &Chunk,
+    _whole_file: &[u8],
+    _strings: &fmod::StringTable,
+) -> Option<String> {
+    // let payload = chunk.bytes(whole_file);
+    // let guid: [u8; 16] = payload.get(..16)?.try_into().ok()?;
+    // strings.lookup(&guid).map(str::to_owned)
+    todo!(
+        "only checked against one real chunk kind (BNKI) — verify per chunk tag before trusting this"
+    )
 }

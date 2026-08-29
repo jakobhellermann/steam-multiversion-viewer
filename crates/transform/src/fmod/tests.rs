@@ -162,9 +162,10 @@ fn string_table_resolves_single_segment_path() {
     assert_eq!(table.lookup(&[0u8; 16]), Some("hello"));
 }
 
-/// End-to-end: a synthetic `RIFF ... "FEV " { LIST "PROJ" { STDT, SND } }`
+/// End-to-end: a synthetic `RIFF ... "FEV " { LIST "PROJ" { STDT, SND, SNDH } }`
 /// bank exercises the chunk walker, string-table decode and FSB5
-/// extraction together.
+/// extraction together — via the verified `SNDH`-offset path, not the
+/// `todo!()`-stubbed no-`SNDH` fallback in `Bank::embedded_fsb5`.
 #[test]
 fn parse_bank_finds_string_table_and_sound_data() {
     let stdt_payload = one_entry_string_table_payload();
@@ -179,10 +180,27 @@ fn parse_bank_finds_string_table_and_sound_data() {
     snd_chunk.extend_from_slice(&(fsb5_stub.len() as u32).to_le_bytes());
     snd_chunk.extend_from_slice(fsb5_stub);
 
+    // Absolute file offset of `fsb5_stub`: 12 (RIFF header) + 8 (LIST
+    // header) + 4 ("PROJ") + stdt_chunk.len() + 8 (SND chunk header).
+    let fsb5_absolute_offset = (12 + 8 + 4 + stdt_chunk.len() + 8) as u32;
+    let mut sndh_payload = Vec::new();
+    sndh_payload.extend_from_slice(&2u16.to_le_bytes()); // X16(raw=2) -> count=1
+    sndh_payload.extend_from_slice(&0u16.to_le_bytes()); // unused payload size
+    sndh_payload.extend_from_slice(&fsb5_absolute_offset.to_le_bytes());
+    sndh_payload.extend_from_slice(&(fsb5_stub.len() as u32).to_le_bytes());
+    let mut sndh_chunk = Vec::new();
+    sndh_chunk.extend_from_slice(b"SNDH");
+    sndh_chunk.extend_from_slice(&(sndh_payload.len() as u32).to_le_bytes());
+    sndh_chunk.extend_from_slice(&sndh_payload);
+
     let mut list_payload = Vec::new();
     list_payload.extend_from_slice(b"PROJ");
     list_payload.extend_from_slice(&stdt_chunk);
     list_payload.extend_from_slice(&snd_chunk);
+    if fsb5_stub.len() % 2 == 1 {
+        list_payload.push(0); // RIFF pad byte after the odd-sized SND payload
+    }
+    list_payload.extend_from_slice(&sndh_chunk);
 
     let mut body = Vec::new();
     body.extend_from_slice(b"LIST");
@@ -255,4 +273,59 @@ fn embedded_fsb5_follows_sndh_absolute_offsets() {
     let parsed = bank::parse(&file).unwrap();
     let fsb = parsed.embedded_fsb5().unwrap();
     assert_eq!(fsb, vec![fsb5_bytes.as_slice()]);
+}
+
+/// No `SNDH` and no `SND ` chunks either: nothing to guess at, so this
+/// stays a plain empty result rather than the `todo!()` below.
+#[test]
+fn embedded_fsb5_is_empty_without_any_sound_data() {
+    let mut list_payload = Vec::new();
+    list_payload.extend_from_slice(b"PROJ");
+
+    let mut body = Vec::new();
+    body.extend_from_slice(b"LIST");
+    body.extend_from_slice(&(list_payload.len() as u32).to_le_bytes());
+    body.extend_from_slice(&list_payload);
+
+    let mut file = Vec::new();
+    file.extend_from_slice(b"RIFF");
+    file.extend_from_slice(&((4 + body.len()) as u32).to_le_bytes());
+    file.extend_from_slice(b"FEV ");
+    file.extend_from_slice(&body);
+
+    let parsed = bank::parse(&file).unwrap();
+    assert_eq!(parsed.embedded_fsb5().unwrap(), Vec::<&[u8]>::new());
+}
+
+/// `SND ` chunks with no `SNDH` index at all is a shape no real file
+/// has shown yet — `Bank::embedded_fsb5` refuses to guess at chunk
+/// boundaries there (see its `todo!()`) rather than silently returning
+/// data that might be wrong the same way the naive "whole chunk
+/// payload" assumption already was for the `SNDH` case. This pins down
+/// that it panics instead of quietly answering.
+#[test]
+#[should_panic(expected = "no SNDH")]
+fn embedded_fsb5_refuses_to_guess_without_sndh() {
+    let mut snd_chunk = Vec::new();
+    snd_chunk.extend_from_slice(b"SND ");
+    snd_chunk.extend_from_slice(&4u32.to_le_bytes());
+    snd_chunk.extend_from_slice(b"data");
+
+    let mut list_payload = Vec::new();
+    list_payload.extend_from_slice(b"PROJ");
+    list_payload.extend_from_slice(&snd_chunk);
+
+    let mut body = Vec::new();
+    body.extend_from_slice(b"LIST");
+    body.extend_from_slice(&(list_payload.len() as u32).to_le_bytes());
+    body.extend_from_slice(&list_payload);
+
+    let mut file = Vec::new();
+    file.extend_from_slice(b"RIFF");
+    file.extend_from_slice(&((4 + body.len()) as u32).to_le_bytes());
+    file.extend_from_slice(b"FEV ");
+    file.extend_from_slice(&body);
+
+    let parsed = bank::parse(&file).unwrap();
+    let _ = parsed.embedded_fsb5();
 }

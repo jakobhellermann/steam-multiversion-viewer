@@ -70,10 +70,14 @@ impl<'a> Reader<'a> {
 
     /// `X16`-length-prefixed UTF-8 string (distinct from the
     /// null-terminated strings packed into the string-table blob).
+    ///
+    /// UNVERIFIED: matches `FModReader.ReadString`, but nothing in this
+    /// module calls it yet, so it's never been run against real bytes.
     pub fn read_string(&mut self) -> Result<String> {
-        let len = self.read_x16()? as usize;
-        let bytes = self.read_bytes(len)?;
-        Ok(String::from_utf8_lossy(bytes).into_owned())
+        // let len = self.read_x16()? as usize;
+        // let bytes = self.read_bytes(len)?;
+        // Ok(String::from_utf8_lossy(bytes).into_owned())
+        todo!("read_string has never been exercised against real bank bytes")
     }
 
     /// Raw 16-byte GUID, read verbatim. This matches .NET's

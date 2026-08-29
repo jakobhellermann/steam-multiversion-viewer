@@ -35,10 +35,16 @@ impl<'a> Bank<'a> {
     /// Every embedded FSB5 blob. Sliced by the `SNDH` chunk's recorded
     /// `(offset, length)` pairs — absolute positions in the file, not
     /// necessarily equal to their matching `SND ` chunk's payload start
-    /// (see `sound_data`). Falls back to each `SND ` chunk's whole
-    /// payload when there's no `SNDH` at all, on the assumption an
-    /// older/different-shaped bank might skip it — unverified, since
-    /// every real file seen so far has had one.
+    /// (see `sound_data`).
+    ///
+    /// UNVERIFIED for banks with no `SNDH` at all: every real file seen
+    /// so far has had one, so there's nothing to confirm "whole `SND `
+    /// chunk payload" is even the right fallback boundary — and the
+    /// one real file we did check shows the FSB5 start isn't reliably
+    /// at the chunk's own payload start, so this fallback could easily
+    /// share that problem. Only the "no `SND ` chunks either" case is
+    /// trivially correct (there's nothing to guess at), so that one
+    /// still returns an empty list instead of panicking.
     pub fn embedded_fsb5(&self) -> Result<Vec<&'a [u8]>> {
         match find_chunk(&self.chunks, TAG_SNDH) {
             Some(sndh) => parse_sound_data_header(sndh.bytes(self.data))?
@@ -61,7 +67,17 @@ impl<'a> Bank<'a> {
             None => {
                 let mut found = Vec::new();
                 find_chunks(&self.chunks, TAG_SND, &mut found);
-                Ok(found.into_iter().map(|c| c.bytes(self.data)).collect())
+                if found.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    // let found = ...; // (computed above)
+                    // Ok(found.into_iter().map(|c| c.bytes(self.data)).collect())
+                    todo!(
+                        "found {} SND chunk(s) but no SNDH — extracting FSB5 by chunk \
+                         boundary alone has never been verified against a real file",
+                        found.len()
+                    )
+                }
             }
         }
     }
