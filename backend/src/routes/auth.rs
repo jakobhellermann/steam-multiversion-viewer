@@ -1,12 +1,5 @@
 // TODO(ai-review): review for style and correctness
 //! Steam login / logout driven from the web UI.
-//!
-//! The server starts without a Steam connection; the user authenticates
-//! here. A login runs as a background task: by default 2FA is confirmed
-//! out-of-band in the Steam mobile app, but the UI can also opt to enter a
-//! Steam Guard code (email / TOTP), which is routed to the parked login via
-//! [`crate::steam::auth::WebConfirmationHandler`]. The frontend polls
-//! `/api/auth/status` to follow the login through its phases.
 
 use axum::Json;
 use axum::extract::State;
@@ -94,9 +87,9 @@ pub async fn status(State(state): State<AppState>) -> Json<AuthStatus> {
     Json(AuthStatus::from_state(&state))
 }
 
-/// Start a Steam login. Returns immediately; the login proceeds in the
-/// background. Follow it via `GET /api/auth/status` and, when a code is
-/// requested, `POST /api/auth/login/code`.
+/// Start a Steam login.
+///
+/// Runs in the background. See GET /api/auth/status, POST /api/auth/login/code.
 #[utoipa::path(
     post,
     path = "/api/auth/login",
@@ -118,8 +111,6 @@ pub async fn login(
             Ok(connection) => {
                 tracing::info!(account = %account, "logged in via web");
                 task_state.set_steam(SteamClient::new(account, connection));
-                // Login succeeded: clear the pending slot so status flips to
-                // authenticated cleanly.
                 auth::clear_pending(&task_state.pending_login, id);
             }
             Err(err) => {
@@ -137,8 +128,7 @@ pub async fn login(
     Json(AuthStatus::from_state(&state))
 }
 
-/// Submit the Steam Guard code for a login that is waiting for one. (Mobile
-/// app confirmation needs no call here — it completes on its own.)
+/// Submit the Steam Guard code for a pending login
 #[utoipa::path(
     post,
     path = "/api/auth/login/code",
@@ -160,8 +150,7 @@ pub async fn login_code(
     Ok(Json(AuthStatus::from_state(&state)))
 }
 
-/// Drop the current Steam connection and forget the saved session, so the
-/// next server start doesn't log back in automatically.
+/// Log out and delete forget saved session
 #[utoipa::path(
     post,
     path = "/api/auth/logout",
