@@ -1181,6 +1181,9 @@ export function NodeContentPanel({
   onHashTarget: (id: string) => void;
 }) {
   const mediaKind = contentMime ? mediaKindForMime(contentMime) : null;
+  // Falls back to the JSON body when the hinted media fails to load (e.g. a texture with no pixel data).
+  const [mediaFailedFor, setMediaFailedFor] = useState<string | null>(null);
+  const showMedia = mediaKind != null && mediaFailedFor !== nodeId;
   const content = useQuery({
     queryKey: [
       "file-structured-node",
@@ -1200,8 +1203,8 @@ export function NodeContentPanel({
         locator.path,
         nodeId,
       ),
-    // Skip the text fetch for media bodies.
-    enabled: mediaKind == null,
+    // Skip the text fetch for media bodies, unless the media itself failed.
+    enabled: !showMedia,
     // Same rationale as the tree query — backend's immutable
     // Cache-Control makes a re-fetch cheap.
     staleTime: Infinity,
@@ -1294,7 +1297,7 @@ export function NodeContentPanel({
     [onClick],
   );
 
-  if (mediaKind) {
+  if (showMedia) {
     // Flush (no frame); pixelated keeps atlas texels crisp.
     return (
       <MediaView
@@ -1309,6 +1312,7 @@ export function NodeContentPanel({
         )}
         alt={nodeId}
         imgClassName="[image-rendering:pixelated]"
+        onError={() => setMediaFailedFor(nodeId)}
       />
     );
   }

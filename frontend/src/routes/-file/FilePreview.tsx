@@ -17,16 +17,25 @@ export function MediaView({
   src,
   alt,
   imgClassName,
+  onError,
 }: {
   kind: "image" | "audio" | "video";
   src: string;
   alt?: string;
   /// Extra `<img>` classes; ignored for audio/video.
   imgClassName?: string;
+  onError?: () => void;
 }) {
   if (kind === "image") {
     // Functional layout only; the caller styles framing/background.
-    return <img src={src} alt={alt} className={`max-w-full ${imgClassName ?? ""}`} />;
+    return (
+      <img
+        src={src}
+        alt={alt}
+        className={`max-w-full ${imgClassName ?? ""}`}
+        onError={onError}
+      />
+    );
   }
   return <MediaPlayer kind={kind} src={src} />;
 }
