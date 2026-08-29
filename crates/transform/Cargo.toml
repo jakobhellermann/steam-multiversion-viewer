@@ -5,7 +5,7 @@ edition = "2024"
 license.workspace = true
 
 [features]
-default = ["unity"]
+default = ["unity", "xnb"]
 # Optional unity-asset support — serializedfile / bundle handling via
 # rabex. Disable to drop the rabex dep entirely.
 unity = [
@@ -17,6 +17,8 @@ unity = [
   "dep:base64",
   "dep:lz4_flex",
 ]
+# XNA/MonoGame compiled content (.xnb): Texture2D to PNG, SoundEffect to WAV.
+xnb = ["dep:lzxd", "dep:texture2ddecoder", "dep:image"]
 
 [dependencies]
 anyhow = "1.0"
@@ -41,6 +43,9 @@ ecb = { version = "0.2", optional = true }
 base64 = { version = "0.22", optional = true }
 lz4_flex = { version = "0.13", optional = true }
 playmakerfsm = { git = "https://github.com/jakobhellermann/playmakerfsm", optional = true }
+lzxd = { version = "0.2", optional = true }
+texture2ddecoder = { version = "0.1", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }

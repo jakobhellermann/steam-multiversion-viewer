@@ -40,7 +40,7 @@ pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
         .routes(routes!(files::manifest_file_transformed))
         .routes(routes!(structured::manifest_file_structured))
         .routes(routes!(structured::manifest_file_structured_node))
-        .routes(routes!(structured::manifest_file_structured_node_image))
+        .routes(routes!(structured::manifest_file_structured_node_media))
         .routes(routes!(diff::manifest::manifest_diff))
         .routes(routes!(diff::manifest::manifest_diff_deep))
         .routes(routes!(diff::manifest::manifest_diff_targets))

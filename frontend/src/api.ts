@@ -471,8 +471,8 @@ export async function fetchStructuredDiffNode(
   return { mime: ct, text };
 }
 
-/// URL for a structured node's image body (a Texture2D as PNG).
-export function structuredNodeImageUrl(
+/// URL for a structured node's media body (Texture2D as PNG, XNB SoundEffect as WAV, …).
+export function structuredNodeMediaUrl(
   appid: AppId,
   depotId: number,
   manifestId: string,
@@ -481,7 +481,7 @@ export function structuredNodeImageUrl(
   nodeId: string,
 ): string {
   const qs = new URLSearchParams({ branch, path, node_id: nodeId });
-  return `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/structured/node/image?${qs}`;
+  return `/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/file/structured/node/media?${qs}`;
 }
 
 /// Fetch the structured tree for a file. The path/branch identify the

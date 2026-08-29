@@ -2569,6 +2569,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lzxd"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c17f346186eccb574ba5581acefc514f0c70a642db4f96e245034a0a158a7168"
+
+[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5426,8 +5432,10 @@ dependencies = [
  "camino",
  "dll-diff",
  "ecb",
+ "image",
  "insta",
  "lz4_flex",
+ "lzxd",
  "object 0.38.1",
  "playmakerfsm",
  "rabex-env",
@@ -5436,6 +5444,7 @@ dependencies = [
  "serde-value",
  "serde_json",
  "similar 3.2.0",
+ "texture2ddecoder",
  "tokio",
  "tracing",
  "utoipa",

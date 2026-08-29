@@ -33,6 +33,8 @@ fn extension_transformer(ext: &str) -> Option<Transformer> {
         "assets" => Some(Transformer::UnitySerialized),
         #[cfg(feature = "unity")]
         "bundle" | "unity3d" => Some(Transformer::UnityBundle),
+        #[cfg(feature = "xnb")]
+        "xnb" => Some(Transformer::Xnb),
         _ => None,
     }
 }

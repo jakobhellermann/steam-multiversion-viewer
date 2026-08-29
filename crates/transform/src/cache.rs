@@ -48,6 +48,11 @@ pub enum Transformer {
     /// `/file/transformed`-style single-blob output for this one;
     /// callers route through `/file/structured` instead.
     Dll,
+    /// XNA/MonoGame compiled content (`.xnb`) — header + type-reader
+    /// tree via [`crate::xnb::build_tree`], media node via
+    /// [`crate::xnb::render_content`].
+    #[cfg(feature = "xnb")]
+    Xnb,
 }
 
 impl Transformer {
@@ -59,6 +64,8 @@ impl Transformer {
             #[cfg(feature = "unity")]
             Self::UnityBundle => "text/plain",
             Self::Dll => "text/x-csharp",
+            #[cfg(feature = "xnb")]
+            Self::Xnb => "text/plain",
         }
     }
 }

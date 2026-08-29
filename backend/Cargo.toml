@@ -6,8 +6,10 @@ repository = "https://github.com/jakobhellermann/steam-multiversion-viewer"
 license.workspace = true
 
 [features]
-default = ["unity"]
+default = ["unity", "xnb"]
 unity = ["transform/unity", "dep:rabex-env", "dep:rabex-env-steam-depot-vfs"]
+# XNA/MonoGame compiled content (.xnb) structured view.
+xnb = ["transform/xnb"]
 # Launch in a native webview window by default
 windowed = []
 dhat-heap = []

@@ -140,6 +140,19 @@ pub async fn manifest_file_structured(
             transform::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
             Ok((ImmutableCache, Json(tree)))
         }
+        #[cfg(feature = "xnb")]
+        Some(Transformer::Xnb) => {
+            let bytes = match sniffed_bytes {
+                Some(bytes) => bytes,
+                None => snapshot.read_full(&path).await?,
+            };
+            let bytes = bytes.to_vec();
+            let tree = tokio::task::spawn_blocking(move || transform::xnb::build_tree(&bytes, &path))
+                .await
+                .map_err(|e| ApiError::internal(format!("xnb tree task panicked: {e}")))?
+                .map_err(ApiError::from_transform)?;
+            Ok((ImmutableCache, Json(tree)))
+        }
         _ => Err(ApiError::unsupported_media_type(format!(
             "no structured view for {path}"
         ))),
@@ -353,19 +366,19 @@ pub async fn manifest_file_structured_node(
     Ok(empty_node())
 }
 
-/// Structured tree node rendered as an image (Texture2D → PNG)
+/// Structured tree node rendered as media (Texture2D → PNG, XNB SoundEffect → WAV, …)
 #[utoipa::path(
     get,
-    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured/node/image",
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/file/structured/node/media",
     tag = "structured",
     params(NodeContentQuery),
     responses(
-        (status = 200, description = "PNG image of the texture", content_type = "image/png"),
-        (status = 415, description = "Node is not a renderable texture")
+        (status = 200, description = "image or audio bytes for the node"),
+        (status = 415, description = "Node has no renderable media")
     )
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path, node_id = %q.node_id))]
-pub async fn manifest_file_structured_node_image(
+pub async fn manifest_file_structured_node_media(
     State(state): State<AppState>,
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<NodeContentQuery>,
@@ -451,8 +464,21 @@ pub async fn manifest_file_structured_node_image(
 
             Ok((ImmutableCache, [(header::CONTENT_TYPE, "image/png")], png).into_response())
         }
+        #[cfg(feature = "xnb")]
+        Some(Transformer::Xnb) => {
+            let bytes = snapshot.read_full(&q.path).await?.to_vec();
+            let rendered = tokio::task::spawn_blocking(move || transform::xnb::render_content(&bytes))
+                .await
+                .map_err(|e| ApiError::internal(format!("xnb media task panicked: {e}")))?
+                .map_err(xnb_error_status)?;
+            let (mime, bytes) = match rendered {
+                transform::xnb::RenderedContent::Png(bytes) => ("image/png", bytes),
+                transform::xnb::RenderedContent::Wav(bytes) => ("audio/wav", bytes),
+            };
+            Ok((ImmutableCache, [(header::CONTENT_TYPE, mime)], bytes).into_response())
+        }
         _ => Err(ApiError::unsupported_media_type(
-            "no texture preview for this file",
+            "no media preview for this file",
         )),
     }
 }
@@ -460,6 +486,14 @@ pub async fn manifest_file_structured_node_image(
 #[cfg(feature = "unity")]
 fn texture_error_status(e: anyhow::Error) -> ApiError {
     match e.downcast_ref::<transform::unity::serializedfile::texture::TextureUnsupported>() {
+        Some(_) => ApiError::unsupported_media_type(e.to_string()),
+        None => ApiError::internal(e.to_string()),
+    }
+}
+
+#[cfg(feature = "xnb")]
+fn xnb_error_status(e: anyhow::Error) -> ApiError {
+    match e.downcast_ref::<transform::xnb::XnbContentUnsupported>() {
         Some(_) => ApiError::unsupported_media_type(e.to_string()),
         None => ApiError::internal(e.to_string()),
     }

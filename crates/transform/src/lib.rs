@@ -16,6 +16,8 @@ pub mod structured;
 pub mod tools;
 #[cfg(feature = "unity")]
 pub mod unity;
+#[cfg(feature = "xnb")]
+pub mod xnb;
 
 pub use cache::{
     ARTIFACT_MAIN, CliTool, TempInput, TransformError, Transformer, cache_artifact_path,

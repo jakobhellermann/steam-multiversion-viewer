@@ -131,6 +131,12 @@ async fn resolve_diff_text(
                 "Unity bundles have no text-diff representation yet",
             ));
         }
+        #[cfg(feature = "xnb")]
+        Some(transform::Transformer::Xnb) => {
+            return Err(ApiError::unsupported_media_type(
+                "XNB files have no text-diff representation yet",
+            ));
+        }
         _ => {}
     }
 
@@ -170,6 +176,8 @@ async fn resolve_diff_text(
         Some(transform::Transformer::Dll) => unreachable!("Dll bailed above"),
         #[cfg(feature = "unity")]
         Some(transform::Transformer::UnityBundle) => unreachable!("UnityBundle bailed above"),
+        #[cfg(feature = "xnb")]
+        Some(transform::Transformer::Xnb) => unreachable!("Xnb bailed above"),
     };
     Ok(DiffSide {
         text,

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import {
   fetchFileStructured,
   fetchStructuredNodeContent,
-  structuredNodeImageUrl,
+  structuredNodeMediaUrl,
   type NodeStatus,
   type StructuredNode,
 } from "../../api";
@@ -1322,7 +1322,7 @@ export function NodeContentPanel({
     return (
       <MediaView
         kind={mediaKind}
-        src={structuredNodeImageUrl(
+        src={structuredNodeMediaUrl(
           locator.appid,
           locator.depotId,
           locator.manifestId,

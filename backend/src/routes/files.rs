@@ -236,6 +236,8 @@ fn rich_view_for(path: &str, bytes: Option<&[u8]>) -> Option<RichView> {
         #[cfg(feature = "unity")]
         Transformer::UnitySerialized | Transformer::UnityBundle => Some(RichView::Structured),
         Transformer::Dll => Some(RichView::Structured),
+        #[cfg(feature = "xnb")]
+        Transformer::Xnb => Some(RichView::Structured),
     }
 }
 
@@ -416,6 +418,12 @@ pub async fn manifest_file_transformed(
         transform::Transformer::UnityBundle => {
             return Err(ApiError::unsupported_media_type(
                 "Unity bundles are served through /file/structured, not /file/transformed",
+            ));
+        }
+        #[cfg(feature = "xnb")]
+        transform::Transformer::Xnb => {
+            return Err(ApiError::unsupported_media_type(
+                "XNB files are served through /file/structured, not /file/transformed",
             ));
         }
     };
