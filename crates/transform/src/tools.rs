@@ -5,7 +5,7 @@
 //! tempfiles, and process spawn lives in `mod.rs` — this module only
 //! declares "which tool runs on what extension".
 
-use crate::{CliTool, Transformer};
+use crate::Transformer;
 
 /// Transformer for a file, by extension or, given `bytes`, content sniffing.
 pub fn transformer_for(path: &str, bytes: Option<&[u8]>) -> Option<Transformer> {
@@ -29,7 +29,6 @@ pub fn transformer_for(path: &str, bytes: Option<&[u8]>) -> Option<Transformer> 
 fn extension_transformer(ext: &str) -> Option<Transformer> {
     match ext {
         "dll" | "exe" => Some(Transformer::Dll),
-        "so" => Some(Transformer::Cli(&NM_DYNAMIC)),
         #[cfg(feature = "unity")]
         "assets" => Some(Transformer::UnitySerialized),
         #[cfg(feature = "unity")]
@@ -51,9 +50,3 @@ fn filename_transformer(name: &str) -> Option<Transformer> {
     let _ = name;
     None
 }
-
-const NM_DYNAMIC: CliTool = CliTool {
-    cmd: "nm",
-    args_before_path: &["-D", "--defined-only", "-C"],
-    output_mime: "text/plain",
-};
