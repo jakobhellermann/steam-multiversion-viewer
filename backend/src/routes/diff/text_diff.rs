@@ -131,6 +131,11 @@ async fn resolve_diff_text(
                 "Unity bundles have no text-diff representation yet",
             ));
         }
+        Some(transform::Transformer::FmodBank) => {
+            return Err(ApiError::unsupported_media_type(
+                "FMOD banks have no text-diff representation yet",
+            ));
+        }
         _ => {}
     }
 
@@ -170,6 +175,7 @@ async fn resolve_diff_text(
         Some(transform::Transformer::Dll) => unreachable!("Dll bailed above"),
         #[cfg(feature = "unity")]
         Some(transform::Transformer::UnityBundle) => unreachable!("UnityBundle bailed above"),
+        Some(transform::Transformer::FmodBank) => unreachable!("FmodBank bailed above"),
     };
     Ok(DiffSide {
         text,

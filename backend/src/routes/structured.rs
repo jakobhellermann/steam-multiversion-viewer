@@ -140,6 +140,15 @@ pub async fn manifest_file_structured(
             transform::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
             Ok((ImmutableCache, Json(tree)))
         }
+        Some(Transformer::FmodBank) => {
+            let bytes = match sniffed_bytes {
+                Some(bytes) => bytes,
+                None => snapshot.read_full(&path).await?,
+            };
+            let tree = transform::fmod::tree::build_tree(&bytes, &path)
+                .map_err(ApiError::from_transform)?;
+            Ok((ImmutableCache, Json(tree)))
+        }
         _ => Err(ApiError::unsupported_media_type(format!(
             "no structured view for {path}"
         ))),

@@ -236,6 +236,7 @@ fn rich_view_for(path: &str, bytes: Option<&[u8]>) -> Option<RichView> {
         #[cfg(feature = "unity")]
         Transformer::UnitySerialized | Transformer::UnityBundle => Some(RichView::Structured),
         Transformer::Dll => Some(RichView::Structured),
+        Transformer::FmodBank => Some(RichView::Structured),
     }
 }
 
@@ -416,6 +417,11 @@ pub async fn manifest_file_transformed(
         transform::Transformer::UnityBundle => {
             return Err(ApiError::unsupported_media_type(
                 "Unity bundles are served through /file/structured, not /file/transformed",
+            ));
+        }
+        transform::Transformer::FmodBank => {
+            return Err(ApiError::unsupported_media_type(
+                "FMOD banks are served through /file/structured, not /file/transformed",
             ));
         }
     };

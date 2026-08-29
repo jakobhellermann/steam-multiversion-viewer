@@ -32,6 +32,7 @@ pub mod chunks;
 pub mod reader;
 pub mod sound_data;
 pub mod string_table;
+pub mod tree;
 
 pub use bank::{Bank, parse};
 pub use chunks::Chunk;

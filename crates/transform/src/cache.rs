@@ -48,6 +48,10 @@ pub enum Transformer {
     /// `/file/transformed`-style single-blob output for this one;
     /// callers route through `/file/structured` instead.
     Dll,
+    /// FMOD Studio `.bank` file (RIFF/LIST chunk container). Structured
+    /// view only, via [`crate::fmod::tree::build_tree`] — same as
+    /// `Dll`, no `/file/transformed` output.
+    FmodBank,
 }
 
 impl Transformer {
@@ -59,6 +63,7 @@ impl Transformer {
             #[cfg(feature = "unity")]
             Self::UnityBundle => "text/plain",
             Self::Dll => "text/x-csharp",
+            Self::FmodBank => "text/plain",
         }
     }
 }
