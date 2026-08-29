@@ -1,0 +1,583 @@
+// TODO(ai-review): review for style and correctness
+//! Manifest-level path diffs: which paths changed or were added between manifests.
+
+use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::sync::Arc;
+
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
+use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
+use serde_json::json;
+use steam_depot_vfs::VfsError;
+use steam_vent_depot::{DepotFile, DepotFileKind, FileHash};
+use tokio::sync::Semaphore;
+use utoipa::ToSchema;
+
+use crate::state::{AppState, Snapshot};
+use crate::steam::{AppId, DepotId, ManifestId};
+
+use super::structured::build_structured_diff_tree;
+use crate::routes::Result;
+use crate::routes::library::ManifestRef;
+
+#[derive(Deserialize, ToSchema)]
+pub struct ManifestDiffRequest {
+    /// The manifest whose paths we report; a path counts if changed vs any `other` or absent from all of them.
+    pub base: ManifestRef,
+    pub others: Vec<ManifestRef>,
+}
+
+#[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "entries": [
+        {"path": "Data/Engine.dll",      "status": "changed"},
+        {"path": "Data/NewModule.dll",   "status": "added"}
+    ]
+}))]
+pub struct ManifestDiffResponse {
+    /// Paths in `base` that are `Changed` vs some `other` or `Added` (absent from every `other`); paths only in some `other` aren't reported since the tree is rooted at `base`.
+    pub entries: Vec<ManifestDiffEntry>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ManifestDiffEntry {
+    pub path: String,
+    pub status: ManifestDiffStatus,
+}
+
+#[derive(Serialize, ToSchema, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestDiffStatus {
+    /// In `base`, in *no* `other`.
+    Added,
+    /// In `base` and differs from some `other`; wins over `Added` when both apply.
+    Changed,
+}
+
+/// Manifest path-level diff
+///
+/// `Changed` (differs from some `other`) or `Added` (absent from every `other`); identity is `(kind, size, sha, linktarget)`.
+#[utoipa::path(
+    post,
+    path = "/api/apps/{appid}/manifests/diff",
+    tag = "diff",
+    request_body = ManifestDiffRequest,
+    responses((status = 200, body = ManifestDiffResponse))
+)]
+#[tracing::instrument(skip_all, fields(others = body.others.len()))]
+pub async fn manifest_diff(
+    State(state): State<AppState>,
+    Path(appid): Path<AppId>,
+    Json(body): Json<ManifestDiffRequest>,
+) -> Result<Json<ManifestDiffResponse>> {
+    state.steam()?; // 401 if not logged in
+    let base_snap = state
+        .open_manifest(
+            appid,
+            body.base.depot_id,
+            body.base.manifest_id,
+            &body.base.branch,
+        )
+        .await?;
+
+    // Comparing a manifest against itself yields nothing.
+    let mut others = open_manifests_concurrently(
+        &state,
+        appid,
+        &body.others,
+        Some((body.base.depot_id, body.base.manifest_id)),
+    );
+
+    let base = base_snap.manifest();
+    let mut base_by_path: HashMap<&str, &DepotFile> = HashMap::with_capacity(base.files.len());
+    for f in &base.files {
+        if f.is_dir() {
+            continue;
+        }
+        base_by_path.insert(f.path.as_str(), f);
+    }
+
+    // `Changed` wins over `Added`: added-vs-A-but-changed-vs-B is still demonstrably different somewhere.
+    let mut absent_in_all: HashSet<&str> = base_by_path.keys().copied().collect();
+    let mut changed: HashSet<String> = HashSet::new();
+    while let Some((_, _, result)) = others.next().await {
+        let snap = result?;
+        let other = snap.manifest();
+        for f in &other.files {
+            if f.is_dir() {
+                continue;
+            }
+            absent_in_all.remove(f.path.as_str());
+            if let Some(base_f) = base_by_path.get(f.path.as_str())
+                && content_id(base_f) != content_id(f)
+            {
+                changed.insert(f.path.clone());
+            }
+        }
+    }
+
+    let mut entries: Vec<ManifestDiffEntry> =
+        Vec::with_capacity(changed.len() + absent_in_all.len());
+    for path in &changed {
+        entries.push(ManifestDiffEntry {
+            path: path.clone(),
+            status: ManifestDiffStatus::Changed,
+        });
+    }
+    for path in &absent_in_all {
+        // Changed wins: skip paths already reported as changed.
+        if changed.contains(*path) {
+            continue;
+        }
+        entries.push(ManifestDiffEntry {
+            path: (*path).to_owned(),
+            status: ManifestDiffStatus::Added,
+        });
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(Json(ManifestDiffResponse { entries }))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct FileDiffTargetsRequest {
+    pub base: ManifestRef,
+    pub others: Vec<ManifestRef>,
+    pub path: String,
+}
+
+#[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "statuses": [
+        {"depot_id": 1234567, "manifest_id": "9876543210987654321", "status": "different"},
+        {"depot_id": 1234567, "manifest_id": "1111222233334444555",  "status": "same"},
+        {"depot_id": 1234567, "manifest_id": "5555666677778888999",  "status": "missing"}
+    ]
+}))]
+pub struct FileDiffTargetsResponse {
+    /// Per `other`: `same`, `different`, or `missing`; identity is the file's content sha (kind/linktarget tie-break for symlinks).
+    pub statuses: Vec<FileDiffTargetStatus>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct FileDiffTargetStatus {
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
+    pub status: FileDiffStatus,
+}
+
+#[derive(Serialize, ToSchema, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum FileDiffStatus {
+    Same,
+    Different,
+    Missing,
+}
+
+/// Find manifests with changes
+///
+/// For one file (`path`) against N targets, report `same`/`different`/`missing` per target.
+#[utoipa::path(
+    post,
+    path = "/api/apps/{appid}/file/diff-targets",
+    tag = "diff",
+    request_body = FileDiffTargetsRequest,
+    responses((status = 200, body = FileDiffTargetsResponse))
+)]
+#[tracing::instrument(skip_all, fields(path = %body.path, others = body.others.len()))]
+pub async fn file_diff_targets(
+    State(state): State<AppState>,
+    Path(appid): Path<AppId>,
+    Json(body): Json<FileDiffTargetsRequest>,
+) -> Result<Json<FileDiffTargetsResponse>> {
+    state.steam()?; // 401 if not logged in
+    let base_snap = state
+        .open_manifest(
+            appid,
+            body.base.depot_id,
+            body.base.manifest_id,
+            &body.base.branch,
+        )
+        .await?;
+    let base_file = base_snap
+        .manifest()
+        .files
+        .iter()
+        .find(|f| f.path == body.path)
+        .cloned();
+
+    let base_fp = base_file.as_ref().map(|f| content_id(f));
+
+    let mut others = open_manifests_concurrently(&state, appid, &body.others, None);
+
+    let path = body.path.as_str();
+    let mut statuses = Vec::new();
+    while let Some((depot_id, manifest_id, result)) = others.next().await {
+        let status = match result {
+            Ok(snap) => {
+                let other_fp = snap
+                    .manifest()
+                    .files
+                    .iter()
+                    .find(|f| f.path == path)
+                    .map(content_id);
+                match (&base_fp, &other_fp) {
+                    (Some(b), Some(o)) if b == o => FileDiffStatus::Same,
+                    (None, None) => FileDiffStatus::Same,
+                    (_, None) => FileDiffStatus::Missing,
+                    (None, Some(_)) => FileDiffStatus::Different,
+                    (Some(_), Some(_)) => FileDiffStatus::Different,
+                }
+            }
+            Err(err) => {
+                tracing::warn!(%depot_id, %manifest_id, %err, "open_manifest failed in file diff");
+                // Treat a fetch error as "different" so the candidate still surfaces for investigation.
+                FileDiffStatus::Different
+            }
+        };
+        statuses.push(FileDiffTargetStatus {
+            depot_id,
+            manifest_id,
+            status,
+        });
+    }
+
+    Ok(Json(FileDiffTargetsResponse { statuses }))
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ManifestDiffTargetsRequest {
+    pub base: ManifestRef,
+    pub others: Vec<ManifestRef>,
+    /// Whitespace-separated AND-tokens, lowercased substring match on path; empty means every path counts.
+    #[serde(default)]
+    pub query: String,
+}
+
+#[derive(Serialize, ToSchema)]
+#[schema(example = json!({
+    "matching_targets": [
+        {"depot_id": 1234567, "manifest_id": "9876543210987654321"},
+        {"depot_id": 1234567, "manifest_id": "5555666677778888999"}
+    ]
+}))]
+pub struct ManifestDiffTargetsResponse {
+    /// Targets with a path matching `query` that differs from base or is absent there; targets with no such difference are omitted.
+    pub matching_targets: Vec<ManifestRefShort>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ManifestRefShort {
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
+}
+
+/// Find manifests with changes in a path subset
+///
+/// Like `/manifests/diff` but answers yes/no per target instead of returning the path list.
+#[utoipa::path(
+    post,
+    path = "/api/apps/{appid}/manifests/diff-targets",
+    tag = "diff",
+    request_body = ManifestDiffTargetsRequest,
+    responses((status = 200, body = ManifestDiffTargetsResponse))
+)]
+#[tracing::instrument(skip_all, fields(others = body.others.len(), query = %body.query))]
+pub async fn manifest_diff_targets(
+    State(state): State<AppState>,
+    Path(appid): Path<AppId>,
+    Json(body): Json<ManifestDiffTargetsRequest>,
+) -> Result<Json<ManifestDiffTargetsResponse>> {
+    state.steam()?; // 401 if not logged in
+    let base_snap = state
+        .open_manifest(
+            appid,
+            body.base.depot_id,
+            body.base.manifest_id,
+            &body.base.branch,
+        )
+        .await?;
+
+    // Path subset: lowercased AND-token substring match on path; no tokens means every base path passes.
+    let tokens: Vec<String> = body
+        .query
+        .split_whitespace()
+        .map(|t| t.to_lowercase())
+        .collect();
+    let base = base_snap.manifest();
+    let mut base_subset: HashMap<&str, &DepotFile> = HashMap::with_capacity(base.files.len());
+    for f in &base.files {
+        if f.is_dir() {
+            continue;
+        }
+        if !tokens.is_empty() {
+            let path_lc = f.path.to_lowercase();
+            if !tokens.iter().all(|t| path_lc.contains(t)) {
+                continue;
+            }
+        }
+        base_subset.insert(f.path.as_str(), f);
+    }
+
+    let mut others = open_manifests_concurrently(
+        &state,
+        appid,
+        &body.others,
+        Some((body.base.depot_id, body.base.manifest_id)),
+    );
+
+    let mut matching_targets: Vec<ManifestRefShort> = Vec::new();
+    while let Some((depot_id, manifest_id, result)) = others.next().await {
+        let snap = match result {
+            Ok(s) => s,
+            Err(err) => {
+                // Same policy as `file_diff_targets`: treat an unfetchable target as different so it still surfaces.
+                tracing::warn!(%depot_id, %manifest_id, %err, "open_manifest failed in manifest_diff_targets");
+                matching_targets.push(ManifestRefShort {
+                    depot_id,
+                    manifest_id,
+                });
+                continue;
+            }
+        };
+        let other = snap.manifest();
+        let mut other_by_path: HashMap<&str, &DepotFile> =
+            HashMap::with_capacity(other.files.len());
+        for f in &other.files {
+            if f.is_dir() {
+                continue;
+            }
+            other_by_path.insert(f.path.as_str(), f);
+        }
+        let mut has_diff = false;
+        for (path, base_f) in &base_subset {
+            match other_by_path.get(path) {
+                None => {
+                    has_diff = true;
+                    break;
+                }
+                Some(other_f) => {
+                    if content_id(base_f) != content_id(other_f) {
+                        has_diff = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if has_diff {
+            matching_targets.push(ManifestRefShort {
+                depot_id,
+                manifest_id,
+            });
+        }
+    }
+
+    Ok(Json(ManifestDiffTargetsResponse { matching_targets }))
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct DeepDiffQuery {
+    /// Branch of the base manifest. Defaults to `public`.
+    #[serde(default = "super::default_branch")]
+    pub branch: String,
+    pub target_depot_id: DepotId,
+    pub target_manifest_id: ManifestId,
+    #[serde(default = "super::default_branch")]
+    pub target_branch: String,
+}
+
+/// Deep manifest diff
+///
+/// Like [`manifest_diff`], but a changed Unity file only counts when its structured diff is non-empty (normalization noise like PPtr renumbering is dropped); DLLs stay fingerprint-level since decompiling is expensive.
+/// Downloads both sides of every Unity candidate, so this is far pricier than `manifest_diff`.
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/structured-diff-filter",
+    tag = "diff",
+    params(DeepDiffQuery),
+    responses((status = 200, body = ManifestDiffResponse))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn manifest_diff_deep(
+    State(state): State<AppState>,
+    Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
+    Query(q): Query<DeepDiffQuery>,
+) -> Result<Json<ManifestDiffResponse>> {
+    state.steam()?; // 401 if not logged in
+    let base_snap = state
+        .open_manifest(appid, depot_id, manifest_id, &q.branch)
+        .await?;
+    let target_snap = state
+        .open_manifest(
+            appid,
+            q.target_depot_id,
+            q.target_manifest_id,
+            &q.target_branch,
+        )
+        .await?;
+
+    let target = target_snap.manifest();
+    let mut target_by_path: HashMap<&str, &DepotFile> = HashMap::with_capacity(target.files.len());
+    for f in &target.files {
+        if f.is_dir() {
+            continue;
+        }
+        target_by_path.insert(f.path.as_str(), f);
+    }
+
+    let base = base_snap.manifest();
+    let mut added: Vec<String> = Vec::new();
+    let mut changed_candidates: Vec<String> = Vec::new();
+    for f in &base.files {
+        if f.is_dir() {
+            continue;
+        }
+        match target_by_path.get(f.path.as_str()) {
+            None => added.push(f.path.clone()),
+            Some(tf) if content_id(f) != content_id(tf) => changed_candidates.push(f.path.clone()),
+            Some(_) => {}
+        }
+    }
+
+    // Deep-check each candidate in parallel: keep non-structured files as-is, keep structured ones only if non-empty, and keep on error too (better a spurious row than a hidden change).
+    let started = std::time::Instant::now();
+    let total_changed = changed_candidates.len();
+    let sem = Arc::new(Semaphore::new(8));
+    let mut fu = FuturesUnordered::new();
+    for path in changed_candidates {
+        let state = &state;
+        let sem = sem.clone();
+        let branch = q.branch.clone();
+        let target_branch = q.target_branch.clone();
+        let target_depot_id = q.target_depot_id;
+        let target_manifest_id = q.target_manifest_id;
+        fu.push(async move {
+            let _permit = sem.acquire().await.expect("semaphore not closed");
+            if !is_deep_comparable(&path) {
+                return Some(path);
+            }
+            match build_structured_diff_tree(
+                state,
+                appid,
+                depot_id,
+                manifest_id,
+                &branch,
+                target_depot_id,
+                target_manifest_id,
+                &target_branch,
+                &path,
+            )
+            .await
+            {
+                Ok(Some(tree)) if structured_diff_is_empty(&tree) => None,
+                Ok(_) => Some(path),
+                Err(err) => {
+                    tracing::warn!(%path, reason = ?err, "deep diff: structured diff failed; keeping");
+                    Some(path)
+                }
+            }
+        });
+    }
+
+    let mut entries: Vec<ManifestDiffEntry> = Vec::new();
+    for path in added {
+        entries.push(ManifestDiffEntry {
+            path,
+            status: ManifestDiffStatus::Added,
+        });
+    }
+    let mut kept_changed = 0usize;
+    while let Some(result) = fu.next().await {
+        if let Some(path) = result {
+            kept_changed += 1;
+            entries.push(ManifestDiffEntry {
+                path,
+                status: ManifestDiffStatus::Changed,
+            });
+        }
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    tracing::info!(
+        total_changed,
+        kept_changed,
+        elapsed = ?started.elapsed(),
+        "deep diff filter done"
+    );
+    Ok(Json(ManifestDiffResponse { entries }))
+}
+
+#[derive(PartialEq, Eq)]
+enum ContentId<'a> {
+    File(FileHash),
+    Symlink(&'a str),
+    Directory,
+}
+
+fn content_id(f: &DepotFile) -> ContentId<'_> {
+    match &f.kind {
+        DepotFileKind::File { sha, .. } => ContentId::File(*sha),
+        DepotFileKind::Symlink { target } => ContentId::Symlink(target),
+        DepotFileKind::Directory => ContentId::Directory,
+    }
+}
+
+/// Opens every distinct `(depot_id, manifest_id)` in `refs`, deduped, `exclude` skipped, bounded by an 8-wide semaphore.
+fn open_manifests_concurrently<'a>(
+    state: &'a AppState,
+    appid: AppId,
+    refs: &'a [ManifestRef],
+    exclude: Option<(DepotId, ManifestId)>,
+) -> FuturesUnordered<impl Future<Output = (DepotId, ManifestId, Result<Snapshot, VfsError>)> + 'a>
+{
+    let sem = Arc::new(Semaphore::new(8));
+    let fu = FuturesUnordered::new();
+    let mut seen = HashSet::new();
+    for r in refs {
+        if !seen.insert((r.depot_id, r.manifest_id)) {
+            continue;
+        }
+        if exclude == Some((r.depot_id, r.manifest_id)) {
+            continue;
+        }
+        let sem = sem.clone();
+        let depot_id = r.depot_id;
+        let manifest_id = r.manifest_id;
+        let branch = r.branch.clone();
+        fu.push(async move {
+            let _permit = sem.acquire().await.expect("semaphore not closed");
+            let result = state
+                .open_manifest(appid, depot_id, manifest_id, &branch)
+                .await;
+            (depot_id, manifest_id, result)
+        });
+    }
+    fu
+}
+
+/// Which file types the deep filter structural-diffs: Unity serialized files and bundles (DLLs stay fingerprint-level; decompiling is expensive).
+fn is_deep_comparable(path: &str) -> bool {
+    #[cfg(feature = "unity")]
+    {
+        matches!(
+            transform::tools::transformer_for(path),
+            Some(transform::Transformer::UnitySerialized | transform::Transformer::UnityBundle)
+        )
+    }
+    #[cfg(not(feature = "unity"))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// True when a structured diff has no actual difference: unchanged root, no children.
+fn structured_diff_is_empty(tree: &transform::structured::StructuredTree) -> bool {
+    tree.root.children.is_empty()
+        && matches!(
+            tree.root.status,
+            None | Some(transform::structured::NodeStatus::Unchanged)
+        )
+}
