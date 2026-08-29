@@ -54,6 +54,7 @@ fn sections_node(file: &object::File) -> Option<Node> {
         id: "sections".to_string(),
         label: "Sections".to_string(),
         badge: Some(children.len().to_string()),
+        default_collapsed: true,
         children,
         ..Node::default()
     })
@@ -209,7 +210,10 @@ fn diff_sections_node<'d>(from: &object::File<'d>, to: &object::File<'d>) -> Opt
             ..section_leaf(&name)
         });
     }
-    diff_group_node("sections", "Sections", children)
+    diff_group_node("sections", "Sections", children).map(|node| Node {
+        default_collapsed: true,
+        ..node
+    })
 }
 
 fn section_leaf(name: &str) -> Node {
