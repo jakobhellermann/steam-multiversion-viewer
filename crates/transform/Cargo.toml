@@ -17,6 +17,11 @@ unity = [
   "dep:base64",
   "dep:lz4_flex",
 ]
+# Experimental: decode embedded FSB5 audio (fmod::bank) via fsbex. Not
+# in `default` yet — fsbex's Vorbis path pulls in vorbis_rs, which
+# builds a vendored libvorbisenc/libogg from C source (needs a C
+# toolchain, no system package required).
+audio = ["dep:fsbex"]
 
 [dependencies]
 anyhow = "1.0"
@@ -41,6 +46,7 @@ ecb = { version = "0.2", optional = true }
 base64 = { version = "0.22", optional = true }
 lz4_flex = { version = "0.13", optional = true }
 playmakerfsm = { git = "https://github.com/jakobhellermann/playmakerfsm", optional = true }
+fsbex = { version = "0.3", optional = true }
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
