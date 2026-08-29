@@ -12,6 +12,7 @@
 pub mod cache;
 pub mod diff;
 pub mod dll;
+pub mod fmod;
 pub mod structured;
 pub mod tools;
 #[cfg(feature = "unity")]
