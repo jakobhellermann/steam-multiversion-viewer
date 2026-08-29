@@ -91,7 +91,7 @@ pub(super) async fn build_structured_diff_tree(
 ) -> Result<Option<StructuredTree>> {
     use transform::Transformer;
 
-    let kind = transform::tools::transformer_for(path);
+    let kind = transform::tools::transformer_for(path, None);
 
     let (base, target) = tokio::try_join!(
         prepare_structured_side(state, appid, depot_id, manifest_id, path, branch),
@@ -104,6 +104,14 @@ pub(super) async fn build_structured_diff_tree(
             target_branch,
         ),
     )?;
+
+    let kind = match kind {
+        Some(k) => Some(k),
+        None => {
+            let bytes = base.read_full(path).await?;
+            transform::tools::transformer_for(path, Some(&bytes))
+        }
+    };
 
     let diff = match kind {
         #[cfg(feature = "unity")]
@@ -406,7 +414,7 @@ pub(super) async fn deep_unity_diff(
         base: (base_env, base_data_dir),
         target: (target_env, target_data_dir),
     } = envs.clone();
-    match transform::tools::transformer_for(path) {
+    match transform::tools::transformer_for(path, None) {
         Some(Transformer::UnitySerialized) => {
             build_unity_serialized_diff(base_env, base_data_dir, target_env, target_data_dir, path)
                 .await

@@ -209,7 +209,7 @@ async fn main() -> Result<()> {
 
 fn is_deep_comparable(path: &str) -> bool {
     matches!(
-        transform::tools::transformer_for(path),
+        transform::tools::transformer_for(path, None),
         Some(Transformer::UnitySerialized | Transformer::UnityBundle)
     )
 }
@@ -225,7 +225,7 @@ fn diff_one(
     target_data_dir: &str,
     path: &str,
 ) -> Result<StructuredTree> {
-    match transform::tools::transformer_for(path) {
+    match transform::tools::transformer_for(path, None) {
         Some(Transformer::UnitySerialized) => {
             Ok(transform::unity::serializedfile::diff::build_diff(
                 base_env,

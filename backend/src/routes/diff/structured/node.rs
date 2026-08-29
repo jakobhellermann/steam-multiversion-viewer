@@ -57,7 +57,7 @@ pub async fn manifest_file_structured_diff_node(
     use transform::Transformer;
 
     state.steam()?; // 401 if not logged in
-    let kind = transform::tools::transformer_for(&q.path);
+    let kind = transform::tools::transformer_for(&q.path, None);
     let supported = match kind {
         Some(Transformer::Dll) => true,
         #[cfg(feature = "unity")]

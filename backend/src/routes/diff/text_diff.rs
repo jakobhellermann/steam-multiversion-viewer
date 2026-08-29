@@ -115,7 +115,7 @@ async fn resolve_diff_text(
 
     let creation_time = snapshot.manifest().creation_time;
     let (file_path, file_sha, chunks_for_dl) = file_download_info(&snapshot, path)?;
-    let transformer = transform::tools::transformer_for(&file_path);
+    let transformer = transform::tools::transformer_for(&file_path, None);
 
     // These formats have no single text dump; bail before downloading anything.
     match transformer {

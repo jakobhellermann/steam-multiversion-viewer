@@ -167,6 +167,7 @@ pub async fn manifest_file(
         )
     };
 
+    let mut sniff_bytes = None;
     let (content_kind, content) = if !q.auto_fetch {
         // Caller wants metadata only — skip the download + content read.
         // We don't classify text-vs-binary without reading the bytes,
@@ -189,14 +190,16 @@ pub async fn manifest_file(
                     .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
                     .await;
                 let bytes = snapshot.read_full(&file_path).await?;
-                if looks_like_text(&bytes) {
+                let content = if looks_like_text(&bytes) {
                     match String::from_utf8(bytes.to_vec()) {
                         Ok(s) => (FileContentKind::Text, Some(s)),
                         Err(_) => (FileContentKind::Binary, None),
                     }
                 } else {
                     (FileContentKind::Binary, None)
-                }
+                };
+                sniff_bytes = Some(bytes);
+                content
             }
             _ => (FileContentKind::Unknown, None),
         }
@@ -207,7 +210,7 @@ pub async fn manifest_file(
         chunk_shas.iter().filter(|sha| index.has_chunk(sha)).count() as u32
     };
 
-    let rich_view = rich_view_for(&file_path);
+    let rich_view = rich_view_for(&file_path, sniff_bytes.as_deref());
 
     Ok(Json(FileView {
         path: file_path,
@@ -224,9 +227,9 @@ pub async fn manifest_file(
     }))
 }
 
-fn rich_view_for(path: &str) -> Option<RichView> {
+fn rich_view_for(path: &str, bytes: Option<&[u8]>) -> Option<RichView> {
     use transform::Transformer;
-    match transform::tools::transformer_for(path)? {
+    match transform::tools::transformer_for(path, bytes)? {
         Transformer::Cli(_) => Some(RichView::Transformed),
         #[cfg(feature = "unity")]
         Transformer::UnitySerialized | Transformer::UnityBundle => Some(RichView::Structured),
@@ -361,7 +364,7 @@ pub async fn manifest_file_transformed(
         )
     };
 
-    let transformer = transform::tools::transformer_for(&file_path).ok_or_else(|| {
+    let transformer = transform::tools::transformer_for(&file_path, None).ok_or_else(|| {
         ApiError::unsupported_media_type(format!("no transformer for {file_path}"))
     })?;
 

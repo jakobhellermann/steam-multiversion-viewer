@@ -76,7 +76,17 @@ pub async fn manifest_file_structured(
         .await;
 
     let path = q.path.clone();
-    match transform::tools::transformer_for(&path) {
+    let mut sniffed_bytes = None;
+    let kind = match transform::tools::transformer_for(&path, None) {
+        Some(k) => Some(k),
+        None => {
+            let bytes = snapshot.read_full(&path).await?;
+            let kind = transform::tools::transformer_for(&path, Some(&bytes));
+            sniffed_bytes = Some(bytes);
+            kind
+        }
+    };
+    match kind {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
             let scratch = state
@@ -117,7 +127,10 @@ pub async fn manifest_file_structured(
         }
         Some(Transformer::Dll) => {
             let cfg = state.config.load();
-            let bytes = snapshot.read_full(&path).await?;
+            let bytes = match sniffed_bytes {
+                Some(bytes) => bytes,
+                None => snapshot.read_full(&path).await?,
+            };
             let tree = transform::dll::tree::build_tree(&cfg.store_root, &file_sha, &bytes, &path)
                 .await
                 .map_err(ApiError::from_transform)?;
@@ -166,7 +179,7 @@ fn parse_program(tail: &str) -> Option<(u32, u32)> {
     params(NodeContentQuery),
     responses(
         (status = 200, body = NodeContent),
-        (status = 415, description = "File has no structured representation")
+        (status = 415, description = "Manifest is not a Unity game")
     )
 )]
 #[tracing::instrument(skip_all, fields(path = %q.path, node_id = %q.node_id))]
@@ -190,185 +203,154 @@ pub async fn manifest_file_structured_node(
         .map(|h| h.0)
         .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
 
-    match transform::tools::transformer_for(&q.path) {
-        #[cfg(feature = "unity")]
-        Some(Transformer::UnitySerialized) => {
-            // Node ids: `obj:<pid>` (object dump), or
-            // `obj:<pid>/prog:<platform>:<blobIndex>` (one shader
-            // program's source). Non-object ids (sections, class-stats)
-            // get an empty body so the frontend hides the panel.
-            let (obj_id, prog_tail) = q
-                .node_id
-                .split_once("/prog:")
-                .map_or((q.node_id.as_str(), None), |(o, p)| (o, Some(p)));
-            let Some(path_id) =
-                transform::unity::serializedfile::tree::parse_object_node_id(obj_id)
-            else {
-                return Ok(empty_node());
-            };
-            let program = match prog_tail {
-                None => None,
-                Some(tail) => match parse_program(tail) {
-                    Some(parsed) => Some(parsed),
-                    None => return Ok(empty_node()),
-                },
-            };
-            let path = q.path.clone();
-            let scratch = state
-                .manifest_cache
-                .scratch(appid, depot_id, manifest_id, &q.branch);
-            let unity = scratch
-                .unity(snapshot.clone())
-                .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
-            let data_dir = unity.data_dir();
-            let scratch = scratch.clone();
-            let (mime, text) = tokio::task::spawn_blocking(move || {
-                // Re-borrow inside the blocking task so the
-                // SecurePlayerPrefs key lookup (lazy I/O on the manifest's
-                // Managed/Assembly-CSharp.dll) doesn't sit on the async
-                // runtime.
-                let unity = scratch
-                    .unity_already_initialized()
-                    .expect("unity scratch was initialised on the async side");
-                use transform::unity::serializedfile::dump_value;
-                match program {
-                    Some((platform, blob_index)) => dump_value::dump_shader_program(
-                        &unity.env, &data_dir, &path, path_id, platform, blob_index,
-                    ),
-                    None => {
-                        let opts = dump_value::DumpOptions {
-                            spp_key: unity.secure_player_prefs_key(),
-                            playmaker_game: Some(unity),
-                        };
-                        dump_value::dump_object_json(&unity.env, &data_dir, &path, path_id, opts)
-                    }
-                }
-            })
+    if let Some(type_name) = q.node_id.strip_prefix("type:") {
+        let cfg = state.config.load();
+        let bytes = snapshot.read_full(&q.path).await?;
+        let text = transform::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
             .await
-            .map_err(|e| ApiError::internal(format!("structured-node task panicked: {e}")))?
             .map_err(|e| ApiError::internal(e.to_string()))?;
-            Ok((
-                ImmutableCache,
-                Json(NodeContent {
-                    mime: mime.to_string(),
-                    text,
-                }),
-            ))
-        }
-        #[cfg(feature = "unity")]
-        Some(Transformer::UnityBundle) => {
-            // Bundle node ids carry an archive prefix
-            // (`archive:<entry>/obj:<pid>`) so the dump can find the
-            // right SerializedFile inside the container. Non-object ids
-            // (archive headers, sections, raw blobs) get an empty body.
-            let Some((archive_entry, inner)) =
-                transform::unity::bundle::parse_archive_id(&q.node_id)
-            else {
-                return Ok(empty_node());
-            };
-            // `inner`: `obj:<pid>` (object dump) or
-            // `obj:<pid>/prog:<platform>:<blobIndex>` (one program).
-            let (obj_id, prog_tail) = inner
-                .split_once("/prog:")
-                .map_or((inner, None), |(o, p)| (o, Some(p)));
-            let Some(path_id) =
-                transform::unity::serializedfile::tree::parse_object_node_id(obj_id)
-            else {
-                return Ok(empty_node());
-            };
-            let program = match prog_tail {
-                None => None,
-                Some(tail) => match parse_program(tail) {
-                    Some(parsed) => Some(parsed),
-                    None => return Ok(empty_node()),
-                },
-            };
-            let bundle_path = q.path.clone();
-            let archive_entry = archive_entry.to_string();
-            let scratch = state
-                .manifest_cache
-                .scratch(appid, depot_id, manifest_id, &q.branch);
+        return Ok((
+            ImmutableCache,
+            Json(NodeContent {
+                mime: "text/x-csharp".to_string(),
+                text,
+            }),
+        ));
+    }
+
+    #[cfg(feature = "unity")]
+    if let Some((archive_entry, inner)) = transform::unity::bundle::parse_archive_id(&q.node_id) {
+        // `inner`: `obj:<pid>` (object dump) or
+        // `obj:<pid>/prog:<platform>:<blobIndex>` (one program).
+        let (obj_id, prog_tail) = inner
+            .split_once("/prog:")
+            .map_or((inner, None), |(o, p)| (o, Some(p)));
+        let Some(path_id) = transform::unity::serializedfile::tree::parse_object_node_id(obj_id)
+        else {
+            return Ok(empty_node());
+        };
+        let program = match prog_tail {
+            None => None,
+            Some(tail) => match parse_program(tail) {
+                Some(parsed) => Some(parsed),
+                None => return Ok(empty_node()),
+            },
+        };
+        let bundle_path = q.path.clone();
+        let archive_entry = archive_entry.to_string();
+        let scratch = state
+            .manifest_cache
+            .scratch(appid, depot_id, manifest_id, &q.branch);
+        let unity = scratch
+            .unity(snapshot.clone())
+            .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
+        let data_dir = unity.data_dir();
+        let scratch = scratch.clone();
+        let (mime, text) = tokio::task::spawn_blocking(move || {
             let unity = scratch
-                .unity(snapshot.clone())
-                .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
-            let data_dir = unity.data_dir();
-            let scratch = scratch.clone();
-            let (mime, text) = tokio::task::spawn_blocking(move || {
-                let unity = scratch
-                    .unity_already_initialized()
-                    .expect("unity scratch was initialised on the async side");
-                let env = &unity.env;
-                let relative = bundle_path
-                    .strip_prefix(&format!("{data_dir}/"))
-                    .unwrap_or(&bundle_path);
-                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
-                use transform::unity::serializedfile::dump_value;
-                match program {
-                    Some((platform, blob_index)) => dump_value::dump_bundle_shader_program(
+                .unity_already_initialized()
+                .expect("unity scratch was initialised on the async side");
+            let env = &unity.env;
+            let relative = bundle_path
+                .strip_prefix(&format!("{data_dir}/"))
+                .unwrap_or(&bundle_path);
+            let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
+            use transform::unity::serializedfile::dump_value;
+            match program {
+                Some((platform, blob_index)) => dump_value::dump_bundle_shader_program(
+                    env,
+                    bundle_bytes,
+                    &archive_entry,
+                    path_id,
+                    platform,
+                    blob_index,
+                ),
+                None => {
+                    let opts = dump_value::DumpOptions {
+                        spp_key: unity.secure_player_prefs_key(),
+                        playmaker_game: Some(unity),
+                    };
+                    dump_value::dump_bundle_object_json(
                         env,
+                        &data_dir,
                         bundle_bytes,
                         &archive_entry,
                         path_id,
-                        platform,
-                        blob_index,
-                    ),
-                    None => {
-                        let opts = dump_value::DumpOptions {
-                            spp_key: unity.secure_player_prefs_key(),
-                            playmaker_game: Some(unity),
-                        };
-                        dump_value::dump_bundle_object_json(
-                            env,
-                            &data_dir,
-                            bundle_bytes,
-                            &archive_entry,
-                            path_id,
-                            opts,
-                        )
-                    }
+                        opts,
+                    )
                 }
-            })
-            .await
-            .map_err(|e| ApiError::internal(format!("structured-node task panicked: {e}")))?
-            .map_err(|e| ApiError::internal(e.to_string()))?;
-            Ok((
-                ImmutableCache,
-                Json(NodeContent {
-                    mime: mime.to_string(),
-                    text,
-                }),
-            ))
-        }
-        Some(Transformer::Dll) => {
-            // `type:<fully-qualified-name>` → ilspy -t. Anything else
-            // (namespace nodes, file root) has no body.
-            let Some(type_name) = q.node_id.strip_prefix("type:") else {
-                return Ok((
-                    ImmutableCache,
-                    Json(NodeContent {
-                        mime: "text/plain".to_string(),
-                        text: String::new(),
-                    }),
-                ));
-            };
-            let cfg = state.config.load();
-            let bytes = snapshot.read_full(&q.path).await?;
-            let text =
-                transform::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
-                    .await
-                    .map_err(|e| ApiError::internal(e.to_string()))?;
-            Ok((
-                ImmutableCache,
-                Json(NodeContent {
-                    mime: "text/x-csharp".to_string(),
-                    text,
-                }),
-            ))
-        }
-        _ => Err(ApiError::unsupported_media_type(
-            "no structured view for this file",
-        )),
+            }
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("structured-node task panicked: {e}")))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        return Ok((
+            ImmutableCache,
+            Json(NodeContent {
+                mime: mime.to_string(),
+                text,
+            }),
+        ));
     }
+
+    #[cfg(feature = "unity")]
+    {
+        let (obj_id, prog_tail) = q
+            .node_id
+            .split_once("/prog:")
+            .map_or((q.node_id.as_str(), None), |(o, p)| (o, Some(p)));
+        let Some(path_id) = transform::unity::serializedfile::tree::parse_object_node_id(obj_id)
+        else {
+            return Ok(empty_node());
+        };
+        let program = match prog_tail {
+            None => None,
+            Some(tail) => match parse_program(tail) {
+                Some(parsed) => Some(parsed),
+                None => return Ok(empty_node()),
+            },
+        };
+        let path = q.path.clone();
+        let scratch = state
+            .manifest_cache
+            .scratch(appid, depot_id, manifest_id, &q.branch);
+        let unity = scratch
+            .unity(snapshot.clone())
+            .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
+        let data_dir = unity.data_dir();
+        let scratch = scratch.clone();
+        let (mime, text) = tokio::task::spawn_blocking(move || {
+            let unity = scratch
+                .unity_already_initialized()
+                .expect("unity scratch was initialised on the async side");
+            use transform::unity::serializedfile::dump_value;
+            match program {
+                Some((platform, blob_index)) => dump_value::dump_shader_program(
+                    &unity.env, &data_dir, &path, path_id, platform, blob_index,
+                ),
+                None => {
+                    let opts = dump_value::DumpOptions {
+                        spp_key: unity.secure_player_prefs_key(),
+                        playmaker_game: Some(unity),
+                    };
+                    dump_value::dump_object_json(&unity.env, &data_dir, &path, path_id, opts)
+                }
+            }
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("structured-node task panicked: {e}")))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        Ok((
+            ImmutableCache,
+            Json(NodeContent {
+                mime: mime.to_string(),
+                text,
+            }),
+        ))
+    }
+
+    #[cfg(not(feature = "unity"))]
+    Ok(empty_node())
 }
 
 /// Structured tree node rendered as an image (Texture2D → PNG)
@@ -395,7 +377,7 @@ pub async fn manifest_file_structured_node_image(
             .await?,
     );
 
-    match transform::tools::transformer_for(&q.path) {
+    match transform::tools::transformer_for(&q.path, None) {
         #[cfg(feature = "unity")]
         Some(Transformer::UnityBundle) => {
             let Some((archive_entry, inner)) =

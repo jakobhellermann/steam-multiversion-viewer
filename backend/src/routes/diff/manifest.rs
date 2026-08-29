@@ -620,7 +620,7 @@ fn is_deep_comparable(path: &str) -> bool {
     #[cfg(feature = "unity")]
     {
         matches!(
-            transform::tools::transformer_for(path),
+            transform::tools::transformer_for(path, None),
             Some(transform::Transformer::UnitySerialized | transform::Transformer::UnityBundle)
         )
     }

@@ -7,9 +7,8 @@
 
 use crate::{CliTool, Transformer};
 
-/// Resolve a file path to the transformer that should produce its text
-/// rendering. Returns `None` when no transformer is registered.
-pub fn transformer_for(path: &str) -> Option<Transformer> {
+/// Transformer for a file, by extension or, given `bytes`, content sniffing.
+pub fn transformer_for(path: &str, bytes: Option<&[u8]>) -> Option<Transformer> {
     let p = std::path::Path::new(path);
     let ext = p
         .extension()
@@ -19,7 +18,12 @@ pub fn transformer_for(path: &str) -> Option<Transformer> {
         return Some(t);
     }
     let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    filename_transformer(file_name)
+    if let Some(t) = filename_transformer(file_name) {
+        return Some(t);
+    }
+    bytes
+        .filter(|b| crate::dll::native::is_elf(b))
+        .map(|_| Transformer::Dll)
 }
 
 fn extension_transformer(ext: &str) -> Option<Transformer> {

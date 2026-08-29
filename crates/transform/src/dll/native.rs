@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-//! PE export/import tree for a native `.exe`/`.dll`, like `nm -D` for `.so`.
+//! Sections/exports/imports tree for a native binary via `object` (PE or ELF), like `nm -D` for `.so`.
 
 use std::collections::BTreeMap;
 
@@ -7,6 +7,10 @@ use object::{Object, ObjectSection};
 
 use crate::TransformError;
 use crate::structured::{Node, NodeStatus, StructuredTree, human_bytes};
+
+pub fn is_elf(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x7fELF")
+}
 
 pub fn build_tree(bytes: &[u8], file_label: &str) -> Result<StructuredTree, TransformError> {
     let file = object::File::parse(bytes)
@@ -329,5 +333,22 @@ fn aggregate_status(children: &[Node]) -> NodeStatus {
         NodeStatus::Changed
     } else {
         NodeStatus::Unchanged
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_elf_true_for_elf_magic() {
+        assert!(is_elf(b"\x7fELF\x02\x01\x01\x00rest of the file"));
+    }
+
+    #[test]
+    fn is_elf_false_for_other_formats() {
+        assert!(!is_elf(b""));
+        assert!(!is_elf(b"MZ\x90\x00")); // PE
+        assert!(!is_elf(b"not an executable at all"));
     }
 }
