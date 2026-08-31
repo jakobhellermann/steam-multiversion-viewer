@@ -2,14 +2,10 @@
 name = "steam-multiversion-viewer"
 version = "0.1.0"
 edition = "2024"
-
+repository = "https://github.com/jakobhellermann/steam-multiversion-viewer"
 
 [features]
 default = ["unity"]
-# Optional unity-asset support: serializedfile/bundle parsing via rabex,
-# the `levelN`/`*.assets`/`globalgamemanagers` transformer dispatch, and
-# anything else in `crate::unity`. Disable to build a viewer with zero
-# unity-specific code.
 unity = ["transform/unity", "dep:rabex-env", "dep:rabex-env-steam-depot-vfs"]
 # Launch in a native webview window by default
 windowed = []
@@ -18,57 +14,53 @@ dhat-heap = []
 [dependencies]
 anyhow = "1.0"
 arc-swap = "1.9"
-# Re-exported by steam-depot-vfs's ChunkStore trait (`get -> Bytes`);
-# pinned here so our local TrackedChunkStore wrapper can name the type.
-bytes = "1"
 axum = { version = "0.8", default-features = false, features = ["tracing", "http1", "json", "macros", "matched-path", "tokio", "query"] }
-camino = { version = "1.2.2", features = ["serde1"] }
+bytes = "1"
+camino = { version = "1.2", features = ["serde1"] }
+clap = { version = "4", features = ["derive"] }
 directories = "6"
-futures-util = "0.3"
-mime_guess = "2.0.5"
-parking_lot = "0.12"
-serde = { version = "1.0", features = ["derive"] }
-similar = "3.1"
-thiserror = "2.0"
-serde_json = "1"
-serde-value = "0.7"
-steam-depot-vfs = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
 dll-diff = { path = "../crates/dll-diff" }
-transform = { path = "../crates/transform", default-features = false }
+futures-util = "0.3"
+mime_guess = "2.0"
+open = "5"
+parking_lot = "0.12"
+rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = ["tracing-instrument"] }
+rabex-env-steam-depot-vfs = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = ["tracing-instrument"] }
+rust-embed = "8"
+serde = { version = "1.0", features = ["derive"] }
+serde-value = "0.7"
+serde_json = "1"
+similar = "3.1"
+steam-depot-vfs = { git = "https://github.com/jakobhellermann/steam-depot-vfs" }
 steam-vent = "0.5"
 steam-vent-depot = { git = "https://github.com/jakobhellermann/steam-vent-depot" }
 steam-vent-proto = "0.5"
+tao = "0.36"
+thiserror = "2.0"
+time = { version = "0.3.47", features = ["formatting", "macros"] }
 tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "net", "sync", "signal", "time", "process", "fs", "io-util"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower = { version = "0.5", features = ["timeout"] }
 tower-http = { version = "0.7", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+transform = { path = "../crates/transform", default-features = false }
 utoipa = { version = "5", features = ["axum_extras", "preserve_path_order"] }
 utoipa-axum = "0.2"
-zstd = "0.13.3"
-time = { version = "0.3.47", features = ["formatting", "macros"] }
-rabex-env = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = ["tracing-instrument"] }
-rabex-env-steam-depot-vfs = { version = "0.1.0", git = "https://github.com/jakobhellermann/rabex-env", optional = true, features = ["tracing-instrument"] }
-rust-embed = "8"
-clap = { version = "4", features = ["derive"] }
-open = "5"
-tao = "0.36"
 wry = "0.56"
+zstd = "0.13.3"
 
 [dev-dependencies]
 tracing-timetree = { git = "https://github.com/jakobhellermann/tracing-timetree" }
 insta = { version = "1", features = ["yaml"] }
 dhat = "0.3"
 
-# Same crate, one back end per platform: FUSE where the kernel speaks it,
-# a loopback NFS server on macOS where it doesn't without macFUSE.
 [target.'cfg(target_os = "linux")'.dependencies]
 steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["fuse"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-muda = "0.19"
 steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["nfs"] }
+muda = "0.19"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["projfs"] }
