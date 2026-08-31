@@ -20,6 +20,7 @@
 //! coalesce.
 
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::process::Stdio;
 use std::sync::Mutex;
 
@@ -56,6 +57,24 @@ static WARMUPS_IN_FLIGHT: Mutex<Option<HashSet<[u8; 20]>>> = Mutex::new(None);
 
 fn warmups_lock() -> std::sync::MutexGuard<'static, Option<HashSet<[u8; 20]>>> {
     WARMUPS_IN_FLIGHT.lock().expect("warmups poisoned")
+}
+
+/// Striped locks that serialise concurrent `-t` decompiles of the same
+/// type: two fast clicks on one node would otherwise each spawn a full
+/// ilspy run before either writes the cache. A (sha, artifact) pair
+/// hashes to one stripe; same-type callers serialise and the loser
+/// picks up the winner's cached result. Fixed count keeps memory
+/// constant — an occasional collision between unrelated types just
+/// serialises them, which is harmless.
+const DECOMPILE_STRIPES: usize = 64;
+static DECOMPILE_LOCKS: [tokio::sync::Mutex<()>; DECOMPILE_STRIPES] =
+    [const { tokio::sync::Mutex::const_new(()) }; DECOMPILE_STRIPES];
+
+fn decompile_stripe(sha: &[u8; 20], artifact: &str) -> &'static tokio::sync::Mutex<()> {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    sha.hash(&mut h);
+    artifact.hash(&mut h);
+    &DECOMPILE_LOCKS[(h.finish() as usize) % DECOMPILE_STRIPES]
 }
 
 /// A type discovered by `ilspycmd -l`.
@@ -180,6 +199,13 @@ pub async fn decompile_type(
 ) -> Result<String, TransformError> {
     let resolved = resolve_outer(store_root, dll_sha, dll_bytes, type_name).await?;
     let artifact = type_artifact_name(&resolved);
+    if let Some(cached) = crate::read_cached_artifact(store_root, dll_sha, &artifact)? {
+        return Ok(cached);
+    }
+    // Coalesce concurrent decompiles of the same type: serialise on the
+    // key's stripe, then re-read the cache — a racing caller (or the
+    // warmer) may have produced it while we waited.
+    let _permit = decompile_stripe(dll_sha, &artifact).lock().await;
     if let Some(cached) = crate::read_cached_artifact(store_root, dll_sha, &artifact)? {
         return Ok(cached);
     }
