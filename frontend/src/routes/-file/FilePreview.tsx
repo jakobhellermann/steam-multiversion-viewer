@@ -29,12 +29,7 @@ export function MediaView({
   if (kind === "image") {
     // Functional layout only; the caller styles framing/background.
     return (
-      <img
-        src={src}
-        alt={alt}
-        className={`max-w-full ${imgClassName ?? ""}`}
-        onError={onError}
-      />
+      <img src={src} alt={alt} className={`max-w-full ${imgClassName ?? ""}`} onError={onError} />
     );
   }
   return <MediaPlayer kind={kind} src={src} />;

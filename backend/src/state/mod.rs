@@ -4,6 +4,7 @@ pub mod extra_manifests;
 pub mod manifest_cache;
 pub mod mount;
 pub mod store_index;
+pub mod store_model;
 
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
@@ -18,6 +19,7 @@ use self::downloads::ChunkService;
 use self::extra_manifests::ExtraManifestsStore;
 use self::mount::MountManager;
 use self::store_index::StoreIndex;
+use self::store_model::StoreModel;
 use crate::config::Config;
 use crate::http::ApiError;
 use crate::steam::chunk_store::TrackedChunkStore;
@@ -51,6 +53,9 @@ pub struct AppState {
     /// In-memory indexes derived from the on-disk store. Updated when new
     /// manifests are fetched.
     pub store_index: Arc<RwLock<StoreIndex>>,
+    /// Derived cache for the store-management routes: built lazily, dropped
+    /// whole on change (never partially updated). See [`store_model`](Self::store_model).
+    store_model: Arc<RwLock<Option<Arc<StoreModel>>>>,
     pub downloads: Arc<ChunkService>,
     pub exports: Arc<export::ExportManager>,
     pub extra_manifests: Arc<ExtraManifestsStore>,
@@ -90,12 +95,37 @@ impl AppState {
             initial_config: Arc::new(config.clone()),
             config: Arc::new(ArcSwap::from_pointee(config)),
             store_index,
+            store_model: Arc::new(RwLock::new(None)),
             downloads,
             exports,
             extra_manifests,
             mount,
             manifest_cache: Arc::new(manifest_cache::ManifestCache::new()),
         })
+    }
+
+    /// The current store model (manifest→chunk graph).
+    pub fn store_model(&self) -> Result<Arc<StoreModel>, std::io::Error> {
+        if let Some(model) = self
+            .store_model
+            .read()
+            .expect("store_model poisoned")
+            .as_ref()
+        {
+            return Ok(Arc::clone(model));
+        }
+        let mut slot = self.store_model.write().expect("store_model poisoned");
+        if let Some(model) = slot.as_ref() {
+            return Ok(Arc::clone(model));
+        }
+        let model = Arc::new(StoreModel::build(&self.store)?);
+        *slot = Some(Arc::clone(&model));
+        Ok(model)
+    }
+
+    /// Call whenever the set of cached manifests changes.
+    pub fn invalidate_store_model(&self) {
+        *self.store_model.write().expect("store_model poisoned") = None;
     }
 
     /// The authenticated Steam client, or a `401` error when the user
@@ -152,6 +182,10 @@ impl AppState {
             .write()
             .expect("store_index poisoned")
             .add_manifest(app_id, snap.manifest());
+        if fresh {
+            // A newly-cached manifest changes the manifest→chunk graph.
+            self.invalidate_store_model();
+        }
         tracing::trace!(
             depot_id = %depot_id,
             manifest_id = %manifest_id,

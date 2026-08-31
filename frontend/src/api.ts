@@ -780,3 +780,69 @@ export function fetchManifestFiles(
   const qs = new URLSearchParams({ branch });
   return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/files?${qs}`);
 }
+
+export type StoreManifest = {
+  manifest_id: string;
+  creation_time: number;
+  chunks_total: number;
+  chunks_present: number;
+  bytes_total: number;
+  bytes_on_disk: number;
+  bytes_unique: number;
+};
+
+export type StoreDepot = {
+  depot_id: number;
+  manifests: StoreManifest[];
+};
+
+export type StoreApp = {
+  app_id: AppId;
+  bytes_on_disk: number;
+  depots: StoreDepot[];
+};
+
+export type StoreOverview = {
+  total_bytes_on_disk: number;
+  total_chunks_on_disk: number;
+  unreferenced: { chunks: number; bytes: number };
+  apps: StoreApp[];
+};
+
+export type StoreManifestRef = {
+  app_id: AppId;
+  depot_id: number;
+  manifest_id: string;
+};
+
+export type PruneRequest = {
+  free_chunks?: StoreManifestRef[];
+  delete_metadata?: StoreManifestRef[];
+  include_unreferenced?: boolean;
+};
+
+export type PruneResult = { freed_bytes: number; freed_chunks: number };
+
+export function fetchStore(): Promise<StoreOverview> {
+  return getJson("/api/store");
+}
+
+export async function prunePreview(body: PruneRequest): Promise<PruneResult> {
+  const r = await fetch("/api/store/prune/preview", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
+export async function prune(body: PruneRequest): Promise<PruneResult> {
+  const r = await fetch("/api/store/prune", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}

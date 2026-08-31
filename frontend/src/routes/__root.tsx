@@ -57,6 +57,9 @@ function RootComponent() {
           <Link to="/" className="font-medium text-sky-400 hover:underline">
             Library
           </Link>
+          <Link to="/store" className="ml-4 text-slate-400 hover:text-sky-400">
+            Store
+          </Link>
           <div className="ml-auto flex items-center gap-2">
             <AccountMenu />
             <MountToggle />

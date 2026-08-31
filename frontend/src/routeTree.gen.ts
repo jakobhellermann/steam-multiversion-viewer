@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as StoreRouteImport } from './routes/store'
 import { Route as AppsAppidRouteImport } from './routes/apps.$appid'
 import { Route as AppsAppidIndexRouteImport } from './routes/apps.$appid.index'
 import { Route as AppsAppidDepotsDepotIdManifestsManifestIdRouteImport } from './routes/apps.$appid.depots.$depotId.manifests.$manifestId'
@@ -31,6 +32,11 @@ const LoginRoute = LoginRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StoreRoute = StoreRouteImport.update({
+  id: '/store',
+  path: '/store',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppsAppidRoute = AppsAppidRouteImport.update({
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/store': typeof StoreRoute
   '/apps/$appid': typeof AppsAppidRouteWithChildren
   '/apps/$appid/': typeof AppsAppidIndexRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId': typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/store': typeof StoreRoute
   '/apps/$appid': typeof AppsAppidIndexRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId': typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId/diff': typeof AppsAppidDepotsDepotIdManifestsManifestIdDiffRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
+  '/store': typeof StoreRoute
   '/apps/$appid': typeof AppsAppidRouteWithChildren
   '/apps/$appid/': typeof AppsAppidIndexRoute
   '/apps/$appid/depots/$depotId/manifests/$manifestId': typeof AppsAppidDepotsDepotIdManifestsManifestIdRoute
@@ -98,6 +107,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/settings'
+    | '/store'
     | '/apps/$appid'
     | '/apps/$appid/'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId'
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/settings'
+    | '/store'
     | '/apps/$appid'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId/diff'
@@ -117,6 +128,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/settings'
+    | '/store'
     | '/apps/$appid'
     | '/apps/$appid/'
     | '/apps/$appid/depots/$depotId/manifests/$manifestId'
@@ -128,6 +140,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
+  StoreRoute: typeof StoreRoute
   AppsAppidRoute: typeof AppsAppidRouteWithChildren
 }
 
@@ -152,6 +165,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/store': {
+      id: '/store'
+      path: '/store'
+      fullPath: '/store'
+      preLoaderRoute: typeof StoreRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/apps/$appid': {
@@ -217,6 +237,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
+  StoreRoute: StoreRoute,
   AppsAppidRoute: AppsAppidRouteWithChildren,
 }
 export const routeTree = rootRouteImport

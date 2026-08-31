@@ -92,8 +92,18 @@ impl StoreIndex {
         self.chunks_present.insert(sha);
     }
 
+    /// Record that a chunk was removed from disk.
+    pub fn mark_chunk_absent(&mut self, sha: &ChunkHash) {
+        self.chunks_present.remove(sha);
+    }
+
     pub fn has_chunk(&self, sha: &ChunkHash) -> bool {
         self.chunks_present.contains(sha)
+    }
+
+    /// The set of chunks currently on disk.
+    pub fn present_chunks(&self) -> &HashSet<ChunkHash> {
+        &self.chunks_present
     }
 
     /// Aggregate stats for a single manifest against the current indexes.

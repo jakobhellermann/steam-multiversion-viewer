@@ -14,6 +14,7 @@ pub mod files;
 pub mod game_info;
 pub mod library;
 pub mod mount;
+pub mod store;
 pub mod structured;
 
 pub(crate) type Result<T, E = ApiError> = std::result::Result<T, E>;
@@ -64,4 +65,7 @@ pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
         .routes(routes!(mount::start))
         .routes(routes!(mount::stop))
         .routes(routes!(mount::status))
+        .routes(routes!(store::store_overview))
+        .routes(routes!(store::prune_preview))
+        .routes(routes!(store::prune))
 }
