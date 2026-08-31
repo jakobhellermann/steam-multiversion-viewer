@@ -135,6 +135,19 @@ function DiffPage() {
       (s) => s.depot_id === targetDepotId && s.manifest_id === targetManifestId,
     )?.creation_time ?? 0;
 
+  // Force the newer manifest to the `base`/`+` side so "added" means "in the newer
+  // version" regardless of URL order (the backend is viewed-centric: added = only-in-base).
+  const urlBase = { depotId, manifestId, branch, creation: baseCreation };
+  const urlTarget = {
+    depotId: targetDepotId,
+    manifestId: targetManifestId,
+    branch: targetBranch,
+    creation: targetCreation,
+  };
+  const baseIsNewer = baseCreation >= targetCreation;
+  const newSide = baseIsNewer ? urlBase : urlTarget;
+  const oldSide = baseIsNewer ? urlTarget : urlBase;
+
   const missing =
     (baseView.data === null ? "base" : null) ?? (targetView.data === null ? "target" : null);
 
@@ -232,40 +245,50 @@ function DiffPage() {
       <div className="mb-4">
         <h1 className="font-mono text-sm break-all">{path}</h1>
         <p className="mt-1 text-xs text-slate-500 tabular-nums">
-          {/* Reads left → right as the unified diff does: `target` (old) on -, `base` (new) on +. */}
+          {/* Left → right is old → new, as the unified diff reads: older on -, newer on +. */}
           <Link
             to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
             params={{
               appid: appidParam,
-              depotId: String(targetDepotId),
-              manifestId: targetManifestId,
+              depotId: String(oldSide.depotId),
+              manifestId: oldSide.manifestId,
             }}
-            search={{ branch: targetBranch === "public" ? undefined : targetBranch, path }}
+            search={{ branch: oldSide.branch === "public" ? undefined : oldSide.branch, path }}
             onClick={(e) =>
               openSide(e, "target", {
-                depotId: String(targetDepotId),
-                manifestId: targetManifestId,
-                branch: targetBranch,
+                depotId: String(oldSide.depotId),
+                manifestId: oldSide.manifestId,
+                branch: oldSide.branch,
               })
             }
             className="font-mono text-rose-300 hover:underline"
           >
-            {targetDepotId}/{targetManifestId}
-            {targetCreation > 0 && (
-              <span className="ml-1 text-rose-300/70">({formatDate(targetCreation)})</span>
+            {oldSide.depotId}/{oldSide.manifestId}
+            {oldSide.creation > 0 && (
+              <span className="ml-1 text-rose-300/70">({formatDate(oldSide.creation)})</span>
             )}
           </Link>
           <span className="mx-2 text-slate-600">→</span>
           <Link
             to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
-            params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
-            search={{ branch: branch === "public" ? undefined : branch, path }}
-            onClick={(e) => openSide(e, "base", { depotId: depotIdParam, manifestId, branch })}
+            params={{
+              appid: appidParam,
+              depotId: String(newSide.depotId),
+              manifestId: newSide.manifestId,
+            }}
+            search={{ branch: newSide.branch === "public" ? undefined : newSide.branch, path }}
+            onClick={(e) =>
+              openSide(e, "base", {
+                depotId: String(newSide.depotId),
+                manifestId: newSide.manifestId,
+                branch: newSide.branch,
+              })
+            }
             className="font-mono text-emerald-300 hover:underline"
           >
-            {depotId}/{manifestId}
-            {baseCreation > 0 && (
-              <span className="ml-1 text-emerald-300/70">({formatDate(baseCreation)})</span>
+            {newSide.depotId}/{newSide.manifestId}
+            {newSide.creation > 0 && (
+              <span className="ml-1 text-emerald-300/70">({formatDate(newSide.creation)})</span>
             )}
           </Link>
         </p>
@@ -285,14 +308,20 @@ function DiffPage() {
       {missing == null && baseView.data && targetView.data && (
         <div className="flex min-h-0 flex-1 flex-col">
           <DiffBody
-            base={baseView.data}
-            target={targetView.data}
-            baseLocator={{ appid, depotId, manifestId, branch, path }}
+            base={baseIsNewer ? baseView.data : targetView.data}
+            target={baseIsNewer ? targetView.data : baseView.data}
+            baseLocator={{
+              appid,
+              depotId: newSide.depotId,
+              manifestId: newSide.manifestId,
+              branch: newSide.branch,
+              path,
+            }}
             targetLocator={{
               appid,
-              depotId: targetDepotId,
-              manifestId: targetManifestId,
-              branch: targetBranch,
+              depotId: oldSide.depotId,
+              manifestId: oldSide.manifestId,
+              branch: oldSide.branch,
               path,
             }}
           />
