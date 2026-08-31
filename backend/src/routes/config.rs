@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use utoipa::ToSchema;
 
-use crate::config::Config;
+use crate::config::{Config, VibrancyEffect};
 use crate::state::AppState;
 
 use super::Result;
@@ -29,6 +29,8 @@ pub struct ConfigDto {
     pub mountpoint: Utf8PathBuf,
     #[schema(value_type = String)]
     pub export_dir: Utf8PathBuf,
+    pub vibrancy_effect: VibrancyEffect,
+    pub vibrancy_tint: u8,
     pub restart_required: bool,
 }
 
@@ -41,6 +43,8 @@ pub struct PatchConfig {
     pub mountpoint: Option<Utf8PathBuf>,
     #[schema(value_type = String)]
     pub export_dir: Option<Utf8PathBuf>,
+    pub vibrancy_effect: Option<VibrancyEffect>,
+    pub vibrancy_tint: Option<u8>,
 }
 
 fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
@@ -52,6 +56,8 @@ fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
         store_root: saved.store_root,
         mountpoint: saved.mountpoint,
         export_dir: saved.export_dir,
+        vibrancy_effect: saved.vibrancy_effect,
+        vibrancy_tint: saved.vibrancy_tint,
     }
 }
 
@@ -95,6 +101,12 @@ pub async fn patch_config(
     }
     if let Some(export_dir) = body.export_dir {
         cfg.export_dir = export_dir;
+    }
+    if let Some(vibrancy_effect) = body.vibrancy_effect {
+        cfg.vibrancy_effect = vibrancy_effect;
+    }
+    if let Some(vibrancy_tint) = body.vibrancy_tint {
+        cfg.vibrancy_tint = vibrancy_tint.min(100);
     }
     cfg.save()?;
     // Publish the new config to every other request handler atomically.

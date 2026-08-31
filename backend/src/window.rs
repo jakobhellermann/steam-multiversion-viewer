@@ -1,11 +1,16 @@
 // TODO(ai-review): review for style and correctness
+use std::sync::Arc;
+
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
+use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Window, WindowBuilder};
 use wry::WebViewBuilder;
 
 use crate::state::AppState;
+
+#[cfg(target_os = "windows")]
+use crate::config::VibrancyEffect;
 
 const TITLE: &str = "Steam Multiversion Viewer";
 
@@ -14,20 +19,59 @@ enum UserEvent {
     Menu(muda::MenuEvent),
     #[cfg(target_os = "macos")]
     Library(Vec<crate::routes::library::OwnedGame>),
+    /// The frontend requested a live backdrop change (settings page).
+    #[cfg(target_os = "windows")]
+    Vibrancy(VibrancyEffect),
 }
 
-fn build_window(event_loop: &EventLoop<UserEvent>) -> Window {
-    WindowBuilder::new()
+#[cfg(target_os = "windows")]
+fn parse_effect(s: &str) -> Option<VibrancyEffect> {
+    Some(match s {
+        "none" => VibrancyEffect::None,
+        "mica" => VibrancyEffect::Mica,
+        "acrylic" => VibrancyEffect::Acrylic,
+        _ => return Option::None,
+    })
+}
+
+/// Marks the native window for the frontend; `active` = backdrop live this
+/// session (fixed at window creation, so toggling `none` needs a restart).
+#[cfg(target_os = "windows")]
+fn vibrancy_init_script(active: bool) -> String {
+    format!("window.__vibrancy = {{ active: {active} }};")
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+fn build_window(event_loop: &EventLoop<UserEvent>, transparent: bool) -> Window {
+    let builder = WindowBuilder::new()
         .with_title(TITLE)
-        .with_inner_size(LogicalSize::new(1280.0, 850.0))
-        .build(event_loop)
-        .expect("failed to create window")
+        .with_inner_size(LogicalSize::new(1280.0, 850.0));
+    // Only transparent when an effect is on — it can't be toggled after creation.
+    #[cfg(target_os = "windows")]
+    let builder = builder.with_transparent(transparent);
+    builder.build(event_loop).expect("failed to create window")
 }
 
-fn build_webview(window: &Window, url: &str) -> wry::WebView {
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+fn build_webview(
+    window: &Window,
+    url: &str,
+    proxy: EventLoopProxy<UserEvent>,
+    transparent: bool,
+) -> wry::WebView {
     let builder = WebViewBuilder::new()
         .with_url(url)
         .with_back_forward_navigation_gestures(true);
+
+    #[cfg(target_os = "windows")]
+    let builder = builder
+        .with_transparent(transparent)
+        .with_initialization_script(vibrancy_init_script(transparent))
+        .with_ipc_handler(move |req| {
+            if let Some(effect) = parse_effect(req.body()) {
+                let _ = proxy.send_event(UserEvent::Vibrancy(effect));
+            }
+        });
 
     // On Linux wry needs the GTK container; build(&window) via raw-window-handle
     // returns UnsupportedWindowHandle under the Wayland GDK backend.
@@ -51,9 +95,29 @@ fn build_webview(window: &Window, url: &str) -> wry::WebView {
 /// window is closed.
 pub fn run(url: &str, state: AppState, handle: tokio::runtime::Handle) -> ! {
     let event_loop: EventLoop<UserEvent> = EventLoopBuilder::with_user_event().build();
-    let window = build_window(&event_loop);
+
+    // The backdrop effect is baked into the window at creation (transparency
+    // can't be toggled afterward), so read the persisted choice up front.
+    #[cfg(target_os = "windows")]
+    let vibrancy = state.config.load().vibrancy_effect;
+    #[cfg(target_os = "windows")]
+    let vibrancy_active = vibrancy != VibrancyEffect::None;
+    #[cfg(not(target_os = "windows"))]
+    let vibrancy_active = false;
+
+    let window = Arc::new(build_window(&event_loop, vibrancy_active));
     #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-    let webview = build_webview(&window, url);
+    let webview = build_webview(&window, url, event_loop.create_proxy(), vibrancy_active);
+
+    // Paints over the opaque white default so the backdrop shows (see windows_vibrancy).
+    #[cfg(target_os = "windows")]
+    let mut surface = vibrancy_active
+        .then(|| windows_vibrancy::create_surface(&window))
+        .flatten();
+    #[cfg(target_os = "windows")]
+    if vibrancy_active {
+        windows_vibrancy::apply(&window, vibrancy);
+    }
     #[cfg(target_os = "macos")]
     let base_url = url.to_string();
 
@@ -82,6 +146,18 @@ pub fn run(url: &str, state: AppState, handle: tokio::runtime::Handle) -> ! {
             #[cfg(target_os = "macos")]
             Event::UserEvent(UserEvent::Library(games)) => {
                 macos::populate_library_menu(&library_menu, games);
+            }
+
+            #[cfg(target_os = "windows")]
+            Event::UserEvent(UserEvent::Vibrancy(effect)) => {
+                windows_vibrancy::apply(&window, effect);
+            }
+
+            #[cfg(target_os = "windows")]
+            Event::RedrawRequested(_) => {
+                if let Some(surface) = surface.as_mut() {
+                    windows_vibrancy::draw_surface(&window, surface);
+                }
             }
 
             // Closing the window ends the process without unwinding, so
@@ -272,6 +348,65 @@ mod macos {
             if let Err(err) = open::that_detached(&url) {
                 tracing::warn!(error = %err, "failed to open browser");
             }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod windows_vibrancy {
+    use std::sync::Arc;
+
+    use super::VibrancyEffect;
+    use tao::window::Window;
+    use window_vibrancy::{apply_acrylic, apply_mica, clear_acrylic, clear_mica};
+
+    // Legacy acrylic color for pre-22H2 Windows; the modern backdrop ignores it
+    // (there the darkening comes from the frontend tint instead).
+    const TINT: (u8, u8, u8, u8) = (15, 23, 42, 125);
+
+    type Surface = softbuffer::Surface<Arc<Window>, Arc<Window>>;
+
+    /// Owns the window's surface and clears it to transparent — a transparent
+    /// window otherwise keeps an opaque white redirection bitmap that the
+    /// WebView2 composites over, hiding the backdrop. Repaint on `RedrawRequested`.
+    pub fn create_surface(window: &Arc<Window>) -> Option<Surface> {
+        let context = softbuffer::Context::new(window.clone()).ok()?;
+        let mut surface = softbuffer::Surface::new(&context, window.clone()).ok()?;
+        draw_surface(window, &mut surface);
+        Some(surface)
+    }
+
+    pub fn draw_surface(window: &Window, surface: &mut Surface) {
+        let size = window.inner_size();
+        let (Some(width), Some(height)) = (
+            std::num::NonZeroU32::new(size.width),
+            std::num::NonZeroU32::new(size.height),
+        ) else {
+            return;
+        };
+        if surface.resize(width, height).is_err() {
+            return;
+        }
+        let Ok(mut buffer) = surface.buffer_mut() else {
+            return;
+        };
+        buffer.fill(0);
+        let _ = buffer.present();
+    }
+
+    pub fn apply(window: &Window, effect: VibrancyEffect) {
+        // Clear first so switching between effects is idempotent; clearing an
+        // inactive effect is a no-op on Windows.
+        let _ = clear_acrylic(window);
+        let _ = clear_mica(window);
+
+        let result = match effect {
+            VibrancyEffect::None => Ok(()),
+            VibrancyEffect::Mica => apply_mica(window, Some(true)),
+            VibrancyEffect::Acrylic => apply_acrylic(window, Some(TINT)),
+        };
+        if let Err(err) = result {
+            tracing::warn!(?effect, error = %err, "failed to apply window vibrancy");
         }
     }
 }

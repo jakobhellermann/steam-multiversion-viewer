@@ -2,13 +2,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { fetchConfig, patchConfig, type Config } from "../api";
+import { fetchConfig, patchConfig, type Config, type VibrancyEffect } from "../api";
+import { applyVibrancy, vibrancyActive, vibrancySupported } from "../vibrancy";
 
 export const Route = createFileRoute("/settings")({ component: SettingsPage });
 
 function SettingsPage() {
   const qc = useQueryClient();
   const query = useQuery({ queryKey: ["config"], queryFn: fetchConfig });
+  const onSaved = () => qc.invalidateQueries({ queryKey: ["config"] });
 
   return (
     <div className="mx-auto max-w-4xl p-8">
@@ -16,12 +18,83 @@ function SettingsPage() {
       {query.isPending && <p className="text-slate-400">Loading…</p>}
       {query.error && <p className="text-sm text-red-400">{(query.error as Error).message}</p>}
       {query.data && (
-        <SettingsForm
-          config={query.data}
-          onSaved={() => qc.invalidateQueries({ queryKey: ["config"] })}
-        />
+        <div className="space-y-8">
+          <SettingsForm config={query.data} onSaved={onSaved} />
+          {vibrancySupported() && <VibrancySection config={query.data} onSaved={onSaved} />}
+        </div>
       )}
     </div>
+  );
+}
+
+function VibrancySection({ config, onSaved }: { config: Config; onSaved: () => void }) {
+  const [effect, setEffect] = useState<VibrancyEffect>(config.vibrancy_effect);
+  const [tint, setTint] = useState(config.vibrancy_tint);
+
+  useEffect(() => {
+    setEffect(config.vibrancy_effect);
+    setTint(config.vibrancy_tint);
+  }, [config.vibrancy_effect, config.vibrancy_tint]);
+
+  const mutation = useMutation({
+    mutationFn: (patch: { vibrancy_effect?: VibrancyEffect; vibrancy_tint?: number }) =>
+      patchConfig(patch),
+    onSuccess: onSaved,
+  });
+
+  // Turning the backdrop on can't happen mid-session — the window's transparency
+  // is fixed at creation — so switching in/out of "none" needs a restart.
+  const needsRestart = effect !== "none" && !vibrancyActive();
+
+  function changeEffect(next: VibrancyEffect) {
+    setEffect(next);
+    applyVibrancy({ vibrancy_effect: next, vibrancy_tint: tint });
+    mutation.mutate({ vibrancy_effect: next });
+  }
+
+  function changeTint(next: number) {
+    setTint(next);
+    applyVibrancy({ vibrancy_effect: effect, vibrancy_tint: next });
+  }
+
+  return (
+    <section className="space-y-3 border-t border-slate-800 pt-6">
+      <h2 className="text-lg font-semibold">Window backdrop</h2>
+
+      <div className="flex items-end gap-6">
+        <label className="block">
+          <span className="text-sm text-slate-400">Effect</span>
+          <select
+            value={effect}
+            onChange={(e) => changeEffect(e.target.value as VibrancyEffect)}
+            className="mt-1 block w-40 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+          >
+            <option value="none">None</option>
+            <option value="mica">Mica</option>
+            <option value="acrylic">Acrylic</option>
+          </select>
+        </label>
+
+        <label className="block flex-1">
+          <span className="text-sm text-slate-400">Tint {tint}%</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={tint}
+            disabled={effect === "none"}
+            onChange={(e) => changeTint(Number(e.target.value))}
+            onPointerUp={() => mutation.mutate({ vibrancy_tint: tint })}
+            onBlur={() => mutation.mutate({ vibrancy_tint: tint })}
+            className="mt-2 block w-full disabled:opacity-40"
+          />
+        </label>
+      </div>
+
+      {needsRestart && (
+        <p className="text-sm text-amber-300">Restart required to turn the backdrop on.</p>
+      )}
+    </section>
   );
 }
 

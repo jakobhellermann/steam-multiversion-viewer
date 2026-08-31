@@ -12,6 +12,12 @@ pub struct Config {
     /// Root for manifest exports; each export gets its own subdirectory below it.
     #[serde(default = "default_export_dir")]
     pub export_dir: Utf8PathBuf,
+    /// Windows-only backdrop effect for the native window.
+    #[serde(default = "default_vibrancy_effect")]
+    pub vibrancy_effect: VibrancyEffect,
+    /// Darkening overlay behind the content, 0–100 %, applied on top of the effect.
+    #[serde(default = "default_vibrancy_tint")]
+    pub vibrancy_tint: u8,
 }
 
 impl Default for Config {
@@ -20,8 +26,28 @@ impl Default for Config {
             store_root: default_store_root(),
             mountpoint: default_mountpoint(),
             export_dir: default_export_dir(),
+            vibrancy_effect: default_vibrancy_effect(),
+            vibrancy_tint: default_vibrancy_tint(),
         }
     }
+}
+
+fn default_vibrancy_effect() -> VibrancyEffect {
+    VibrancyEffect::Mica
+}
+
+fn default_vibrancy_tint() -> u8 {
+    50
+}
+
+/// Backdrop material for the native window (Windows only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum VibrancyEffect {
+    #[default]
+    None,
+    Mica,
+    Acrylic,
 }
 
 impl Config {

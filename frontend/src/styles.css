@@ -25,3 +25,13 @@ body {
   color: #e2e8f0;
   color-scheme: dark;
 }
+
+/* Tint on the root so it covers the whole viewport (even short/loading pages);
+   body transparent so it doesn't add a second opaque layer over the backdrop. */
+html.vibrancy-active {
+  background: var(--vibrancy-tint, transparent) !important;
+}
+
+html.vibrancy-active body {
+  background: transparent !important;
+}

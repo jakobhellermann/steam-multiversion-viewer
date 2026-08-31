@@ -12,7 +12,8 @@ import { useEffect, useRef } from "react";
 
 import { DownloadsDrawer } from "../components/DownloadsDrawer";
 import { MountToggle } from "../components/MountToggle";
-import { fetchAuthStatus, logout, type AuthStatus } from "../api";
+import { fetchAuthStatus, fetchConfig, logout, type AuthStatus } from "../api";
+import { applyVibrancy, vibrancySupported } from "../vibrancy";
 import "../styles.css";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -50,6 +51,18 @@ function RootComponent() {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Sync the backdrop with persisted config (native window only); shares the
+  // ["config"] query with settings so saving there re-applies it live.
+  const { data: config } = useQuery({
+    queryKey: ["config"],
+    queryFn: fetchConfig,
+    enabled: vibrancySupported(),
+  });
+  useEffect(() => {
+    if (config) applyVibrancy(config);
+  }, [config]);
+
   return (
     <>
       <header ref={headerRef} className="border-b border-slate-800">

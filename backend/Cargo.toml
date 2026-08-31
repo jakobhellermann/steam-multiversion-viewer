@@ -72,6 +72,8 @@ steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["projfs"] }
+window-vibrancy = "0.8"
+softbuffer = "0.4"
 
 [package.metadata.packager]
 product-name = "Steam Multiversion Viewer"

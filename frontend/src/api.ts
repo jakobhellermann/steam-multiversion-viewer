@@ -625,10 +625,14 @@ export function fetchGameInfo(
   return getJson(`/api/apps/${appid}/depots/${depotId}/manifests/${manifestId}/game_info?${qs}`);
 }
 
+export type VibrancyEffect = "none" | "mica" | "acrylic";
+
 export type Config = {
   store_root: string;
   mountpoint: string;
   export_dir: string;
+  vibrancy_effect: VibrancyEffect;
+  vibrancy_tint: number;
   restart_required: boolean;
 };
 
@@ -640,6 +644,8 @@ export async function patchConfig(patch: {
   store_root?: string;
   mountpoint?: string;
   export_dir?: string;
+  vibrancy_effect?: VibrancyEffect;
+  vibrancy_tint?: number;
 }): Promise<Config> {
   const r = await fetch("/api/config", {
     method: "PATCH",
