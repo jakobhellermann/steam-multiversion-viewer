@@ -225,7 +225,10 @@ function DiffPage() {
           manifestLink={linkOptions({
             to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
             params: { appid: appidParam, depotId: depotIdParam, manifestId },
-            search: { branch: branch === "public" ? undefined : branch },
+            search: {
+              branch: branch === "public" ? undefined : branch,
+              compare_to: `${targetDepotId}/${targetManifestId}`,
+            },
           })}
         />
         <span className="text-slate-600">/</span>
