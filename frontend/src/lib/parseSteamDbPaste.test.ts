@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { describe, expect, test } from "vitest";
-import { parseSteamDbPaste, type ParsedExtra } from "./parseSteamDbPaste";
+import { parseSteamDbPaste, steamDbSignInGated, type ParsedExtra } from "./parseSteamDbPaste";
 
 function bare(manifest_id: string, branch = "public"): ParsedExtra {
   return { manifest_id, branch, app_id: null, depot_id: null };
@@ -114,6 +114,25 @@ Seen Date    Relative Date    ManifestID
     const input = `24 March 2026 – 22:56:53 UTC    2 months ago    4006284489195722835 _steamdb_external_
 20 March 2026 – 08:31:28 UTC    2 months ago    468692862190470536`;
     expect(parseSteamDbPaste(input)).toEqual([bare("468692862190470536")]);
+  });
+});
+
+describe("steamDbSignInGated", () => {
+  test("detects the logged-out truncation gate", () => {
+    const input = `12 November 2025 – 08:41:37 UTC     9 months ago     3545882420322545098
+12 November 2025 – 00:02:03 UTC     9 months ago     7267592975921547533 public-beta
+Please sign in via Steam to view more entries`;
+    expect(steamDbSignInGated(input)).toBe(true);
+  });
+
+  test("case-insensitive", () => {
+    expect(steamDbSignInGated("PLEASE SIGN IN VIA STEAM TO VIEW MORE ENTRIES")).toBe(true);
+  });
+
+  test("a full logged-in history has no gate", () => {
+    const input = `24 March 2026 – 22:56:53 UTC    2 months ago    4421626056705534276
+20 March 2026 – 08:31:28 UTC    2 months ago    468692862190470536`;
+    expect(steamDbSignInGated(input)).toBe(false);
   });
 });
 

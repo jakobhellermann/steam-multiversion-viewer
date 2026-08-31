@@ -15,7 +15,7 @@ import {
 import { BranchFilterList } from "../components/BranchFilterList";
 import { Bytes } from "../components/Bytes";
 import { ErrorBox } from "../components/ErrorBox";
-import { parseSteamDbPaste, type ParsedExtra } from "../lib/parseSteamDbPaste";
+import { parseSteamDbPaste, steamDbSignInGated, type ParsedExtra } from "../lib/parseSteamDbPaste";
 import { pinScroll } from "../lib/pinScroll";
 import { useBranchFilter } from "../lib/useBranchFilter";
 
@@ -725,6 +725,10 @@ function ImportExtrasModal({
     };
   }, [onClose]);
   const parsed = useMemo(() => parseSteamDbPaste(text), [text]);
+  // The paste carries SteamDB's "sign in to view more" gate → the history
+  // was truncated to the most recent rows. Warn so the user logs in and
+  // re-copies instead of importing a partial list.
+  const signInGated = useMemo(() => steamDbSignInGated(text), [text]);
   // Identity = manifest_id + branch. We treat a parsed entry as a
   // duplicate iff the same (manifest_id, branch) already exists on this
   // depot — either as an official manifest or a tracked extra. Same
@@ -839,6 +843,12 @@ function ImportExtrasModal({
             }
             className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs focus:border-sky-700 focus:outline-none"
           />
+          {signInGated && (
+            <p className="rounded border border-amber-800/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
+              SteamDB only shows the most recent manifests to logged-out visitors. Log in for the
+              full history.
+            </p>
+          )}
           {parsed.length > 0 && (
             <div className="overflow-hidden rounded border border-slate-800">
               <div className="flex justify-between border-b border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-400">

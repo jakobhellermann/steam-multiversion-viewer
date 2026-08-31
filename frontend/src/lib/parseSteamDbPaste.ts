@@ -38,6 +38,15 @@ const SMALL_ID_RE = /\b\d{1,10}\b/g;
 ///   * Bare manifest ID, one per line.
 ///
 /// Branches default to "public" when not present in the input.
+/// SteamDB only serves the full manifest history to logged-in accounts;
+/// anonymous visitors get the most recent ~10 rows and a "Please sign in
+/// via Steam to view more entries" gate. When that gate text rides along
+/// in the paste the user almost certainly copied a truncated history, so
+/// we surface a warning rather than silently importing a partial list.
+export function steamDbSignInGated(text: string): boolean {
+  return /sign in via steam to view more/i.test(text);
+}
+
 export function parseSteamDbPaste(text: string): ParsedExtra[] {
   const out: ParsedExtra[] = [];
   const seen = new Set<string>();
