@@ -1,4 +1,5 @@
 #![recursion_limit = "256"]
+#![cfg_attr(all(windows, feature = "windowed"), windows_subsystem = "windows")]
 mod config;
 mod http;
 mod routes;

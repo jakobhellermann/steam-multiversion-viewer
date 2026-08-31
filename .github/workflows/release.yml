@@ -1,0 +1,91 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: linux-x64, formats: "appimage,deb" }
+          - { os: macos-latest, name: macos-arm64, formats: dmg }
+          - { os: windows-latest, name: windows-x64, formats: wix }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      # rust-embed bakes frontend/dist into the binary, so build the web app first.
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: pnpm run build
+        working-directory: frontend
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # tao/wry need GTK + WebKit on Linux; libfuse2 is for AppImage tooling.
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libfuse2 file
+      - run: cargo install cargo-packager --locked
+
+      # Formats come from [package.metadata.packager]: wix/MSI on Windows,
+      # .app + .dmg on macOS, AppImage on Linux. Its before-packaging-command
+      # runs the cargo build, which also leaves the raw binary in target/.
+      - run: cargo packager --release --formats ${{ matrix.formats }}
+        working-directory: backend
+
+      # normalize to steam-multiversion-viewer-<version>-<os>-<arch>.<ext>.
+      - name: Collect and rename artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          base="steam-multiversion-viewer-${version}-${{ matrix.name }}"
+          mkdir -p out
+          if [ "${{ runner.os }}" != "macOS" ]; then
+            ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+            cp "target/release/steam-multiversion-viewer${ext}" "out/${base}${ext}"
+          fi
+          shopt -s nullglob
+          installers=(backend/dist/*.msi backend/dist/*.dmg backend/dist/*.AppImage backend/dist/*.deb)
+          if [ ${#installers[@]} -eq 0 ]; then
+            echo "no installer found; searching:"
+            find backend target -maxdepth 3 \( -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' \) 2>/dev/null
+            exit 1
+          fi
+          for f in "${installers[@]}"; do
+            cp "$f" "out/${base}.${f##*.}"
+          done
+          ls -la out/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}
+          if-no-files-found: error
+          path: out/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: artifacts/*

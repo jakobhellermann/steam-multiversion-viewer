@@ -71,6 +71,9 @@ softbuffer = "0.4"
 product-name = "Steam Multiversion Viewer"
 identifier = "io.github.jakobhellermann.steam-multiversion-viewer"
 icons = ["../frontend/public/logo512.png"]
-formats = ["app", "dmg", "wix", "appimage"]
+formats = ["app", "dmg", "wix", "appimage", "deb"]
 out-dir = "dist"
 before-packaging-command = "cargo build --release --features windowed"
+
+[package.metadata.packager.macos]
+signing-identity = "-" # ad-hoc signing
