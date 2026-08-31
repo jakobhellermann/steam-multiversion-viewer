@@ -5,10 +5,11 @@ import { useCallback, useRef } from "react";
 
 import { fetchStructuredDiff, fetchStructuredDiffNode, type StructuredNode } from "../../api";
 import { type Lang, langForMime } from "../../lib/syntax";
+import { useDelayedFlag } from "../../lib/useDelayedFlag";
 import { HighlightedPre } from "./FilePreview";
 import { makeDiffPostProcess, makePostProcess } from "./markers";
 import { focusUnlessSelecting, scopeSelectAll } from "./selection";
-import { Tree } from "./StructuredView";
+import { NODE_SPINNER_DELAY_MS, NodePanelSpinner, Tree } from "./StructuredView";
 import type { FileLocator } from "./types";
 
 /// Tree-based diff view for files with structured representations.
@@ -134,6 +135,10 @@ function DiffNodeBody({
     retry: false,
   });
 
+  // Keep the previous body up for a short fetch; swap to a spinner only
+  // once the new node has been in-flight past the flash threshold.
+  const showSpinner = useDelayedFlag(enabled && content.isFetching, NODE_SPINNER_DELAY_MS);
+
   // Same "keep last settled on screen" pattern the non-diff view
   // uses: react-query's cache doesn't carry across keys, so stash
   // the last successful response in a ref. Loading shimmer for a
@@ -161,6 +166,7 @@ function DiffNodeBody({
     };
   }
   const settled = lastSettledRef.current;
+  if (showSpinner) return <NodePanelSpinner />;
   if (!settled) {
     // First render before anything settles — keep the pane blank
     // rather than flash a spinner.

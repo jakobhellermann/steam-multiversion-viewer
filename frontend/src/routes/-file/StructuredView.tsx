@@ -16,8 +16,11 @@ import {
   type NodeStatus,
   type StructuredNode,
 } from "../../api";
+import { Loader2 } from "lucide-react";
+
 import { mediaKindForMime } from "../../lib/mediaKind";
 import { langForMime } from "../../lib/syntax";
+import { useDelayedFlag } from "../../lib/useDelayedFlag";
 import { HighlightedPre, MediaView } from "./FilePreview";
 import { makePostProcess } from "./markers";
 import { parsePptrRef, pptrNodeKeys } from "./pptrRef";
@@ -1166,6 +1169,19 @@ function FacetDropdown({
   );
 }
 
+/// Delay before a still-pending node fetch swaps the previous body for
+/// a spinner — short enough to feel responsive, long enough that a
+/// cache-hit fetch never flashes one.
+export const NODE_SPINNER_DELAY_MS = 100;
+
+export function NodePanelSpinner() {
+  return (
+    <div className="flex justify-center p-4 text-slate-500">
+      <Loader2 size={16} className="animate-spin" />
+    </div>
+  );
+}
+
 export function NodeContentPanel({
   locator,
   nodeId,
@@ -1211,6 +1227,10 @@ export function NodeContentPanel({
     // No `placeholderData` — we keep prior content on screen ourselves
     // via `lastSettledRef`, which works across node changes too.
   });
+
+  // Keep the previous body up for a short fetch; swap to a spinner only
+  // once the new node has been in-flight past the flash threshold.
+  const showSpinner = useDelayedFlag(!showMedia && content.isFetching, NODE_SPINNER_DELAY_MS);
 
   // We render whatever payload the most recent *settled* query
   // produced — data on success, message on error — and leave it
@@ -1317,6 +1337,7 @@ export function NodeContentPanel({
     );
   }
 
+  if (showSpinner) return <NodePanelSpinner />;
   if (!settled) return null;
   if (settled.kind === "err") {
     return <p className="text-sm text-red-300">{settled.message}</p>;
