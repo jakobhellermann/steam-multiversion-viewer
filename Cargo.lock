@@ -2778,7 +2778,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -3325,8 +3325,17 @@ version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b00f26d3400549137f92511a46ac1cd8ce37cb5598a96d382381458b992a5d24"
 dependencies = [
- "toml_datetime",
+ "toml_datetime 0.6.3",
  "toml_edit 0.20.2",
+]
+
+[[package]]
+name = "proc-macro-crate"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
+dependencies = [
+ "toml_edit 0.25.13+spec-1.1.0",
 ]
 
 [[package]]
@@ -3488,7 +3497,7 @@ dependencies = [
 [[package]]
 name = "rabex-env"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#03251ec480aebd07611f619b2610dea8cb2887fd"
+source = "git+https://github.com/jakobhellermann/rabex-env#5c3e78b69320208caa00baa740b3afb30af6d758"
 dependencies = [
  "anyhow",
  "base64",
@@ -3510,7 +3519,7 @@ dependencies = [
 [[package]]
 name = "rabex-env-steam-depot-vfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#03251ec480aebd07611f619b2610dea8cb2887fd"
+source = "git+https://github.com/jakobhellermann/rabex-env#5c3e78b69320208caa00baa740b3afb30af6d758"
 dependencies = [
  "anyhow",
  "rabex-env",
@@ -3523,7 +3532,7 @@ dependencies = [
 [[package]]
 name = "rabex-texture"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/rabex-env#03251ec480aebd07611f619b2610dea8cb2887fd"
+source = "git+https://github.com/jakobhellermann/rabex-env#5c3e78b69320208caa00baa740b3afb30af6d758"
 dependencies = [
  "anyhow",
  "image",
@@ -4007,13 +4016,13 @@ dependencies = [
 
 [[package]]
 name = "scroll_derive"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed76efe62313ab6610570951494bdaa81568026e0318eaa55f167de70eeea67d"
+checksum = "e1a36a382ed65dbcc0ab47fd5e9a94112417ccd34560a392ef3b7b0f0ec39148"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -4368,7 +4377,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "steam-depot-mount"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-depot-vfs#fbfaad26d8e727739ec84178ec28dd4246137a96"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#413aa524f844836e7e31834c616cc0cd5873cfa6"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4387,7 +4396,7 @@ dependencies = [
 [[package]]
 name = "steam-depot-vfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-depot-vfs#fbfaad26d8e727739ec84178ec28dd4246137a96"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#413aa524f844836e7e31834c616cc0cd5873cfa6"
 dependencies = [
  "bytes",
  "directories",
@@ -4511,7 +4520,7 @@ dependencies = [
 [[package]]
 name = "steam-vent-depot"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-vent-depot#b4e96bf31067294fe905c8364a20677047969007"
+source = "git+https://github.com/jakobhellermann/steam-vent-depot#74d60d717510a2e364d5d13f6df06cf793e83e6f"
 dependencies = [
  "aes 0.9.3",
  "base64",
@@ -5013,7 +5022,7 @@ checksum = "185d8ab0dfbb35cf1399a6344d8484209c088f75f8f68230da55d48d95d43e3d"
 dependencies = [
  "serde",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 0.6.3",
  "toml_edit 0.20.2",
 ]
 
@@ -5027,14 +5036,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml_datetime"
+version = "1.1.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "toml_edit"
 version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap",
- "toml_datetime",
- "winnow",
+ "toml_datetime 0.6.3",
+ "winnow 0.5.40",
 ]
 
 [[package]]
@@ -5046,8 +5064,29 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_spanned",
- "toml_datetime",
- "winnow",
+ "toml_datetime 0.6.3",
+ "winnow 0.5.40",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.25.13+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6975367e4d2ef766d86af01ffad14b622fecc8d4357a998fbc4deb6e9bacaf9b"
+dependencies = [
+ "indexmap",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "winnow 1.0.4",
+]
+
+[[package]]
+name = "toml_parser"
+version = "1.1.3+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
+dependencies = [
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -5951,6 +5990,15 @@ name = "winnow"
 version = "0.5.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f593a95398737aeed53e489c785df13f3618e41dbcd6718c6addbf1395aa6876"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "winnow"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
 ]
