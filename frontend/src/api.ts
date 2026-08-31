@@ -656,7 +656,16 @@ export function fetchMountStatus(): Promise<MountStatus> {
   return getJson("/api/mount/status");
 }
 
-export async function startMount(): Promise<MountStatus> {
+/// Windows-only: `startMount` may report that ProjFS wasn't enabled and a
+/// UAC prompt to enable it was shown. `enabled` / `restart_needed` mean the
+/// user should mount again; `cancelled` means they dismissed the prompt.
+export type ProjfsEnableOutcome = "enabled" | "restart_needed" | "cancelled";
+
+export type StartMountResult =
+  | { kind: "mounted"; mountpoint: string }
+  | { kind: "projfs_prompt"; outcome: ProjfsEnableOutcome };
+
+export async function startMount(): Promise<StartMountResult> {
   const r = await fetch("/api/mount/start", { method: "POST" });
   if (!r.ok) throw new Error(await extractErrorMessage(r));
   return r.json();

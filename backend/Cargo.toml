@@ -70,6 +70,9 @@ steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs"
 muda = "0.19"
 steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["nfs"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["projfs"] }
+
 [package.metadata.packager]
 product-name = "Steam Multiversion Viewer"
 identifier = "io.github.jakobhellermann.steam-multiversion-viewer"

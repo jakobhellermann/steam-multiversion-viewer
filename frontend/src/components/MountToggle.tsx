@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
-import { fetchMountStatus, startMount, stopMount } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { fetchMountStatus, type ProjfsEnableOutcome, startMount, stopMount } from "../api";
 
 /// Header icon-button that toggles the depot mount. Sky-blue when the
 /// mount is up, slate when idle; hover-title shows the current
@@ -10,12 +10,33 @@ export function MountToggle() {
   const qc = useQueryClient();
   const status = useQuery({ queryKey: ["mount-status"], queryFn: fetchMountStatus });
 
+  // Neutral (non-error) notice, e.g. after ProjFS was enabled and the user
+  // needs to click again.
+  const [info, setInfo] = useState<string | null>(null);
+
   const mutation = useMutation({
     mutationFn: async () => {
-      if (status.data?.state === "mounted") return stopMount();
-      return startMount();
+      if (status.data?.state === "mounted") {
+        return { action: "stopped" as const, status: await stopMount() };
+      }
+      return { action: "started" as const, result: await startMount() };
     },
-    onSuccess: (data) => qc.setQueryData(["mount-status"], data),
+    onSuccess: (data) => {
+      setInfo(null);
+      if (data.action === "stopped") {
+        qc.setQueryData(["mount-status"], data.status);
+        return;
+      }
+      const r = data.result;
+      if (r.kind === "mounted") {
+        qc.setQueryData(["mount-status"], { state: "mounted", mountpoint: r.mountpoint });
+        return;
+      }
+      // ProjFS was off; a UAC prompt was shown. Stay idle — the user mounts
+      // again once it's enabled.
+      setInfo(projfsMessage(r.outcome));
+      qc.invalidateQueries({ queryKey: ["mount-status"] });
+    },
     // On error the backend state may be out of sync with what we
     // assumed; refetch so the next click does the right thing.
     onError: () => qc.invalidateQueries({ queryKey: ["mount-status"] }),
@@ -35,11 +56,12 @@ export function MountToggle() {
 
   const popoverRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!lastError) return;
+    if (!lastError && !info) return;
     function onDown(e: MouseEvent) {
       if (!(e.target instanceof Node)) return;
       if (popoverRef.current?.contains(e.target)) return;
       mutation.reset();
+      setInfo(null);
     }
     // Defer attaching by a tick so the click that opened the popover
     // doesn't immediately dismiss it.
@@ -48,7 +70,7 @@ export function MountToggle() {
       window.clearTimeout(id);
       window.removeEventListener("mousedown", onDown);
     };
-  }, [lastError, mutation]);
+  }, [lastError, info, mutation]);
 
   return (
     <div className="relative">
@@ -91,7 +113,7 @@ export function MountToggle() {
           />
         )}
       </button>
-      {lastError && (
+      {lastError ? (
         // Anchored to the icon so it doesn't push header items around.
         // Dismissed by clicking outside (see effect above).
         <div
@@ -104,7 +126,28 @@ export function MountToggle() {
             {lastError.message}
           </div>
         </div>
+      ) : (
+        info && (
+          <div
+            ref={popoverRef}
+            role="status"
+            className="absolute top-full right-0 z-50 mt-2 w-96 rounded-md border border-sky-700 bg-sky-950/95 px-4 py-3 text-sm text-sky-100 shadow-xl"
+          >
+            {info}
+          </div>
+        )
       )}
     </div>
   );
+}
+
+function projfsMessage(outcome: ProjfsEnableOutcome): string {
+  switch (outcome) {
+    case "enabled":
+      return "ProjFS enabled — click Mount again to mount the depot tree.";
+    case "restart_needed":
+      return "ProjFS enabled. Restart Windows, then click Mount again.";
+    case "cancelled":
+      return "ProjFS was not enabled (the prompt was dismissed).";
+  }
 }

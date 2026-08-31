@@ -8,17 +8,33 @@ use axum::extract::State;
 
 use crate::http::ApiError;
 use crate::state::AppState;
-use crate::state::mount::{MountControlError, MountDeps, MountStatus};
+use crate::state::mount::{
+    MountControlError, MountDeps, MountStatus, ProjfsEnableOutcome, prompt_enable_projfs,
+};
+
+/// Result of `POST /api/mount/start`.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StartResult {
+    /// Mount is up at `mountpoint`.
+    Mounted {
+        #[schema(value_type = String)]
+        mountpoint: std::path::PathBuf,
+    },
+    /// ProjFS wasn't enabled; a UAC prompt to enable it was shown. The user
+    /// retries the mount afterwards.
+    ProjfsPrompt { outcome: ProjfsEnableOutcome },
+}
 
 /// Start depot mount
 #[utoipa::path(
     post,
     path = "/api/mount/start",
     tag = "mount",
-    responses((status = 200, body = MountStatus))
+    responses((status = 200, body = StartResult))
 )]
 #[tracing::instrument(skip_all)]
-pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, ApiError> {
+pub async fn start(State(state): State<AppState>) -> Result<Json<StartResult>, ApiError> {
     let steam = state.steam()?; // 401 if not logged in
     let cfg = state.config.load();
     // Snapshot the index under its lock so we can drop it before
@@ -30,7 +46,7 @@ pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, A
         .indexed()
         .collect::<Vec<_>>();
     let mountpoint = cfg.mountpoint.as_std_path().to_path_buf();
-    let status = state
+    let result = state
         .mount
         .start_with(
             mountpoint,
@@ -43,9 +59,23 @@ pub async fn start(State(state): State<AppState>) -> Result<Json<MountStatus>, A
             index_snapshot.into_iter(),
             &state.extra_manifests,
         )
-        .await
-        .map_err(mount_err)?;
-    Ok(Json(status))
+        .await;
+    match result {
+        Ok(MountStatus::Mounted { mountpoint }) => Ok(Json(StartResult::Mounted { mountpoint })),
+        Ok(MountStatus::Idle | MountStatus::Unsupported) => {
+            Err(ApiError::internal("mount start returned no mount"))
+        }
+        // ProjFS is off: prompt for elevation (UAC). We don't auto-mount —
+        // the user retries the mount after enabling.
+        Err(MountControlError::ProjFsNotEnabled) => {
+            let outcome = tokio::task::spawn_blocking(prompt_enable_projfs)
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))?
+                .map_err(mount_err)?;
+            Ok(Json(StartResult::ProjfsPrompt { outcome }))
+        }
+        Err(e) => Err(mount_err(e)),
+    }
 }
 
 /// Stop depot mount
