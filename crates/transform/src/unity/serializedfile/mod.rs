@@ -17,17 +17,36 @@ pub(crate) mod test;
 
 use crate::structured::Node;
 
-/// Open linear gameobject chains by default: a gameobject with exactly
-/// one child has nothing to choose between, so leave it expanded. A run
-/// of single-child gameobjects opens all the way down; expansion stops
-/// at the first gameobject that branches (or at a leaf). Components and
-/// section rows keep whatever the builder decided.
-pub(crate) fn expand_single_child_chains(node: &mut Node) {
+/// Widest a forced-spine terminal may fan out and still auto-open —
+/// reveals `a/b/{c,d,e}` but not `a/b/{1..100}`.
+const MAX_TERMINAL_FANOUT: usize = 6;
+
+/// Auto-open the parts of a single-root hierarchy with nothing to choose:
+/// every single-child gameobject, plus the first branching gameobject on
+/// the forced spine when its fan-out is at most `MAX_TERMINAL_FANOUT`.
+pub(crate) fn expand_single_child_chains(root: &mut Node) {
+    open_single_child_nodes(root);
+    open_forced_spine_terminal(root);
+}
+
+fn open_single_child_nodes(node: &mut Node) {
     if node.kind == "gameobject" && node.children.len() == 1 {
         node.default_collapsed = false;
     }
     for child in &mut node.children {
-        expand_single_child_chains(child);
+        open_single_child_nodes(child);
+    }
+}
+
+fn open_forced_spine_terminal(node: &mut Node) {
+    match node.children.as_mut_slice() {
+        [only] => open_forced_spine_terminal(only),
+        children if (2..=MAX_TERMINAL_FANOUT).contains(&children.len()) => {
+            if node.kind == "gameobject" {
+                node.default_collapsed = false;
+            }
+        }
+        _ => {}
     }
 }
 
@@ -55,26 +74,61 @@ mod chain_tests {
         }
     }
 
-    #[test]
-    fn linear_chain_opens_fully_branch_stays_collapsed() {
-        // a1 → a2 → a3(leaf) opens; b with two children stops.
-        let mut root = go("a1", vec![go("a2", vec![go("a3", vec![])])]);
-        expand_single_child_chains(&mut root);
+    fn expanded_ids(node: &Node) -> Vec<String> {
         let mut ids = Vec::new();
-        expanded(&root, &mut ids);
-        // a1 and a2 have exactly one child → open; a3 is a leaf → stays collapsed.
-        assert_eq!(ids, vec!["a1".to_string(), "a2".to_string()]);
-
-        let mut branch = go("b", vec![go("c", vec![]), go("d", vec![])]);
-        expand_single_child_chains(&mut branch);
-        let mut branch_ids = Vec::new();
-        expanded(&branch, &mut branch_ids);
-        assert_eq!(branch_ids, Vec::<String>::new());
+        expanded(node, &mut ids);
+        ids
     }
 
     #[test]
-    fn sub_chain_after_branch_still_opens() {
-        // a1 → a2 branches to x(→x2) and y; the x sub-chain opens too.
+    fn linear_chain_opens_fully_leaf_stays_collapsed() {
+        let mut root = go("a1", vec![go("a2", vec![go("a3", vec![])])]);
+        expand_single_child_chains(&mut root);
+        assert_eq!(
+            expanded_ids(&root),
+            vec!["a1".to_string(), "a2".to_string()]
+        );
+    }
+
+    #[test]
+    fn forced_spine_terminal_opens_when_small() {
+        let mut root = go(
+            "a",
+            vec![go(
+                "b",
+                vec![go("c", vec![]), go("d", vec![]), go("e", vec![])],
+            )],
+        );
+        expand_single_child_chains(&mut root);
+        assert_eq!(expanded_ids(&root), vec!["a".to_string(), "b".to_string()],);
+    }
+
+    #[test]
+    fn forced_spine_terminal_stays_collapsed_when_wide() {
+        let wide: Vec<Node> = (0..100).map(|i| go(&format!("n{i}"), vec![])).collect();
+        let mut root = go("a", vec![go("b", wide)]);
+        expand_single_child_chains(&mut root);
+        assert_eq!(expanded_ids(&root), vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn small_branch_off_the_spine_stays_collapsed() {
+        let mut root = go(
+            "a",
+            vec![
+                go("b1", vec![go("x", vec![]), go("y", vec![])]),
+                go("b2", vec![]),
+            ],
+        );
+        expand_single_child_chains(&mut root);
+        // `a` opens as the small root branch; b1's own fan-out is off the
+        // spine and stays collapsed.
+        assert_eq!(expanded_ids(&root), vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn single_child_sub_chain_after_branch_still_opens() {
+        // x is a single-child node anywhere in the tree → its sub-chain opens.
         let mut root = go(
             "a1",
             vec![go(
@@ -83,9 +137,9 @@ mod chain_tests {
             )],
         );
         expand_single_child_chains(&mut root);
-        let mut ids = Vec::new();
-        expanded(&root, &mut ids);
-        // a1(1 child) and x(1 child) open; a2 branches; x2/y are leaves.
-        assert_eq!(ids, vec!["a1".to_string(), "x".to_string()]);
+        assert_eq!(
+            expanded_ids(&root),
+            vec!["a1".to_string(), "a2".to_string(), "x".to_string()],
+        );
     }
 }
