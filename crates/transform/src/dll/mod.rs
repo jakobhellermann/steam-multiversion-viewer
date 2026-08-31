@@ -39,6 +39,16 @@ mod test;
 /// we ship installers.
 const ILSPYCMD: &str = "ilspycmd";
 
+/// Short sha prefix
+fn sha_short(sha: &[u8; 20]) -> String {
+    use std::fmt::Write as _;
+    let mut hex = String::with_capacity(12);
+    for b in &sha[..6] {
+        write!(&mut hex, "{b:02x}").expect("write to String");
+    }
+    hex
+}
+
 /// Per-process set of DLL shas with a `-p` warmer in flight. Prevents
 /// firing the (multi-second, multi-CPU) bulk pass twice for the same
 /// file when, say, two browser tabs hit the same DLL at once.
@@ -107,6 +117,7 @@ pub async fn list_entities(
     let raw = if let Some(cached) = crate::read_cached_artifact(store_root, dll_sha, "list")? {
         cached
     } else {
+        tracing::info!(sha = %sha_short(dll_sha), "dll transform: list entities (ilspy -l)");
         let raw = run_ilspy(dll_bytes, &["-l", "c i s d e"]).await?;
         crate::write_cached_artifact(store_root, dll_sha, "list", &raw)?;
         raw
@@ -171,6 +182,11 @@ pub async fn decompile_type(
     let artifact = type_artifact_name(&resolved);
     if let Some(cached) = crate::read_cached_artifact(store_root, dll_sha, &artifact)? {
         return Ok(cached);
+    }
+    if resolved == type_name {
+        tracing::info!(sha = %sha_short(dll_sha), %type_name, "dll transform: decompile single type (ilspy -t)");
+    } else {
+        tracing::info!(sha = %sha_short(dll_sha), %type_name, resolved = %resolved, "dll transform: decompile single type (ilspy -t)");
     }
     let text = run_ilspy(dll_bytes, &["-t", &resolved]).await?;
     crate::write_cached_artifact(store_root, dll_sha, &artifact, &text)?;
@@ -255,17 +271,20 @@ pub fn warm_full_decompile(store_root: &Utf8Path, dll_sha: [u8; 20], dll_bytes: 
         let mut guard = warmups_lock();
         let set = guard.get_or_insert_with(HashSet::new);
         if !set.insert(dll_sha) {
-            // Already warming this DLL — nothing to do.
+            tracing::info!(sha = %sha_short(&dll_sha), "dll warmer: already in flight, skipping");
             return;
         }
     }
     let store_root = store_root.to_path_buf();
+    tracing::info!(sha = %sha_short(&dll_sha), "dll warmer: start full decompile (ilspy -p)");
     tokio::spawn(async move {
         let result = run_warmer(&store_root, &dll_sha, &dll_bytes).await;
         warmups_lock().as_mut().map(|s| s.remove(&dll_sha));
         match result {
-            Ok(n) => tracing::info!(sha = ?dll_sha, types_cached = n, "dll warmer done"),
-            Err(e) => tracing::warn!(sha = ?dll_sha, %e, "dll warmer failed"),
+            Ok(n) => {
+                tracing::info!(sha = %sha_short(&dll_sha), types_cached = n, "dll warmer done")
+            }
+            Err(e) => tracing::warn!(sha = %sha_short(&dll_sha), %e, "dll warmer failed"),
         }
     });
 }
