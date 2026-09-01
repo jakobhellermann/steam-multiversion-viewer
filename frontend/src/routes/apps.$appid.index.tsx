@@ -247,7 +247,7 @@ function AppDetailBody({
         {info.depots.length === 0 ? (
           <p className="text-sm text-slate-500">No depots.</p>
         ) : (
-          <div className="grid grid-cols-[max-content_1fr_max-content_max-content_max-content] gap-y-3 text-sm">
+          <div className="grid grid-cols-[max-content_1fr_max-content_max-content] gap-y-3 text-sm">
             {info.depots.map((depot) => (
               <DepotCard
                 key={depot.depot_id}
@@ -344,7 +344,6 @@ function DepotCard({
             <div className="px-4 py-1.5 font-semibold">Manifest ID</div>
             <div className="px-4 py-1.5 text-right font-semibold">Size</div>
             <div className="px-4 py-1.5 text-right font-semibold">Missing</div>
-            <div className="px-4 py-1.5 text-right font-semibold">Unique</div>
           </div>
           {(() => {
             // Two branches often point at the same manifest gid (public ==
@@ -452,7 +451,7 @@ function ExtrasSection({
         aria-expanded={expanded}
         className="col-span-full grid cursor-pointer grid-cols-subgrid border-t border-slate-800 text-xs text-slate-500 select-none hover:bg-slate-800/40 hover:text-slate-300"
       >
-        <div className="col-span-4 flex items-center gap-1 px-4 py-1.5">
+        <div className="col-span-3 flex items-center gap-1 px-4 py-1.5">
           <span className="inline-block w-3 font-glyph text-slate-500">{expanded ? "▼" : "▶"}</span>
           <span>
             Additional manifests <span className="tabular-nums">({extras.length})</span>
@@ -575,22 +574,6 @@ function ManifestRow({
           <Skeleton />
         )}
       </Link>
-      <Link
-        {...linkProps}
-        tabIndex={-1}
-        aria-hidden="true"
-        className={`${cell} text-right whitespace-nowrap text-slate-400 tabular-nums`}
-      >
-        {status ? (
-          status.bytes_unique === 0 ? (
-            <span className="text-slate-600">—</span>
-          ) : (
-            <Bytes value={status.bytes_unique} />
-          )
-        ) : (
-          <Skeleton />
-        )}
-      </Link>
     </div>
   );
 }
@@ -668,22 +651,6 @@ function ExtraManifestRow({
                 (<Bytes value={status.bytes_missing_compressed} />)
               </span>
             </span>
-          )
-        ) : (
-          <Skeleton />
-        )}
-      </Link>
-      <Link
-        {...linkProps}
-        tabIndex={-1}
-        aria-hidden="true"
-        className={`${cell} text-right whitespace-nowrap text-slate-400 tabular-nums`}
-      >
-        {status ? (
-          status.bytes_unique === 0 ? (
-            <span className="text-slate-600">—</span>
-          ) : (
-            <Bytes value={status.bytes_unique} />
           )
         ) : (
           <Skeleton />
