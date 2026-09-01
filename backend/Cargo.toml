@@ -75,5 +75,9 @@ formats = ["app", "dmg", "wix", "appimage", "deb"]
 out-dir = "dist"
 before-packaging-command = "cargo build --release --features windowed"
 
+[package.metadata.packager.appimage]
+# see https://github.com/tauri-apps/tauri/pull/2940
+excluded-libraries = ["libwebkit2gtk-4.1.so*", "libjavascriptcoregtk-4.1.so*"]
+
 [package.metadata.packager.macos]
 signing-identity = "-" # ad-hoc signing
