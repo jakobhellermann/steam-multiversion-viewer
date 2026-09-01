@@ -1,15 +1,9 @@
 // TODO(ai-review): review for style and correctness
-//! In-memory indexes over the on-disk depot store:
-//!
-//! - [`StoreIndex::chunks_present`] — set of chunk SHAs we actually have on
-//!   disk.
-//! - [`StoreIndex::chunk_refcount`] — how many distinct (depot_id, gid)
-//!   manifests reference each chunk.
-//!
-//! Both are populated at startup; the refcount index is also updated each
-//! time we open a manifest we hadn't seen yet.
+//! In-memory index over the on-disk depot store: [`StoreIndex::chunks_present`]
+//! tracks the set of chunk SHAs we actually have on disk. Populated at
+//! startup, and updated as manifests are opened and chunks come and go.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use steam_depot_vfs::{ChunkHash, DepotStore};
 use steam_vent_depot::Manifest;
@@ -18,7 +12,6 @@ use crate::steam::{AppId, DepotId, ManifestId};
 
 pub struct StoreIndex {
     chunks_present: HashSet<ChunkHash>,
-    chunk_refcount: HashMap<ChunkHash, u32>,
     indexed_manifests: HashSet<(AppId, DepotId, ManifestId)>,
 }
 
@@ -28,7 +21,6 @@ impl StoreIndex {
         let started = std::time::Instant::now();
         let mut idx = Self {
             chunks_present: HashSet::new(),
-            chunk_refcount: HashMap::new(),
             indexed_manifests: HashSet::new(),
         };
 
@@ -56,7 +48,6 @@ impl StoreIndex {
 
         tracing::info!(
             chunks_present = idx.chunks_present.len(),
-            referenced_chunks = idx.chunk_refcount.len(),
             manifests = idx.indexed_manifests.len(),
             time = ?started.elapsed(),
             "store index built"
@@ -64,22 +55,12 @@ impl StoreIndex {
         Ok(idx)
     }
 
-    /// Fold a manifest's chunks into the refcount index. Returns `true` if
-    /// this was a new entry, `false` if we'd already indexed this
-    /// `(app_id, depot_id, manifest_id)` triple.
+    /// Record a manifest as indexed. Returns `true` if this was a new entry,
+    /// `false` if we'd already indexed this `(app_id, depot_id, manifest_id)`
+    /// triple.
     pub fn add_manifest(&mut self, app_id: AppId, m: &Manifest) -> bool {
-        if !self
-            .indexed_manifests
+        self.indexed_manifests
             .insert((app_id, DepotId(m.depot_id), ManifestId(m.manifest_id)))
-        {
-            return false;
-        }
-        for file in &m.files {
-            for chunk in file.chunks() {
-                *self.chunk_refcount.entry(chunk.sha).or_insert(0) += 1;
-            }
-        }
-        true
     }
 
     /// Iterate every indexed `(app, depot, manifest)` triple.
@@ -122,13 +103,10 @@ impl StoreIndex {
                 let wire = u64::from(chunk.size_compressed);
                 s.chunks_total += 1;
                 s.bytes_total += on_disk;
-                let present = self.chunks_present.contains(&chunk.sha);
-                if !present {
+                s.bytes_total_compressed += wire;
+                if !self.chunks_present.contains(&chunk.sha) {
                     s.chunks_missing += 1;
-                    s.bytes_missing += on_disk;
                     s.bytes_missing_compressed += wire;
-                } else if self.chunk_refcount.get(&chunk.sha).copied() == Some(1) {
-                    s.bytes_unique += on_disk;
                 }
             }
         }
@@ -142,12 +120,9 @@ pub struct ManifestStats {
     pub chunks_missing: u32,
     /// Uncompressed bytes — total disk footprint when fully downloaded.
     pub bytes_total: u64,
-    /// Uncompressed bytes you'd add to disk by completing the download.
-    pub bytes_missing: u64,
+    /// Compressed bytes — total download size of the whole manifest.
+    pub bytes_total_compressed: u64,
     /// Compressed bytes you'd pull over the wire from Steam's CDN to
     /// complete the download.
     pub bytes_missing_compressed: u64,
-    /// Uncompressed bytes you'd reclaim by deleting this manifest's
-    /// exclusive chunks.
-    pub bytes_unique: u64,
 }

@@ -429,9 +429,8 @@ pub struct ManifestRef {
     "chunks_total": 14586,
     "chunks_missing": 13583,
     "bytes_total": 11283371566u64,
-    "bytes_missing": 10289529410u64,
+    "bytes_total_compressed": 10694072752u64,
     "bytes_missing_compressed": 9716479376u64,
-    "bytes_unique": 948753388u64,
     "creation_time": 1680271331
 }))]
 pub struct ManifestStatusEntry {
@@ -443,13 +442,10 @@ pub struct ManifestStatusEntry {
     pub chunks_total: u32,
     pub chunks_missing: u32,
     pub bytes_total: u64,
-    /// Additional uncompressed bytes needed on disk to fully download this manifest.
-    pub bytes_missing: u64,
+    /// Compressed bytes — total download size of the whole manifest.
+    pub bytes_total_compressed: u64,
     /// Compressed bytes that would be pulled over the wire to complete the download.
     pub bytes_missing_compressed: u64,
-    /// Bytes currently on disk that are only referenced by this manifest
-    /// (i.e. what you'd reclaim by deleting it).
-    pub bytes_unique: u64,
     /// Manifest creation time (Steam-side timestamp, unix seconds). Lets
     /// callers sort tracked manifests chronologically without having to
     /// open each one again. Zero when `error` is set.
@@ -513,9 +509,8 @@ pub async fn manifest_statuses(
                     chunks_total: stats.chunks_total,
                     chunks_missing: stats.chunks_missing,
                     bytes_total: stats.bytes_total,
-                    bytes_missing: stats.bytes_missing,
+                    bytes_total_compressed: stats.bytes_total_compressed,
                     bytes_missing_compressed: stats.bytes_missing_compressed,
-                    bytes_unique: stats.bytes_unique,
                     creation_time: manifest.creation_time,
                 }
             }
@@ -528,9 +523,8 @@ pub async fn manifest_statuses(
                     chunks_total: 0,
                     chunks_missing: 0,
                     bytes_total: 0,
-                    bytes_missing: 0,
+                    bytes_total_compressed: 0,
                     bytes_missing_compressed: 0,
-                    bytes_unique: 0,
                     creation_time: 0,
                 }
             }

@@ -133,9 +133,8 @@ export type ManifestStatusEntry = {
   chunks_total: number;
   chunks_missing: number;
   bytes_total: number;
-  bytes_missing: number;
+  bytes_total_compressed: number;
   bytes_missing_compressed: number;
-  bytes_unique: number;
   /** Steam-side manifest creation time (unix seconds). 0 when `error` is set. */
   creation_time: number;
 };

@@ -343,7 +343,7 @@ function DepotCard({
             <div className="px-4 py-1.5 font-semibold">Branch</div>
             <div className="px-4 py-1.5 font-semibold">Manifest ID</div>
             <div className="px-4 py-1.5 text-right font-semibold">Size</div>
-            <div className="px-4 py-1.5 text-right font-semibold">Missing</div>
+            <div className="px-4 py-1.5 text-right font-semibold">Download Size</div>
           </div>
           {(() => {
             // Two branches often point at the same manifest gid (public ==
@@ -500,7 +500,7 @@ function ManifestRow({
 }: {
   depotId: number;
   appid: number;
-  manifest: { branch: string; manifest_id: string; size: number; download_size: number };
+  manifest: { branch: string; manifest_id: string; size: number };
   status: ManifestStatusEntry | undefined;
   duplicate: boolean;
   branchDescription: string | undefined;
@@ -555,24 +555,7 @@ function ManifestRow({
         aria-hidden="true"
         className={`${cell} text-right whitespace-nowrap tabular-nums`}
       >
-        {status ? (
-          status.error ? (
-            <span className="text-red-400" title={status.error}>
-              inaccessible
-            </span>
-          ) : status.bytes_missing === 0 ? (
-            <span className="text-slate-600">—</span>
-          ) : (
-            <span className="text-amber-300">
-              <Bytes value={status.bytes_missing} />{" "}
-              <span className="text-slate-500">
-                (<Bytes value={status.bytes_missing_compressed} />)
-              </span>
-            </span>
-          )
-        ) : (
-          <Skeleton />
-        )}
+        <DownloadCell status={status} />
       </Link>
     </div>
   );
@@ -637,24 +620,7 @@ function ExtraManifestRow({
         aria-hidden="true"
         className={`${cell} text-right whitespace-nowrap tabular-nums`}
       >
-        {status ? (
-          status.error ? (
-            <span className="text-red-400" title={status.error}>
-              inaccessible
-            </span>
-          ) : status.bytes_missing === 0 ? (
-            <span className="text-slate-600">—</span>
-          ) : (
-            <span className="text-amber-300">
-              <Bytes value={status.bytes_missing} />{" "}
-              <span className="text-slate-500">
-                (<Bytes value={status.bytes_missing_compressed} />)
-              </span>
-            </span>
-          )
-        ) : (
-          <Skeleton />
-        )}
+        <DownloadCell status={status} />
       </Link>
     </div>
   );
@@ -961,6 +927,22 @@ function BranchFilter({
       )}
     </div>
   );
+}
+
+// Remaining compressed download size, or the total once nothing's left.
+function DownloadCell({ status }: { status: ManifestStatusEntry | undefined }) {
+  if (!status) return <Skeleton />;
+  if (status.error) {
+    return (
+      <span className="text-red-400" title={status.error}>
+        inaccessible
+      </span>
+    );
+  }
+  if (status.bytes_missing_compressed === 0) {
+    return <Bytes value={status.bytes_total_compressed} />;
+  }
+  return <Bytes value={status.bytes_missing_compressed} />;
 }
 
 function Skeleton() {

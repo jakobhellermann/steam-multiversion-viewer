@@ -148,11 +148,7 @@ impl AppState {
         self.steam.store(None);
     }
 
-    /// Fetch (or load from cache) a manifest and fold it into the in-memory
-    /// refcount index. All routes that need a manifest should go through
-    /// this so `bytes_unique` stays consistent. Handlers should guard with
-    /// [`AppState::steam`] for a clean `401`; the not-logged-in case here is
-    /// a defensive fallback.
+    /// Fetch (or load from cache) a manifest and record it as indexed.
     pub async fn open_manifest(
         &self,
         app_id: AppId,
