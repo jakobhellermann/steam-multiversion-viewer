@@ -22,6 +22,9 @@ enum UserEvent {
     /// The frontend requested a live backdrop change (settings page).
     #[cfg(target_os = "windows")]
     Vibrancy(VibrancyEffect),
+    /// Test-only: the app-detail dropdown requested a vibrancy variant to preview.
+    #[cfg(target_os = "macos")]
+    MacVibrancy(String),
 }
 
 #[cfg(target_os = "windows")]
@@ -49,6 +52,10 @@ fn build_window(event_loop: &EventLoop<UserEvent>, transparent: bool) -> Window 
     // Only transparent when an effect is on — it can't be toggled after creation.
     #[cfg(target_os = "windows")]
     let builder = builder.with_transparent(transparent);
+    // macOS vibrancy is toggled live, so the window is always transparent; the
+    // opaque page background hides it until a variant is picked.
+    #[cfg(target_os = "macos")]
+    let builder = builder.with_transparent(true);
     builder.build(event_loop).expect("failed to create window")
 }
 
@@ -71,6 +78,14 @@ fn build_webview(
             if let Some(effect) = parse_effect(req.body()) {
                 let _ = proxy.send_event(UserEvent::Vibrancy(effect));
             }
+        });
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .with_transparent(true)
+        .with_initialization_script(macos_vibrancy::INIT_SCRIPT)
+        .with_ipc_handler(move |req| {
+            let _ = proxy.send_event(UserEvent::MacVibrancy(req.body().to_string()));
         });
 
     // On Linux wry needs the GTK container; build(&window) via raw-window-handle
@@ -151,6 +166,11 @@ pub fn run(url: &str, state: AppState, handle: tokio::runtime::Handle) -> ! {
             #[cfg(target_os = "windows")]
             Event::UserEvent(UserEvent::Vibrancy(effect)) => {
                 windows_vibrancy::apply(&window, effect);
+            }
+
+            #[cfg(target_os = "macos")]
+            Event::UserEvent(UserEvent::MacVibrancy(variant)) => {
+                macos_vibrancy::apply(&window, &variant);
             }
 
             #[cfg(target_os = "windows")]
@@ -408,5 +428,77 @@ mod windows_vibrancy {
         if let Err(err) = result {
             tracing::warn!(?effect, error = %err, "failed to apply window vibrancy");
         }
+    }
+}
+
+/// Test-only live preview of macOS backdrop materials, driven by the dropdown on
+/// the app-detail page. Variant keys are the ipc body; unknown keys warn.
+#[cfg(target_os = "macos")]
+mod macos_vibrancy {
+    use tao::window::Window;
+    use window_vibrancy::{
+        LiquidGlassOptions, NSGlassEffectViewStyle, NSVisualEffectMaterial, apply_liquid_glass,
+        apply_vibrancy, clear_liquid_glass, clear_vibrancy,
+    };
+
+    pub const INIT_SCRIPT: &str = "window.__macTestVibrancy = true;";
+
+    pub fn apply(window: &Window, variant: &str) {
+        let _ = clear_vibrancy(window);
+        let _ = clear_liquid_glass(window);
+
+        if variant == "none" {
+            return;
+        }
+
+        if let Some(style) = glass_style(variant) {
+            let options = LiquidGlassOptions::new(style).opaque(false);
+            if let Err(err) = apply_liquid_glass(window, options) {
+                tracing::warn!(variant, error = %err, "failed to apply liquid glass");
+            }
+        } else if let Some(material) = vibrancy_material(variant) {
+            if let Err(err) = apply_vibrancy(window, material, None, None) {
+                tracing::warn!(variant, error = %err, "failed to apply vibrancy material");
+            }
+        } else {
+            tracing::warn!(variant, "unknown vibrancy variant");
+        }
+    }
+
+    fn glass_style(variant: &str) -> Option<NSGlassEffectViewStyle> {
+        use NSGlassEffectViewStyle as G;
+        Some(match variant.strip_prefix("glass-")? {
+            "regular" => G::Regular,
+            "clear" => G::Clear,
+            "dock" => G::Dock,
+            "sidebar" => G::Sidebar,
+            "inspector" => G::Inspector,
+            "widgets" => G::Widgets,
+            "control" => G::Control,
+            "loupe" => G::Loupe,
+            "bubbles" => G::Bubbles,
+            _ => return None,
+        })
+    }
+
+    fn vibrancy_material(variant: &str) -> Option<NSVisualEffectMaterial> {
+        use NSVisualEffectMaterial as M;
+        Some(match variant.strip_prefix("vibrancy-")? {
+            "hud-window" => M::HudWindow,
+            "sidebar" => M::Sidebar,
+            "under-window-background" => M::UnderWindowBackground,
+            "window-background" => M::WindowBackground,
+            "under-page-background" => M::UnderPageBackground,
+            "content-background" => M::ContentBackground,
+            "popover" => M::Popover,
+            "menu" => M::Menu,
+            "header-view" => M::HeaderView,
+            "sheet" => M::Sheet,
+            "fullscreen-ui" => M::FullScreenUI,
+            "titlebar" => M::Titlebar,
+            "selection" => M::Selection,
+            "tooltip" => M::Tooltip,
+            _ => return None,
+        })
     }
 }

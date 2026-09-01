@@ -15,6 +15,11 @@ import {
 import { BranchFilterList } from "../components/BranchFilterList";
 import { Bytes } from "../components/Bytes";
 import { ErrorBox } from "../components/ErrorBox";
+import {
+  MAC_VIBRANCY_VARIANTS,
+  applyMacVibrancyVariant,
+  macVibrancyTestSupported,
+} from "../vibrancy";
 import { parseSteamDbPaste, steamDbSignInGated, type ParsedExtra } from "../lib/parseSteamDbPaste";
 import { pinScroll } from "../lib/pinScroll";
 import { useBranchFilter } from "../lib/useBranchFilter";
@@ -72,6 +77,7 @@ function AppDetail() {
 
   return (
     <div className="mx-auto max-w-4xl p-8">
+      {macVibrancyTestSupported() && <MacVibrancyTester />}
       {query.isPending && <p className="text-slate-400">Loading…</p>}
       {query.error && <ErrorBox title="Failed to load app info" error={query.error as Error} />}
       {query.data && (
@@ -992,6 +998,52 @@ function BranchFilter({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function MacVibrancyTester() {
+  const [variant, setVariant] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem("mac-vibrancy-preview") ?? "none";
+    } catch {
+      return "none";
+    }
+  });
+  // Re-apply on mount so the native effect matches the remembered selection
+  // after navigating back to an app page.
+  useEffect(() => {
+    applyMacVibrancyVariant(variant);
+  }, [variant]);
+  const change = (key: string) => {
+    setVariant(key);
+    try {
+      sessionStorage.setItem("mac-vibrancy-preview", key);
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <div className="fixed top-3 right-3 z-50 rounded border border-slate-700 bg-slate-900/90 px-3 py-2 text-xs shadow-lg">
+      <label className="flex items-center gap-2">
+        <span className="text-slate-400">Backdrop</span>
+        <select
+          value={variant}
+          onChange={(e) => change(e.target.value)}
+          className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-slate-200"
+        >
+          <option value="none">None</option>
+          {MAC_VIBRANCY_VARIANTS.map((g) => (
+            <optgroup key={g.group} label={g.group}>
+              {g.items.map((it) => (
+                <option key={it.key} value={it.key}>
+                  {it.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
