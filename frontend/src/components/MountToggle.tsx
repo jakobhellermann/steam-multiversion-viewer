@@ -22,7 +22,6 @@ export function MountToggle() {
       return { action: "started" as const, result: await startMount() };
     },
     onSuccess: (data) => {
-      setInfo(null);
       if (data.action === "stopped") {
         qc.setQueryData(["mount-status"], data.status);
         return;
@@ -30,6 +29,7 @@ export function MountToggle() {
       const r = data.result;
       if (r.kind === "mounted") {
         qc.setQueryData(["mount-status"], { state: "mounted", mountpoint: r.mountpoint });
+        setInfo( `${r.mountpoint}`);
         return;
       }
       // ProjFS was off; a UAC prompt was shown. Stay idle — the user mounts
