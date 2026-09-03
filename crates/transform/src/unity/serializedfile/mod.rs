@@ -41,10 +41,10 @@ fn open_single_child_nodes(node: &mut Node) {
 fn open_forced_spine_terminal(node: &mut Node) {
     match node.children.as_mut_slice() {
         [only] => open_forced_spine_terminal(only),
-        children if (2..=MAX_TERMINAL_FANOUT).contains(&children.len()) => {
-            if node.kind == "gameobject" {
-                node.default_collapsed = false;
-            }
+        children
+            if (2..=MAX_TERMINAL_FANOUT).contains(&children.len()) && node.kind == "gameobject" =>
+        {
+            node.default_collapsed = false;
         }
         _ => {}
     }

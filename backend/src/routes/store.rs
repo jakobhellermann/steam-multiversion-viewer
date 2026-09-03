@@ -1,6 +1,7 @@
 // TODO(ai-review): review for style and correctness
 //! Store-management: what's on disk per app/depot/manifest, and pruning it.
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use axum::Json;
@@ -152,7 +153,7 @@ pub async fn store_overview(State(state): State<AppState>) -> Result<Json<StoreO
             let mut depots: Vec<StoreDepot> = depots
                 .into_iter()
                 .map(|(depot_id, mut manifests)| {
-                    manifests.sort_by(|a, b| b.creation_time.cmp(&a.creation_time));
+                    manifests.sort_by_key(|manifest| Reverse(manifest.creation_time));
                     StoreDepot {
                         depot_id: DepotId(depot_id),
                         manifests,
@@ -167,7 +168,7 @@ pub async fn store_overview(State(state): State<AppState>) -> Result<Json<StoreO
             }
         })
         .collect();
-    apps.sort_by(|a, b| b.bytes_on_disk.cmp(&a.bytes_on_disk));
+    apps.sort_by_key(|app| Reverse(app.bytes_on_disk));
 
     Ok(Json(StoreOverview {
         total_bytes_on_disk: total_ref_bytes + unref.bytes,

@@ -8,7 +8,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::header;
 use axum::response::{IntoResponse as _, Response};
 use serde::Deserialize;
-use steam_vent_depot::DepotFileKind;
+use steam_depot_vfs::FileHash;
+use steam_vent_depot::{ChunkHash, DepotFileKind};
 use utoipa::ToSchema;
 
 use crate::http::ApiError;
@@ -135,7 +136,7 @@ async fn resolve_diff_text(
 
     let cfg = state.config.load();
     if transformer.is_some()
-        && let Some(cached) = transform::read_cached(&cfg.store_root, &file_sha)?
+        && let Some(cached) = transform::read_cached(&cfg.store_root, &file_sha.0)?
     {
         return Ok(DiffSide {
             text: cached,
@@ -151,7 +152,7 @@ async fn resolve_diff_text(
     let text = match transformer {
         None => text_plain(&snapshot, &file_path).await?,
         Some(transform::Transformer::Cli(tool)) => {
-            text_via_cli_tool(&snapshot, &cfg.store_root, tool, &file_sha, &file_path).await?
+            text_via_cli_tool(&snapshot, &cfg.store_root, tool, &file_sha.0, &file_path).await?
         }
         #[cfg(feature = "unity")]
         Some(transform::Transformer::UnitySerialized) => {
@@ -221,10 +222,11 @@ async fn text_via_unity_serialized(
 }
 
 /// A file's path, content sha, and chunk (sha, compressed-size) list for download.
+#[allow(clippy::type_complexity)]
 fn file_download_info(
     snapshot: &crate::state::Snapshot,
     path: &str,
-) -> Result<(String, [u8; 20], Vec<(steam_vent_depot::ChunkHash, u64)>)> {
+) -> Result<(String, FileHash, Vec<(ChunkHash, u64)>)> {
     let file = snapshot
         .manifest()
         .files
@@ -240,5 +242,5 @@ fn file_download_info(
         .iter()
         .map(|c| (c.sha, u64::from(c.size_compressed)))
         .collect();
-    Ok((file.path.clone(), sha.0, chunks_for_dl))
+    Ok((file.path.clone(), *sha, chunks_for_dl))
 }
