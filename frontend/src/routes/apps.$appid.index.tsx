@@ -195,7 +195,7 @@ function AppDetailBody({
         ) : (
           <div className="max-h-80 overflow-y-auto">
             <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-slate-900">
+              <thead className="sticky top-0">
                 <tr className="border-b border-slate-700">
                   <th className="px-3 py-2">Name</th>
                   <th className="px-3 py-2 text-right">Build ID</th>
@@ -450,7 +450,7 @@ function ExtrasSection({
           }
         }}
         aria-expanded={expanded}
-        className="col-span-full grid cursor-pointer grid-cols-subgrid border-t border-slate-800 bg-slate-900/40 text-xs text-slate-500 select-none hover:bg-slate-900/60 hover:text-slate-300"
+        className="col-span-full grid cursor-pointer grid-cols-subgrid border-t border-slate-800 text-xs text-slate-500 select-none hover:bg-slate-800/40 hover:text-slate-300"
       >
         <div className="col-span-4 flex items-center gap-1 px-4 py-1.5">
           <span className="inline-block w-3 font-glyph text-slate-500">{expanded ? "▼" : "▶"}</span>

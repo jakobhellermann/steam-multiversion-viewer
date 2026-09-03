@@ -931,7 +931,7 @@ function FilesPanel({
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
-            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-1.5 pr-8 text-sm focus:border-sky-700 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+            className="w-full rounded border border-slate-700  px-3 py-1.5 pr-8 text-sm focus:border-sky-700 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
           />
           {query && (
             <button
@@ -946,7 +946,7 @@ function FilesPanel({
         </div>
         {deepTarget && (
           <label
-            className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 select-none"
+            className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 select-none"
             title="Download and structural-diff every changed file, hiding those with no structured difference"
           >
             <input
@@ -1255,7 +1255,7 @@ function ExtensionFilter({
         className={`rounded border px-3 py-1.5 text-sm whitespace-nowrap ${
           count > 0
             ? "border-sky-700 bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
-            : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600"
+            : "border-slate-700  text-slate-300 hover:border-slate-600"
         }`}
         aria-haspopup="dialog"
         aria-expanded={open}
