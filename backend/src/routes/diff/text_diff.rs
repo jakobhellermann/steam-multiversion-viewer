@@ -13,7 +13,7 @@ use steam_vent_depot::{ChunkHash, DepotFileKind};
 use utoipa::ToSchema;
 
 use crate::http::ApiError;
-use crate::state::AppState;
+use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::diff_label;
@@ -178,7 +178,7 @@ async fn resolve_diff_text(
 }
 
 /// Read a file's bytes as UTF-8 text; 415 if it isn't valid UTF-8.
-async fn text_plain(snapshot: &crate::state::Snapshot, file_path: &str) -> Result<String> {
+async fn text_plain(snapshot: &Snapshot, file_path: &str) -> Result<String> {
     let bytes = snapshot.read_full(file_path).await?;
     String::from_utf8(bytes.to_vec()).map_err(|_| {
         ApiError::unsupported_media_type(format!(
@@ -189,7 +189,7 @@ async fn text_plain(snapshot: &crate::state::Snapshot, file_path: &str) -> Resul
 
 /// Run an external CLI transformer on a file's bytes and cache the result.
 async fn text_via_cli_tool(
-    snapshot: &crate::state::Snapshot,
+    snapshot: &Snapshot,
     store_root: &camino::Utf8Path,
     tool: &transform::CliTool,
     file_sha: &[u8; 20],
@@ -209,7 +209,7 @@ async fn text_via_unity_serialized(
     depot_id: DepotId,
     manifest_id: ManifestId,
     branch: &str,
-    snapshot: Arc<crate::state::Snapshot>,
+    snapshot: Arc<Snapshot>,
     file_path: String,
 ) -> Result<String> {
     let (env, data_dir) = unity_env(state, appid, depot_id, manifest_id, branch, snapshot)?;
@@ -224,7 +224,7 @@ async fn text_via_unity_serialized(
 /// A file's path, content sha, and chunk (sha, compressed-size) list for download.
 #[allow(clippy::type_complexity)]
 fn file_download_info(
-    snapshot: &crate::state::Snapshot,
+    snapshot: &Snapshot,
     path: &str,
 ) -> Result<(String, FileHash, Vec<(ChunkHash, u64)>)> {
     let file = snapshot

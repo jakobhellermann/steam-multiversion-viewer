@@ -15,6 +15,8 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::http::{ApiError, ImmutableCache};
 use crate::state::AppState;
+#[cfg(feature = "unity")]
+use crate::state::Snapshot;
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::library::ManifestFileKind;
@@ -431,7 +433,7 @@ async fn run_unity_dump(
     depot_id: DepotId,
     manifest_id: ManifestId,
     branch: &str,
-    snapshot: Arc<crate::state::Snapshot>,
+    snapshot: Arc<Snapshot>,
     path: String,
 ) -> Result<String, ApiError> {
     let scratch = state

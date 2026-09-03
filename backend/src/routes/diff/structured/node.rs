@@ -9,7 +9,7 @@ use axum::response::{IntoResponse as _, Response};
 use serde::Deserialize;
 
 use crate::http::ApiError;
-use crate::state::AppState;
+use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::dll_side_bytes;
@@ -516,7 +516,7 @@ async fn open_node_snapshot(
     manifest_id: ManifestId,
     branch: &str,
     needed: bool,
-) -> Result<Option<Arc<crate::state::Snapshot>>> {
+) -> Result<Option<Arc<Snapshot>>> {
     if !needed {
         return Ok(None);
     }
@@ -535,7 +535,7 @@ fn unity_side_with_scratch(
     depot_id: DepotId,
     manifest_id: ManifestId,
     branch: &str,
-    snapshot: Arc<crate::state::Snapshot>,
+    snapshot: Arc<Snapshot>,
 ) -> Result<(Arc<crate::state::manifest_cache::ManifestScratch>, String), ApiError> {
     let scratch = state
         .manifest_cache
