@@ -226,6 +226,12 @@ fn register_one_with_branch(
     manifest_id: ManifestId,
     branch: String,
 ) {
+    let creation_time = deps
+        .store
+        .load_cached_manifest(app_id.0, depot_id.0, manifest_id.0)
+        .ok()
+        .flatten()
+        .map(|m| m.creation_time);
     let deps = deps.clone();
     let res = mount.add_lazy(
         app_id.0,
@@ -256,7 +262,7 @@ fn register_one_with_branch(
                     .map_err(|e| std::io::Error::other(e.to_string()))
             }
         },
-        None,
+        creation_time,
     );
     if let Err(e) = res {
         tracing::warn!(%app_id, %depot_id, %manifest_id, %e, "mount add_lazy failed");
