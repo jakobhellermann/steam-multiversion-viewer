@@ -1,6 +1,6 @@
 [package]
 name = "steam-multiversion-viewer"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 repository = "https://github.com/jakobhellermann/steam-multiversion-viewer"
 license.workspace = true

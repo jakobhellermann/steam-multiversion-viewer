@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "dll-diff"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dotnetdll 0.3.0",
  "rayon",
@@ -4591,7 +4591,7 @@ dependencies = [
 
 [[package]]
 name = "steam-multiversion-viewer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -5417,7 +5417,7 @@ dependencies = [
 
 [[package]]
 name = "transform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes 0.9.3",
  "anyhow",
