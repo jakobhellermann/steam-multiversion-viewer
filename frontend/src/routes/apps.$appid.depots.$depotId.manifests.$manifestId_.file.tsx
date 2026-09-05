@@ -228,12 +228,16 @@ function FileViewPage() {
           appInfo={appInfoQuery.data}
           extras={extraQuery.data ?? []}
           statuses={statusQuery.data}
-          onSelect={(mid, br) =>
+          onSelect={(mid, br) => {
+            // Keep structured view focus
+            const hash = decodeURIComponent(window.location.hash.replace(/^#/, "")) || undefined;
             navigate({
               params: { appid: appidParam, depotId: depotIdParam, manifestId: mid },
-              search: { branch: br === "public" ? undefined : br, path, compare_to },
-            })
-          }
+              // Keep structured-view filters
+              search: { ...search, branch: br === "public" ? undefined : br },
+              hash,
+            });
+          }}
           manifestLink={linkOptions({
             to: "/apps/$appid/depots/$depotId/manifests/$manifestId",
             params: { appid: appidParam, depotId: depotIdParam, manifestId },
