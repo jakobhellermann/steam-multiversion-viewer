@@ -8,6 +8,7 @@ import {
   putExtraManifests,
   type AppInfo,
   type DepotEntry,
+  type DepotManifest,
   type ExtraManifestEntry,
   type ManifestRef,
   type ManifestStatusEntry,
@@ -500,7 +501,7 @@ function ManifestRow({
 }: {
   depotId: number;
   appid: number;
-  manifest: { branch: string; manifest_id: string; size: number };
+  manifest: DepotManifest;
   status: ManifestStatusEntry | undefined;
   duplicate: boolean;
   branchDescription: string | undefined;
@@ -555,7 +556,7 @@ function ManifestRow({
         aria-hidden="true"
         className={`${cell} text-right whitespace-nowrap tabular-nums`}
       >
-        <DownloadCell status={status} />
+        <DownloadCell status={status} appinfoDownloadSize={m.download_size} />
       </Link>
     </div>
   );
@@ -929,9 +930,17 @@ function BranchFilter({
   );
 }
 
-// Remaining compressed download size, or the total once nothing's left.
-function DownloadCell({ status }: { status: ManifestStatusEntry | undefined }) {
-  if (!status) return <Skeleton />;
+// Total compressed download size
+function DownloadCell({
+  status,
+  appinfoDownloadSize,
+}: {
+  status: ManifestStatusEntry | undefined;
+  appinfoDownloadSize?: number;
+}) {
+  if (!status) {
+    return appinfoDownloadSize !== undefined ? <Bytes value={appinfoDownloadSize} /> : <Skeleton />;
+  }
   if (status.error) {
     return (
       <span className="text-red-400" title={status.error}>
@@ -939,10 +948,7 @@ function DownloadCell({ status }: { status: ManifestStatusEntry | undefined }) {
       </span>
     );
   }
-  if (status.bytes_missing_compressed === 0) {
-    return <Bytes value={status.bytes_total_compressed} />;
-  }
-  return <Bytes value={status.bytes_missing_compressed} />;
+  return <Bytes value={status.bytes_total_compressed} />;
 }
 
 function Skeleton() {
