@@ -1,5 +1,6 @@
 ---
-source: crates/transform/src/unity/serializedfile/tree.rs
+source: crates/transform/src/unity/serializedfile/tree/shader.rs
+assertion_line: 106
 expression: "shader_nodes(42, groups)"
 ---
 - id: "obj:42/plat:15"

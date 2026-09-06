@@ -1,0 +1,200 @@
+use std::collections::{BTreeMap, HashSet};
+
+use anyhow::Result;
+use rabex_env::handle::SerializedFileHandle;
+use rabex_env::rabex::objects::ClassId;
+use rabex_env::rabex::objects::pptr::PathId;
+use rabex_env::rabex::typetree::TypeTreeProvider;
+use rabex_env::resolver::EnvResolver;
+use rabex_env::unity::types::MonoBehaviour;
+
+use crate::structured::{Node, NodeStatus};
+use crate::unity::NameOnly;
+
+use super::Side;
+use super::hierarchy::Covered;
+
+#[tracing::instrument(skip_all)]
+pub(super) fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
+    base_file: &SerializedFileHandle<'_, R, P>,
+    target_file: &SerializedFileHandle<'_, R, P>,
+    covered: &Covered,
+) -> Result<Node> {
+    let base_bodies = super::build_body_index(base_file);
+    let target_bodies = super::build_body_index(target_file);
+
+    let base_raw = collect_loose(base_file, &covered.base)?;
+    let target_raw = collect_loose(target_file, &covered.target)?;
+
+    let base_counts = class_id_counts(&base_raw);
+    let target_counts = class_id_counts(&target_raw);
+    let is_singleton = |class_id: ClassId| {
+        base_counts.get(&class_id) == Some(&1) && target_counts.get(&class_id) == Some(&1)
+    };
+    let key_for = |raw: &RawLoose| LooseKey {
+        label: raw.label.clone(),
+        name: if is_singleton(raw.class_id) {
+            String::new()
+        } else if raw.name.is_empty() {
+            format!("__pid:{}", raw.path_id)
+        } else {
+            raw.name.clone()
+        },
+    };
+    let mut base_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
+    for r in &base_raw {
+        base_items.insert(key_for(r), LooseItem { path_id: r.path_id });
+    }
+    let mut target_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
+    for r in &target_raw {
+        target_items.insert(key_for(r), LooseItem { path_id: r.path_id });
+    }
+
+    let mut keys: Vec<LooseKey> = base_items
+        .keys()
+        .chain(target_items.keys())
+        .cloned()
+        .collect();
+    keys.sort();
+    keys.dedup();
+
+    let mut children: Vec<Node> = Vec::new();
+    for key in keys {
+        let b = base_items.remove(&key);
+        let t = target_items.remove(&key);
+        let node = match (b, t) {
+            (Some(b), Some(t)) => {
+                let status = super::matched_status(
+                    base_file,
+                    target_file,
+                    &base_bodies,
+                    &target_bodies,
+                    b.path_id,
+                    t.path_id,
+                );
+                let id = super::matched_pair_id(b.path_id, t.path_id);
+                Node {
+                    badge: if b.path_id == t.path_id {
+                        Some(format!("[{}]", b.path_id))
+                    } else {
+                        Some(format!("[{} → {}]", t.path_id, b.path_id))
+                    },
+                    facets: [("class".to_string(), key.label.clone())]
+                        .into_iter()
+                        .collect(),
+                    ..super::make_node(id, loose_label(&key, &b), "component", status)
+                }
+            }
+            (Some(b), None) => Node {
+                badge: Some(format!("[{}]", b.path_id)),
+                facets: [("class".to_string(), key.label.clone())]
+                    .into_iter()
+                    .collect(),
+                ..super::make_node(
+                    super::one_sided_id(Side::Base, b.path_id),
+                    loose_label(&key, &b),
+                    "component",
+                    NodeStatus::Added,
+                )
+            },
+            (None, Some(t)) => Node {
+                badge: Some(format!("[{}]", t.path_id)),
+                facets: [("class".to_string(), key.label.clone())]
+                    .into_iter()
+                    .collect(),
+                ..super::make_node(
+                    super::one_sided_id(Side::Target, t.path_id),
+                    loose_label(&key, &t),
+                    "component",
+                    NodeStatus::Removed,
+                )
+            },
+            (None, None) => unreachable!(),
+        };
+        children.push(node);
+    }
+
+    let badge = Some(format!(
+        "{} {}",
+        children.len(),
+        super::pluralize(children.len(), "object")
+    ));
+    let pruned = super::prune_unchanged(children);
+    let status = super::aggregate_status(&pruned);
+    Ok(Node {
+        badge,
+        children: pruned,
+        ..super::make_node("section:loose", "Loose components", "section", status)
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct LooseKey {
+    label: String,
+    name: String,
+}
+
+struct LooseItem {
+    path_id: PathId,
+}
+
+struct RawLoose {
+    class_id: ClassId,
+    label: String,
+    name: String,
+    path_id: PathId,
+}
+
+fn class_id_counts(items: &[RawLoose]) -> std::collections::HashMap<ClassId, usize> {
+    let mut m: std::collections::HashMap<ClassId, usize> = std::collections::HashMap::new();
+    for r in items {
+        *m.entry(r.class_id).or_default() += 1;
+    }
+    m
+}
+
+#[tracing::instrument(skip_all)]
+fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    covered: &HashSet<PathId>,
+) -> Result<Vec<RawLoose>> {
+    let mut out: Vec<RawLoose> = Vec::new();
+    for obj in file.file.objects() {
+        let path_id = obj.m_PathID;
+        if covered.contains(&path_id) {
+            continue;
+        }
+        let class_id = obj.m_ClassID;
+        let _obj_span = tracing::info_span!("loose_object", ?class_id, path_id).entered();
+        let name = file
+            .object_at::<NameOnly>(path_id)
+            .ok()
+            .and_then(|h| h.read().ok())
+            .map(|n| n.m_Name)
+            .unwrap_or_default();
+        let label = if class_id == ClassId::MonoBehaviour {
+            file.object_at::<MonoBehaviour>(path_id)
+                .ok()
+                .and_then(|h| h.mono_script().ok().flatten())
+                .map(|s| s.full_name().into_owned())
+                .unwrap_or_else(|| format!("{class_id:?}"))
+        } else {
+            format!("{class_id:?}")
+        };
+        out.push(RawLoose {
+            class_id,
+            label,
+            name,
+            path_id,
+        });
+    }
+    Ok(out)
+}
+
+fn loose_label(key: &LooseKey, _item: &LooseItem) -> String {
+    if key.name.is_empty() || key.name.starts_with("__pid:") {
+        key.label.clone()
+    } else {
+        format!("{}: {}", key.label, key.name)
+    }
+}

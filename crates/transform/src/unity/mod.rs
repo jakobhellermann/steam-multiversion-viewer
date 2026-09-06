@@ -17,6 +17,13 @@ pub mod game_version;
 pub mod secure_player_prefs;
 pub mod serializedfile;
 
+#[derive(serde::Deserialize, Default)]
+#[allow(non_snake_case)]
+pub(crate) struct NameOnly {
+    #[serde(default)]
+    pub(crate) m_Name: String,
+}
+
 /// Dump a unity serialized-file as text using a prebuilt `env`.
 /// Synchronous because rabex's I/O trampolines through
 /// `block_in_place`/`block_on`; callers from async context must wrap in
