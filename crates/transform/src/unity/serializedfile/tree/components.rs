@@ -7,7 +7,7 @@ use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::MonoBehaviour;
 
 use crate::structured::Node;
-use crate::unity::NameOnly;
+use crate::unity::{NameOnly, game_specific};
 
 /// Dispatches to the node builder for this engine class.
 #[tracing::instrument(level = "debug", skip_all, fields(?class_id, ?path_id))]
@@ -54,11 +54,22 @@ fn monobehaviour_node<R: EnvResolver, P: TypeTreeProvider>(
     path_id: PathId,
 ) -> Result<Node> {
     let handle = file.object_at::<MonoBehaviour>(path_id)?;
-    let class_label = handle
-        .mono_script()?
-        .map(|script| script.full_name().into_owned())
-        .unwrap_or_else(|| format!("{:?}", ClassId::MonoBehaviour));
-    Ok(component_leaf(path_id, &class_label, &class_label))
+
+    let Some(mono_script) = handle.mono_script()? else {
+        let label = format!("{:?}", ClassId::MonoBehaviour);
+        return Ok(component_leaf(path_id, &label, &label));
+    };
+    let class_label = mono_script.full_name().into_owned();
+    let display_label = game_specific::monobehaviour_name(file, &class_label, path_id);
+    let mut node = component_leaf(
+        path_id,
+        display_label.as_deref().unwrap_or(&class_label),
+        &class_label,
+    );
+    if display_label.is_some() {
+        node = node.with_badge(class_label);
+    }
+    Ok(node)
 }
 
 fn shader_node<R: EnvResolver, P: TypeTreeProvider>(

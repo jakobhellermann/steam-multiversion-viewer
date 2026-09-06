@@ -15,6 +15,14 @@ use super::serializedfile::dump_value::DumpOptions;
 
 pub mod playmaker;
 
+pub fn monobehaviour_name<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    script_name: &str,
+    path_id: PathId,
+) -> Option<String> {
+    playmaker::monobehaviour_name(file, script_name, path_id)
+}
+
 /// Dump the object at `path_id` with whichever game-specific dump
 /// recognises it, as `(mime, body)`. `None` when none does. Which
 /// objects it applies to is each dump's own decision.

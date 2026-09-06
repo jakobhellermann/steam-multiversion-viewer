@@ -57,12 +57,43 @@ pub trait GameContextSource {
     fn game_context(&self) -> Result<&GameContext>;
 }
 
+#[derive(serde::Deserialize, Default)]
+#[allow(non_snake_case)]
+struct FsmNameOnly {
+    #[serde(default)]
+    fsm: FsmName,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct FsmName {
+    #[serde(default)]
+    name: String,
+}
+
 fn is_fsm<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     path_id: PathId,
 ) -> Result<bool> {
     let script = file.object_at::<MonoBehaviour>(path_id)?.mono_script()?;
     Ok(script.is_some_and(|s| s.full_name() == SCRIPT_NAME))
+}
+
+pub fn monobehaviour_name<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    script_name: &str,
+    path_id: PathId,
+) -> Option<String> {
+    if script_name != SCRIPT_NAME {
+        return None;
+    }
+    let name = file
+        .object_at::<FsmNameOnly>(path_id)
+        .ok()?
+        .read()
+        .ok()?
+        .fsm
+        .name;
+    (!name.is_empty()).then_some(name)
 }
 
 /// Whether both objects are equal `PlayMakerFSM`s. Skips the name
