@@ -4623,6 +4623,7 @@ dependencies = [
  "serde",
  "serde-value",
  "serde_json",
+ "sha1 0.10.7",
  "similar 3.2.0",
  "softbuffer",
  "steam-depot-mount",

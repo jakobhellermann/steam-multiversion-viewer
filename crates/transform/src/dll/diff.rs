@@ -18,7 +18,7 @@ use super::EntityEntry;
 #[cfg(test)]
 use super::EntityKind;
 use crate::TransformError;
-use crate::structured::{Node, NodeStatus, StructuredTree};
+use crate::structured::{DiffNodeMatch, Node, NodeId, NodeStatus, StructuredTree};
 
 /// Build the namespace-grouped diff tree between two .NET assemblies.
 /// Runs `dll_diff::diff` on `from_bytes` vs `to_bytes`, fetches the
@@ -56,9 +56,31 @@ pub async fn build_tree(
         .map(|t| (t.fqn, map_status(t.status)))
         .collect();
 
-    Ok(StructuredTree {
-        root: build_root(file_label, &from_entities, &to_entities, &statuses),
-    })
+    let mut root = build_root(file_label, &from_entities, &to_entities, &statuses);
+    attach_diff_matches(&mut root);
+    Ok(StructuredTree { root })
+}
+
+fn attach_diff_matches(node: &mut Node) {
+    node.diff_match = match node.id.strip_prefix("base:") {
+        Some(id) => DiffNodeMatch {
+            base: Some(NodeId(id.to_owned())),
+            target: None,
+        },
+        None => match node.id.strip_prefix("target:") {
+            Some(id) => DiffNodeMatch {
+                base: None,
+                target: Some(NodeId(id.to_owned())),
+            },
+            None => DiffNodeMatch {
+                base: Some(NodeId(node.id.clone())),
+                target: Some(NodeId(node.id.clone())),
+            },
+        },
+    };
+    for child in &mut node.children {
+        attach_diff_matches(child);
+    }
 }
 
 fn map_status(s: dll_diff::Status) -> NodeStatus {

@@ -10,7 +10,7 @@ use rabex_env::rabex::objects::pptr::PathId;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 
-use crate::structured::{Node, NodeStatus, StructuredTree};
+use crate::structured::{Node, NodeId, NodeStatus, StructuredTree};
 pub(super) use equality::{matched_status, object_bytes};
 
 mod class_stats;
@@ -110,7 +110,89 @@ pub fn build_diff<R: EnvResolver, P: TypeTreeProvider>(
         children,
         ..Default::default()
     };
-    Ok(StructuredTree { root })
+    let mut tree = StructuredTree { root };
+    attach_diff_matches(&mut tree.root);
+    Ok(tree)
+}
+
+/// Record the version-local object ids represented by every diff row.
+pub(crate) fn attach_diff_matches(node: &mut Node) {
+    let (prefix, id) = match crate::unity::bundle::parse_archive_id(&node.id) {
+        Some((archive, id)) => (format!("archive:{archive}/"), id),
+        None => (String::new(), node.id.as_str()),
+    };
+    node.diff_match = match id {
+        id if let Some(id) = id.strip_prefix("base:") => crate::structured::DiffNodeMatch {
+            base: Some(NodeId(format!("{prefix}{id}"))),
+            target: None,
+        },
+        id if let Some(id) = id.strip_prefix("target:") => crate::structured::DiffNodeMatch {
+            base: None,
+            target: Some(NodeId(format!("{prefix}{id}"))),
+        },
+        id if let Some(ids) = id.strip_prefix("mod:") => {
+            if let Some((base, target)) = ids.split_once(',') {
+                crate::structured::DiffNodeMatch {
+                    base: Some(NodeId(format!("{prefix}{base}"))),
+                    target: Some(NodeId(format!("{prefix}{target}"))),
+                }
+            } else {
+                crate::structured::DiffNodeMatch::default()
+            }
+        }
+        id => crate::structured::DiffNodeMatch {
+            base: Some(NodeId(format!("{prefix}{id}"))),
+            target: Some(NodeId(format!("{prefix}{id}"))),
+        },
+    };
+    for child in &mut node.children {
+        attach_diff_matches(child);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn records_current_and_previous_object_ids() {
+        let mut root = Node::leaf("file:x", "x", "file");
+        root.children = vec![
+            Node::leaf("obj:1", "same", "component"),
+            Node::leaf("mod:obj:2,obj:9", "moved", "component"),
+            Node::leaf("base:obj:3", "added", "component"),
+            Node::leaf("target:obj:4", "removed", "component"),
+        ];
+
+        attach_diff_matches(&mut root);
+
+        assert_eq!(
+            root.children[0].diff_match.base,
+            Some(NodeId("obj:1".into()))
+        );
+        assert_eq!(
+            root.children[0].diff_match.target,
+            Some(NodeId("obj:1".into()))
+        );
+        assert_eq!(
+            root.children[1].diff_match.base,
+            Some(NodeId("obj:2".into()))
+        );
+        assert_eq!(
+            root.children[1].diff_match.target,
+            Some(NodeId("obj:9".into()))
+        );
+        assert_eq!(
+            root.children[2].diff_match.base,
+            Some(NodeId("obj:3".into()))
+        );
+        assert_eq!(root.children[2].diff_match.target, None);
+        assert_eq!(root.children[3].diff_match.base, None);
+        assert_eq!(
+            root.children[3].diff_match.target,
+            Some(NodeId("obj:4".into()))
+        );
+    }
 }
 
 /// Builds the class, hierarchy, and loose-object sections.

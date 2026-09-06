@@ -34,6 +34,23 @@ pub struct StructuredDiffQuery {
     pub target_branch: String,
 }
 
+/// One side of a structured comparison.
+#[derive(Clone, Debug)]
+pub struct StructuredDiffSide {
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
+    pub branch: String,
+}
+
+/// Input for the format-agnostic structured-diff dispatcher.
+#[derive(Clone, Debug)]
+pub struct StructuredDiffRequest {
+    pub appid: AppId,
+    pub base: StructuredDiffSide,
+    pub target: StructuredDiffSide,
+    pub path: String,
+}
+
 /// Structured tree diff
 ///
 /// Returns a pruned tree tagged `added`/`removed`/`changed`/`unchanged` per node; unchanged leaves are dropped. Per-node content is fetched separately, lazily, via `/file/structured/node`, once per side.
@@ -54,97 +71,122 @@ pub async fn manifest_file_structured_diff(
     Query(q): Query<StructuredDiffQuery>,
 ) -> Result<(crate::http::ImmutableCache, Json<StructuredTree>)> {
     state.steam()?; // 401 if not logged in
-    match build_structured_diff_tree(
-        &state,
+    let request = StructuredDiffRequest {
         appid,
-        depot_id,
-        manifest_id,
-        &q.branch,
-        q.target_depot_id,
-        q.target_manifest_id,
-        &q.target_branch,
-        &q.path,
-    )
-    .await?
-    {
+        base: StructuredDiffSide {
+            depot_id,
+            manifest_id,
+            branch: q.branch,
+        },
+        target: StructuredDiffSide {
+            depot_id: q.target_depot_id,
+            manifest_id: q.target_manifest_id,
+            branch: q.target_branch,
+        },
+        path: q.path,
+    };
+    match build_structured_diff(&state, &request).await? {
         Some(tree) => Ok((crate::http::ImmutableCache, Json(tree))),
         None => Err(ApiError::unsupported_media_type(format!(
             "structured diff not supported for: {}",
-            q.path
+            request.path
         ))),
     }
 }
 
-/// Build the structured-diff tree for one file across two manifests, or `None` if the file type has no structured-diff builder. Downloads both sides' chunks and runs the per-format differ.
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip_all, fields(path = %path))]
-pub(super) async fn build_structured_diff_tree(
+/// Build a structured diff, or return `None` for unsupported file types.
+#[tracing::instrument(skip_all, fields(path = %request.path))]
+pub async fn build_structured_diff(
     state: &AppState,
-    appid: AppId,
-    depot_id: DepotId,
-    manifest_id: ManifestId,
-    branch: &str,
-    target_depot_id: DepotId,
-    target_manifest_id: ManifestId,
-    target_branch: &str,
-    path: &str,
+    request: &StructuredDiffRequest,
 ) -> Result<Option<StructuredTree>> {
     use transform::Transformer;
 
-    let kind = transform::tools::transformer_for(path, None);
+    let kind = transform::tools::transformer_for(&request.path, None);
 
     let (base, target) = tokio::try_join!(
-        prepare_structured_side(state, appid, depot_id, manifest_id, path, branch),
         prepare_structured_side(
             state,
-            appid,
-            target_depot_id,
-            target_manifest_id,
-            path,
-            target_branch,
+            request.appid,
+            request.base.depot_id,
+            request.base.manifest_id,
+            &request.path,
+            &request.base.branch,
+        ),
+        prepare_structured_side(
+            state,
+            request.appid,
+            request.target.depot_id,
+            request.target.manifest_id,
+            &request.path,
+            &request.target.branch,
         ),
     )?;
 
     let kind = match kind {
         Some(k) => Some(k),
         None => {
-            let bytes = base.read_full(path).await?;
-            transform::tools::transformer_for(path, Some(&bytes))
+            let bytes = base.read_full(&request.path).await?;
+            transform::tools::transformer_for(&request.path, Some(&bytes))
         }
     };
 
     let diff = match kind {
         #[cfg(feature = "unity")]
         Some(Transformer::UnitySerialized) => {
-            let (base_env, base_data_dir) =
-                unity_env(state, appid, depot_id, manifest_id, branch, base)?;
+            let (base_env, base_data_dir) = unity_env(
+                state,
+                request.appid,
+                request.base.depot_id,
+                request.base.manifest_id,
+                &request.base.branch,
+                base,
+            )?;
             let (target_env, target_data_dir) = unity_env(
                 state,
-                appid,
-                target_depot_id,
-                target_manifest_id,
-                target_branch,
+                request.appid,
+                request.target.depot_id,
+                request.target.manifest_id,
+                &request.target.branch,
                 target,
             )?;
-            build_unity_serialized_diff(base_env, base_data_dir, target_env, target_data_dir, path)
-                .await?
+            build_unity_serialized_diff(
+                base_env,
+                base_data_dir,
+                target_env,
+                target_data_dir,
+                &request.path,
+            )
+            .await?
         }
         #[cfg(feature = "unity")]
         Some(Transformer::UnityBundle) => {
-            let (base_env, base_data_dir) =
-                unity_env(state, appid, depot_id, manifest_id, branch, base)?;
+            let (base_env, base_data_dir) = unity_env(
+                state,
+                request.appid,
+                request.base.depot_id,
+                request.base.manifest_id,
+                &request.base.branch,
+                base,
+            )?;
             let (target_env, target_data_dir) = unity_env(
                 state,
-                appid,
-                target_depot_id,
-                target_manifest_id,
-                target_branch,
+                request.appid,
+                request.target.depot_id,
+                request.target.manifest_id,
+                &request.target.branch,
                 target,
             )?;
-            build_unity_bundle_diff(base_env, base_data_dir, target_env, target_data_dir, path)
-                .await?
+            build_unity_bundle_diff(
+                base_env,
+                base_data_dir,
+                target_env,
+                target_data_dir,
+                &request.path,
+            )
+            .await?
         }
-        Some(Transformer::Dll) => build_dll_diff(state, &base, &target, path).await?,
+        Some(Transformer::Dll) => build_dll_diff(state, &base, &target, &request.path).await?,
         _ => return Ok(None),
     };
 

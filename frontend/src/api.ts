@@ -405,6 +405,31 @@ export type NodeContent = {
 
 export type NodeStatus = "unchanged" | "changed" | "added" | "removed";
 
+export type HistoryStatus = NodeStatus | "initial" | "missing" | "unsupported";
+
+export type FileHistoryEntry = ManifestRef & {
+  status: HistoryStatus;
+  node_id?: string;
+  diff_node_id?: string;
+  previous?: ManifestRef;
+};
+
+export async function fetchFileHistory(
+  appid: AppId,
+  current: ManifestRef,
+  previous: ManifestRef[],
+  path: string,
+  nodeId?: string,
+): Promise<FileHistoryEntry[]> {
+  const r = await fetch(`/api/apps/${appid}/file/history`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ current, previous, path, node_id: nodeId }),
+  });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
 /// Fetch the structured diff for a file between two manifests.
 /// Returns the same shape as `fetchFileStructured`, with `status` and
 /// optional `object_ref` set on nodes the diff touched. Returns null

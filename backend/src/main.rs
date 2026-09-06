@@ -1,11 +1,6 @@
 #![recursion_limit = "256"]
 #![cfg_attr(all(windows, feature = "windowed"), windows_subsystem = "windows")]
-mod config;
-mod http;
-mod routes;
-mod state;
 mod static_files;
-mod steam;
 mod window;
 
 use std::net::SocketAddr;
@@ -27,7 +22,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 
-use crate::state::AppState;
+use steam_multiversion_viewer::state::AppState;
+use steam_multiversion_viewer::{routes, steam};
 
 #[derive(OpenApi)]
 #[openapi(info(

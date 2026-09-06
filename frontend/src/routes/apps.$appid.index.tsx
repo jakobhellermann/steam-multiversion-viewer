@@ -13,7 +13,7 @@ import {
   type ManifestRef,
   type ManifestStatusEntry,
 } from "../api";
-import { BranchFilterList } from "../components/BranchFilterList";
+import { BranchFilter } from "../components/BranchFilter";
 import { Bytes } from "../components/Bytes";
 import { ErrorBox } from "../components/ErrorBox";
 import { parseSteamDbPaste, steamDbSignInGated, type ParsedExtra } from "../lib/parseSteamDbPaste";
@@ -875,74 +875,6 @@ function ImportExtrasModal({
           </button>
         </footer>
       </div>
-    </div>
-  );
-}
-
-function BranchFilter({
-  branches,
-  hidden,
-  onToggle,
-  onShowAll,
-  onHideAll,
-  onOnly,
-}: {
-  branches: string[];
-  hidden: Set<string>;
-  onToggle: (name: string) => void;
-  onShowAll: () => void;
-  onHideAll: () => void;
-  onOnly: (name: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  // Close on outside click / Escape — same pattern as CompareMenu.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  const visibleCount = branches.length - hidden.size;
-  const label =
-    hidden.size === 0
-      ? "all"
-      : visibleCount === 0
-        ? "none"
-        : `${visibleCount} of ${branches.length}`;
-  return (
-    <div ref={rootRef} className="relative inline-block">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex items-center gap-1.5 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-slate-600"
-      >
-        <span className="text-slate-500">Branches:</span>
-        <span>{label}</span>
-        <span className="text-slate-500">{open ? "▲" : "▼"}</span>
-      </button>
-      {open && (
-        <div className="dropdown-panel right-0 z-10 flex max-h-96 w-64 flex-col overflow-hidden surface-float">
-          <BranchFilterList
-            branches={branches}
-            hidden={hidden}
-            onToggle={onToggle}
-            onShowAll={onShowAll}
-            onHideAll={onHideAll}
-            onOnly={onOnly}
-          />
-        </div>
-      )}
     </div>
   );
 }

@@ -44,6 +44,7 @@ export function FilePreview({
   rawSrc,
   locator,
   showHeader = true,
+  onSelectedHistoryNodeChange,
 }: {
   view: FileView;
   /// URL to the raw bytes — needed for `<img>` / `<audio>` / `<video>`
@@ -53,6 +54,7 @@ export function FilePreview({
   /// query key so a .dll's decompile result can be cached.
   locator: FileLocator;
   showHeader?: boolean;
+  onSelectedHistoryNodeChange?: (nodeId: string | undefined) => void;
 }) {
   if (view.kind !== "file") {
     return null;
@@ -73,7 +75,11 @@ export function FilePreview({
     // would refuse to shrink below its intrinsic content height.
     return (
       <section className={`${sectionClass} flex min-h-0 flex-1 flex-col`}>
-        <StructuredView locator={locator} showHeader={showHeader} />
+        <StructuredView
+          locator={locator}
+          showHeader={showHeader}
+          onSelectedHistoryNodeChange={onSelectedHistoryNodeChange}
+        />
       </section>
     );
   }

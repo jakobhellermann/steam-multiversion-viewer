@@ -12,12 +12,13 @@ pub mod export;
 pub mod extra_manifests;
 pub mod files;
 pub mod game_info;
+pub mod history;
 pub mod library;
 pub mod mount;
 pub mod store;
 pub mod structured;
 
-pub(crate) type Result<T, E = ApiError> = std::result::Result<T, E>;
+pub type Result<T, E = ApiError> = std::result::Result<T, E>;
 
 pub(super) fn default_branch() -> String {
     "public".into()
@@ -35,6 +36,7 @@ pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
         .routes(routes!(library::manifest_files))
         .routes(routes!(library::manifest_statuses))
         .routes(routes!(game_info::game_info))
+        .routes(routes!(history::file_history))
         .routes(routes!(files::manifest_file))
         .routes(routes!(files::manifest_file_raw))
         .routes(routes!(files::manifest_file_transformed))

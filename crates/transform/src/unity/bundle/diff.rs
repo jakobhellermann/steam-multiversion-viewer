@@ -156,7 +156,9 @@ where
         ..Default::default()
     };
 
-    Ok(StructuredTree { root })
+    let mut tree = StructuredTree { root };
+    crate::unity::serializedfile::diff::attach_diff_matches(&mut tree.root);
+    Ok(tree)
 }
 
 /// Sit-classification for one bundle entry — used as the join key

@@ -11,19 +11,52 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use serde_json::json;
 use utoipa::ToSchema;
 
-/// One entry in a structured tree. Nodes are recursive — children
-/// follow the same shape.
+/// Opaque identifier for a node within one structured file.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(transparent)]
+pub struct NodeId(pub String);
+
+impl From<String> for NodeId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for NodeId {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl AsRef<str> for NodeId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Corresponding node ids in one structured diff.
+#[derive(Debug, Clone, Default)]
+pub struct DiffNodeMatch {
+    pub base: Option<NodeId>,
+    pub target: Option<NodeId>,
+}
+
+/// One entry in a structured tree. Nodes are recursive.
 #[derive(Debug, Clone, Default, Serialize, ToSchema)]
 pub struct Node {
     /// Stable identifier inside its `StructuredTree`, used by the
     /// node-content endpoint to fetch lazy detail. Format is up to the
     /// builder; the frontend treats it as an opaque string.
     pub id: String,
+    /// Version-local ids represented by this diff row. This stays
+    /// backend-only; history uses it to follow an object across versions.
+    #[serde(skip_serializing)]
+    pub diff_match: DiffNodeMatch,
     /// Human-readable label shown in the tree row.
     pub label: String,
     /// Free-form type tag builders key decisions off internally (e.g.
@@ -104,6 +137,7 @@ impl Node {
     pub fn leaf(id: impl Into<String>, label: impl Into<String>, kind: impl Into<String>) -> Self {
         Self {
             id: id.into(),
+            diff_match: DiffNodeMatch::default(),
             label: label.into(),
             kind: kind.into(),
             badge: None,

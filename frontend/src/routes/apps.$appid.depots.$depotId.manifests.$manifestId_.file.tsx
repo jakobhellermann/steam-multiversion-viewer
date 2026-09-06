@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { createFileRoute, Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   downloadManifest,
   fetchAppInfo,
@@ -67,6 +67,7 @@ function FileViewPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   const appid = Number(appidParam);
   const depotId = Number(depotIdParam);
+  const [historyNodeId, setHistoryNodeId] = useState<string>();
   const queryClient = useQueryClient();
 
   const view = useQuery({
@@ -290,6 +291,18 @@ function FileViewPage() {
           // the real menu mounts.
           <CompareMenuPlaceholder count={diffTargets.size} />
         )}
+        <Link
+          to="/apps/$appid/depots/$depotId/manifests/$manifestId/file/history"
+          params={{ appid: appidParam, depotId: depotIdParam, manifestId }}
+          search={{
+            branch: branch === "public" ? undefined : branch,
+            path,
+            node_id: historyNodeId,
+          }}
+          className="rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 hover:border-slate-600"
+        >
+          History
+        </Link>
       </div>
 
       {diffRefs.length > 0 && (
@@ -344,6 +357,7 @@ function FileViewPage() {
           view={view.data}
           rawSrc={fileRawUrl(appid, depotId, manifestId, branch, path)}
           locator={{ appid, depotId, manifestId, branch, path }}
+          onSelectedHistoryNodeChange={setHistoryNodeId}
         />
       )}
     </div>

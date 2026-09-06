@@ -34,9 +34,11 @@ import type { FileLocator } from "./types";
 export function StructuredView({
   locator,
   showHeader = true,
+  onSelectedHistoryNodeChange,
 }: {
   locator: FileLocator;
   showHeader?: boolean;
+  onSelectedHistoryNodeChange?: (nodeId: string | undefined) => void;
 }) {
   const tree = useQuery({
     queryKey: [
@@ -84,14 +86,19 @@ export function StructuredView({
       root={tree.data.root}
       showHeader={showHeader}
       mountKey={locator.path}
+      onSelectedNodeChange={(node) =>
+        onSelectedHistoryNodeChange?.(node?.has_content === true ? node.id : undefined)
+      }
       renderContent={({ node, isInTree, onHashTarget }) => (
-        <NodeContentPanel
-          locator={locator}
-          nodeId={node.id}
-          contentMime={node.content_mime}
-          isInTree={isInTree}
-          onHashTarget={onHashTarget}
-        />
+        <>
+          <NodeContentPanel
+            locator={locator}
+            nodeId={node.id}
+            contentMime={node.content_mime}
+            isInTree={isInTree}
+            onHashTarget={onHashTarget}
+          />
+        </>
       )}
     />
   );
@@ -122,6 +129,7 @@ export function Tree({
   showHeader,
   renderContent,
   mountKey,
+  onSelectedNodeChange,
 }: {
   root: StructuredNode;
   showHeader: boolean;
@@ -134,6 +142,7 @@ export function Tree({
   /// changes. Used to re-focus the tree container — `Tree` itself
   /// has no notion of "the current file", just a root.
   mountKey: string;
+  onSelectedNodeChange?: (node: StructuredNode | null) => void;
 }) {
   // IMPORTANT: this component must stay format-agnostic. Don't add
   // logic that branches on a node's `kind` or `id` value — anything
@@ -178,6 +187,7 @@ export function Tree({
     return map;
   }, [root]);
   const selectedNode = selectedId ? (nodeById.get(selectedId) ?? null) : null;
+  useEffect(() => onSelectedNodeChange?.(selectedNode), [onSelectedNodeChange, selectedNode]);
 
   // Per-side `[archive:X/]<path-id>` → real node id, so a pptr ref
   // resolves to its diff node even when that node carries a
