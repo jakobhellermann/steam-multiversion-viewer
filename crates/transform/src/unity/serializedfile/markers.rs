@@ -72,6 +72,7 @@ pub fn shape_marker(polygons: &[Vec<(f32, f32)>]) -> String {
 /// frontend recovers per-line side from the unified-diff `+`/`-`
 /// gutter, so we don't bake a side field into the wire shape.
 pub fn pptr_marker(ref_: &str, target: &str, type_id: &str, file: &str) -> String {
+    let file = marker_file_path(file);
     let mut out = String::with_capacity(
         MARK_PREFIX.len() + 6 + ref_.len() + target.len() + type_id.len() + file.len(),
     );
@@ -87,6 +88,7 @@ pub fn pptr_marker(ref_: &str, target: &str, type_id: &str, file: &str) -> Strin
 /// to jump to (a `type:<FQN>`), `name` the on-screen label, `file` the
 /// depot-relative path of the assembly (`<DataDir>/Managed/<X>.dll`).
 pub fn classref_marker(ref_: &str, name: &str, file: &str) -> String {
+    let file = marker_file_path(file);
     let mut out = String::with_capacity(
         MARK_PREFIX.len() + MARK_TYPE_CLASSREF.len() + 3 + ref_.len() + name.len() + file.len(),
     );
@@ -95,6 +97,16 @@ pub fn classref_marker(ref_: &str, name: &str, file: &str) -> String {
         "{MARK_PREFIX}{MARK_TYPE_CLASSREF}{MARK_SEP}{ref_}{MARK_SEP}{name}{MARK_SEP}{file}",
     );
     out
+}
+
+/// Normalize a depot path for the marker wire format: payloads live
+/// inside JSON strings that the frontend runs through shiki before
+/// swapping markers for links, and a `\` would become a JSON escape
+/// that splits the shiki token and mangles the swap. Depot paths are
+/// `/`-separated anyway; `Path::display` on Windows yields `\`, so
+/// fold it here at the wire boundary.
+fn marker_file_path(file: &str) -> String {
+    file.replace('\\', "/")
 }
 
 /// Build a `color` marker. `hex` should already include the leading
@@ -193,6 +205,23 @@ mod tests {
                 "{MARK_PREFIX}classref{MARK_SEP}type:SceneManager{MARK_SEP}SceneManager{MARK_SEP}hollow_knight_Data/Managed/Assembly-CSharp.dll",
             )
         );
+    }
+
+    #[test]
+    fn marker_file_paths_are_forward_slashed() {
+        // A Windows `Path::display` path must not leak into the payload:
+        // shiki splits the JSON string token at the escaped backslash
+        // and the frontend's post-shiki swap mangles the markup.
+        let m = pptr_marker(
+            "obj:5",
+            "Player",
+            "Camera",
+            "Data\\StreamingAssets\\x.bundle",
+        );
+        assert!(m.ends_with("Data/StreamingAssets/x.bundle"));
+        assert!(!m.contains('\\'));
+        let c = classref_marker("type:Foo", "Foo", "Data\\Managed\\Assembly-CSharp.dll");
+        assert!(c.ends_with("Data/Managed/Assembly-CSharp.dll"));
     }
 
     #[test]
