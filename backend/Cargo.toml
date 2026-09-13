@@ -12,6 +12,9 @@ unity = ["transform/unity", "dep:rabex-env", "dep:rabex-env-steam-depot-vfs"]
 windowed = []
 dhat-heap = []
 
+[build-dependencies]
+winresource = "0.1"
+
 [dependencies]
 anyhow = "1.0"
 arc-swap = "1.9"
