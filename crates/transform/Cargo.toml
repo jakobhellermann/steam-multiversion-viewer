@@ -20,7 +20,6 @@ unity = [
 
 [dependencies]
 anyhow = "1.0"
-async-trait = "0.1"
 camino = { version = "1.2.2", features = ["serde1"] }
 dll-diff = { path = "../dll-diff" }
 object = { version = "0.38", default-features = false, features = ["read"] }
