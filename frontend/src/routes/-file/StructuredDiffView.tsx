@@ -82,8 +82,15 @@ export function StructuredDiffView({
       root={tree.data.root}
       showHeader={false}
       mountKey={mountKey}
-      renderContent={({ node }) => (
-        <DiffNodeBody appid={appid} base={base} target={target} path={path} node={node} />
+      renderContent={({ node, isInTree }) => (
+        <DiffNodeBody
+          appid={appid}
+          base={base}
+          target={target}
+          path={path}
+          node={node}
+          isInTree={isInTree}
+        />
       )}
     />
   );
@@ -95,12 +102,17 @@ function DiffNodeBody({
   target,
   path,
   node,
+  isInTree,
 }: {
   appid: number;
   base: { depotId: number; manifestId: string; branch: string };
   target: FileLocator;
   path: string;
   node: StructuredNode;
+  /// Whether a pptr ref resolves to a row in this diff tree — refs to
+  /// objects outside the changed set render as plain text instead of
+  /// dead links (the markers module's `isLocalRefInTree` contract).
+  isInTree: (id: string) => boolean;
 }) {
   // Backend reads which side(s) to dump out of the id's prefix — the
   // frontend just hands the raw tree id over. `has_content` gates the
@@ -200,13 +212,15 @@ function DiffNodeBody({
   // gutter. A one-sided body (added/removed node → plain json/csharp)
   // has no gutter, so the whole dump belongs to one side: a removed
   // node is target-only, everything else base. Tag accordingly and
-  // resolve external refs against that side's manifest.
+  // resolve external refs against that side's manifest. `isInTree` is
+  // the tree's ref resolver, so local refs to objects the diff tree
+  // doesn't list render plain instead of as dead links.
   const postProcess =
     settled.lang === "diff"
-      ? makeDiffPostProcess(baseLocator, targetLocator, () => true)
+      ? makeDiffPostProcess(baseLocator, targetLocator, isInTree)
       : node.status === "removed"
-        ? makePostProcess(targetLocator, () => true, "target")
-        : makePostProcess(baseLocator, () => true, "base");
+        ? makePostProcess(targetLocator, isInTree, "target")
+        : makePostProcess(baseLocator, isInTree, "base");
   return (
     <DiffContentPane>
       <HighlightedPre code={settled.text} lang={settled.lang} bare postProcess={postProcess} />
