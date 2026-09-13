@@ -359,7 +359,7 @@ function CompareMenuPlaceholder({ count }: { count: number }) {
     <button
       type="button"
       disabled
-      className={`rounded border px-3 py-1.5 text-sm whitespace-nowrap opacity-60 ${
+      className={`dropdown-trigger opacity-60 ${
         count > 0
           ? "border-sky-700 bg-sky-950/40 text-sky-200"
           : "border-slate-700 bg-slate-900 text-slate-300"

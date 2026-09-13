@@ -363,7 +363,7 @@ export function CompareMenu({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`rounded border px-3 py-1.5 text-sm whitespace-nowrap ${
+        className={`dropdown-trigger ${
           count > 0
             ? "border-sky-700 bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
             : "border-slate-700 text-slate-300 hover:border-slate-600"
@@ -375,7 +375,7 @@ export function CompareMenu({
         Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
       </button>
       {open && (
-        <div className="absolute top-full -right-25 z-10 mt-1 flex max-h-96 w-128 rounded border border-slate-700 bg-slate-900 shadow-lg">
+        <div className="dropdown-panel -right-25 z-10 flex max-h-96 w-128 bg-slate-900">
           <div className="flex w-56 flex-col border-r border-slate-800">
             {allCandidateBranches.length > 1 && (
               <div className="relative z-20 shrink-0 border-b border-slate-800 bg-slate-900">
@@ -391,7 +391,7 @@ export function CompareMenu({
                   <span className="text-slate-500">{branchMenuOpen ? "▲" : "▼"}</span>
                 </button>
                 {branchMenuOpen && (
-                  <div className="absolute top-full left-0 z-20 mt-1 flex max-h-72 w-48 flex-col overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-lg">
+                  <div className="dropdown-panel left-0 z-20 flex max-h-72 w-48 flex-col overflow-hidden bg-slate-900">
                     <BranchFilterList
                       branches={allCandidateBranches}
                       hidden={hiddenBranches}

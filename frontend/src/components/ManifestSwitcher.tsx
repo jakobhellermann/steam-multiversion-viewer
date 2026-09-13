@@ -173,7 +173,7 @@ export function ManifestSwitcher({
         </button>
       )}
       {open && (
-        <div className="absolute top-full left-0 z-20 mt-1 max-h-80 w-72 overflow-auto rounded border border-slate-700 bg-slate-900 shadow-lg">
+        <div className="dropdown-panel left-0 z-20 max-h-80 w-72 overflow-auto bg-slate-900">
           <ul>
             {visible.map((m) => {
               const isCurrent = m.manifestId === currentManifestId && m.branch === currentBranch;

@@ -792,7 +792,7 @@ function ImportExtrasModal({
               "1 January 2025 – 12:00:00 UTC    1 year ago     1111111111111111111\n" +
               "2 January 2025 – 12:00:00 UTC    1 year ago     2222222222222222222 public-beta"
             }
-            className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs focus:border-sky-700 focus:outline-none"
+            className="w-full field bg-slate-950 px-3 py-2 font-mono text-xs focus:border-sky-700 focus:outline-none"
           />
           {signInGated && (
             <p className="rounded border border-amber-800/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
@@ -932,7 +932,7 @@ function BranchFilter({
         <span className="text-slate-500">{open ? "▲" : "▼"}</span>
       </button>
       {open && (
-        <div className="absolute top-full right-0 z-10 mt-1 flex max-h-96 w-64 flex-col overflow-hidden rounded border border-slate-700 bg-slate-900 shadow-lg">
+        <div className="dropdown-panel right-0 z-10 flex max-h-96 w-64 flex-col overflow-hidden bg-slate-900">
           <BranchFilterList
             branches={branches}
             hidden={hidden}

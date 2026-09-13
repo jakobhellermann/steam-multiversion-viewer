@@ -931,7 +931,7 @@ function FilesPanel({
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
-            className="w-full rounded border border-slate-700  px-3 py-1.5 pr-8 text-sm focus:border-sky-700 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+            className="w-full field bg-slate-900 px-3 py-1.5 pr-8 text-sm focus:border-sky-700 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
           />
           {query && (
             <button
@@ -1252,10 +1252,10 @@ function ExtensionFilter({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`rounded border px-3 py-1.5 text-sm whitespace-nowrap ${
+        className={`dropdown-trigger ${
           count > 0
             ? "border-sky-700 bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
-            : "border-slate-700  text-slate-300 hover:border-slate-600"
+            : "border-slate-700 text-slate-300 hover:border-slate-600"
         }`}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -1263,8 +1263,8 @@ function ExtensionFilter({
         Extensions{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
       </button>
       {open && (
-        <div className="absolute top-full right-0 z-10 mt-1 max-h-80 w-48 overflow-auto rounded border border-slate-700 bg-slate-900 shadow-lg">
-          <div className="sticky top-0 flex items-center justify-between border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400">
+        <div className="dropdown-panel right-0 z-10 max-h-80 w-48 overflow-auto bg-slate-900">
+          <div className="dropdown-header bg-slate-900">
             <span className="tabular-nums">{extCounts.length} types</span>
             {count > 0 && (
               <button

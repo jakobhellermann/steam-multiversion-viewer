@@ -67,7 +67,7 @@ function VibrancySection({ config, onSaved }: { config: Config; onSaved: () => v
           <select
             value={effect}
             onChange={(e) => changeEffect(e.target.value as VibrancyEffect)}
-            className="mt-1 block w-40 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+            className="mt-1 block w-40 field bg-slate-900 px-3 py-2 text-sm"
           >
             <option value="none">None</option>
             <option value="mica">Mica</option>
@@ -133,7 +133,7 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
           type="text"
           value={storeRoot}
           onChange={(e) => setStoreRoot(e.target.value)}
-          className="mt-1 block w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm"
+          className="mt-1 block w-full field bg-slate-900 px-3 py-2 font-mono text-sm"
           spellCheck={false}
         />
         <p className="mt-1 text-xs text-slate-500">
@@ -148,7 +148,7 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
           type="text"
           value={mountpoint}
           onChange={(e) => setMountpoint(e.target.value)}
-          className="mt-1 block w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm"
+          className="mt-1 block w-full field bg-slate-900 px-3 py-2 font-mono text-sm"
           spellCheck={false}
         />
         <p className="mt-1 text-xs text-slate-500">
@@ -163,7 +163,7 @@ function SettingsForm({ config, onSaved }: { config: Config; onSaved: () => void
           type="text"
           value={exportDir}
           onChange={(e) => setExportDir(e.target.value)}
-          className="mt-1 block w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm"
+          className="mt-1 block w-full field bg-slate-900 px-3 py-2 font-mono text-sm"
           spellCheck={false}
         />
         <p className="mt-1 text-xs text-slate-500">
