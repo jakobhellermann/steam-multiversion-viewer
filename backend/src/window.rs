@@ -59,6 +59,13 @@ fn build_webview(
     proxy: EventLoopProxy<UserEvent>,
     transparent: bool,
 ) -> wry::WebView {
+    #[cfg(target_os = "windows")]
+    let mut web_context = wry::WebContext::new(Some(webview_data_dir()));
+    #[cfg(target_os = "windows")]
+    let builder = WebViewBuilder::new_with_web_context(&mut web_context)
+        .with_url(url)
+        .with_back_forward_navigation_gestures(true);
+    #[cfg(not(target_os = "windows"))]
     let builder = WebViewBuilder::new()
         .with_url(url)
         .with_back_forward_navigation_gestures(true);
@@ -85,9 +92,22 @@ fn build_webview(
         builder.build_gtk(vbox).expect("failed to create webview")
     };
     #[cfg(not(target_os = "linux"))]
-    let webview = builder.build(window).expect("failed to create webview");
+    let webview = builder.build(window).unwrap_or_else(|e| {
+        tracing::error!(%e, "failed to create webview");
+        panic!("failed to create webview: {e}");
+    });
 
     webview
+}
+
+/// WebView2 defaults its user data folder to the exe's directory, which is
+/// read-only under Program Files — environment creation then fails with
+/// E_ACCESSDENIED. Keep the data in a per-user directory instead.
+#[cfg(target_os = "windows")]
+fn webview_data_dir() -> std::path::PathBuf {
+    directories::ProjectDirs::from("", "", "steam-multiversion-viewer")
+        .map(|d| d.cache_dir().join("webview"))
+        .unwrap_or_else(|| std::env::temp_dir().join("steam-multiversion-viewer"))
 }
 
 /// Opens a native webview window on `url` and runs the event loop.
