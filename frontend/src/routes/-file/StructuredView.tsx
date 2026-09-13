@@ -680,7 +680,7 @@ export function Tree({
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
-            className="w-full field bg-slate-900 px-3 py-1.5 pr-8 text-sm focus:border-sky-700 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+            className="w-full field px-3 py-1.5 pr-8 text-sm [&::-webkit-search-cancel-button]:hidden"
           />
           {query && (
             <button
@@ -1109,7 +1109,7 @@ function FacetDropdown({
         className={`dropdown-trigger capitalize ${
           count > 0
             ? "border-sky-700 bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
-            : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-600"
+            : "border-slate-700 text-slate-300 hover:border-slate-600"
         }`}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -1123,9 +1123,9 @@ function FacetDropdown({
           onScroll={(e) => {
             scrollTopRef.current = e.currentTarget.scrollTop;
           }}
-          className="dropdown-panel right-0 z-10 max-h-80 w-56 overflow-auto bg-slate-900"
+          className="dropdown-panel right-0 z-10 max-h-80 w-56 overflow-auto surface-float"
         >
-          <div className="dropdown-header bg-slate-900">
+          <div className="dropdown-header surface-float">
             <span className="tabular-nums">{counts.length} values</span>
             {count > 0 && (
               <button
@@ -1144,7 +1144,7 @@ function FacetDropdown({
                 <li key={v}>
                   <label
                     onMouseDown={(e) => e.preventDefault()}
-                    className={`flex cursor-pointer items-center gap-2 px-3 py-1 text-sm select-none hover:bg-slate-800/60 ${
+                    className={`flex cursor-pointer items-center gap-2 px-3 py-1 text-sm select-none hover:bg-slate-700/60 ${
                       checked ? "text-sky-200" : "text-slate-300"
                     }`}
                   >

@@ -50,7 +50,7 @@ export function BranchFilterList({
         {branches.map((name) => {
           const checked = !hidden.has(name);
           return (
-            <li key={name} className="flex items-center hover:bg-slate-800/60">
+            <li key={name} className="flex items-center hover:bg-slate-700/60">
               <label className="flex flex-1 cursor-pointer items-center gap-2 px-3 py-1 select-none">
                 <input
                   type="checkbox"

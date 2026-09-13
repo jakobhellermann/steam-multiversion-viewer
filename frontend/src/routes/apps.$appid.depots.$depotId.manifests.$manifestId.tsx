@@ -931,7 +931,7 @@ function FilesPanel({
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
-            className="w-full field bg-slate-900 px-3 py-1.5 pr-8 text-sm focus:border-sky-700 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+            className="w-full field px-3 py-1.5 pr-8 text-sm [&::-webkit-search-cancel-button]:hidden"
           />
           {query && (
             <button
@@ -1263,8 +1263,8 @@ function ExtensionFilter({
         Extensions{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
       </button>
       {open && (
-        <div className="dropdown-panel right-0 z-10 max-h-80 w-48 overflow-auto bg-slate-900">
-          <div className="dropdown-header bg-slate-900">
+        <div className="dropdown-panel right-0 z-10 max-h-80 w-48 overflow-auto surface-float">
+          <div className="dropdown-header surface-float">
             <span className="tabular-nums">{extCounts.length} types</span>
             {count > 0 && (
               <button
@@ -1283,7 +1283,7 @@ function ExtensionFilter({
                 <li key={ext}>
                   <label
                     onMouseDown={(e) => e.preventDefault()}
-                    className={`flex cursor-pointer items-center gap-2 px-3 py-1 text-sm select-none hover:bg-slate-800/60 ${
+                    className={`flex cursor-pointer items-center gap-2 px-3 py-1 text-sm select-none hover:bg-slate-700/60 ${
                       checked ? "text-sky-200" : "text-slate-300"
                     }`}
                   >

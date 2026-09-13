@@ -360,9 +360,7 @@ function CompareMenuPlaceholder({ count }: { count: number }) {
       type="button"
       disabled
       className={`dropdown-trigger opacity-60 ${
-        count > 0
-          ? "border-sky-700 bg-sky-950/40 text-sky-200"
-          : "border-slate-700 bg-slate-900 text-slate-300"
+        count > 0 ? "border-sky-700 bg-sky-950/40 text-sky-200" : "border-slate-700 text-slate-300"
       }`}
       title="Loading…"
     >

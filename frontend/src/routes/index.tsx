@@ -26,7 +26,7 @@ function Home() {
   return (
     <div className="mx-auto max-w-4xl p-8">
       <input
-        className="mb-4 w-full field bg-slate-800 px-3 py-2 placeholder-slate-400"
+        className="mb-4 w-full field px-3 py-2 placeholder-slate-400"
         placeholder="Search…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}

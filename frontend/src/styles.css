@@ -7,8 +7,25 @@
 
 /* --- Shared UI surfaces -------------------------------------------------- */
 
+/* Floating layer over content (dropdowns, drawers, modals, popovers):
+   elevated surface one step lighter than the page (dark-mode elevation
+   convention — flyouts sit above, not below, the window tone).
+   No backdrop-filter: WebView2 transparent windows don't apply it, so
+   opaque paint is the only reliable way to hide the content below. */
+@utility surface-float {
+  background-color: rgb(34 40 52);
+}
+
+/* On the flat opaque page (#0f172a) that panel color reads slightly
+   out-of-family against the bluer background — there stay in the slate
+   family instead. The vibrancy class only exists in the native window
+   with a live backdrop. */
+html:not(.vibrancy-active) .surface-float {
+  background-color: rgb(30 41 59);
+}
+
 /* Popup panel anchored below its trigger. Add placement (left/right),
-   z, size, overflow, display and background per instance. */
+   z, size, overflow and display per instance, plus surface-float. */
 @utility dropdown-panel {
   position: absolute;
   top: 100%;
@@ -18,8 +35,8 @@
   box-shadow: var(--shadow-lg);
 }
 
-/* Sticky header strip inside a dropdown-panel; add a background per
-   instance so rows scrolling underneath don't show through. */
+/* Sticky header strip inside a dropdown-panel. Compose with surface-float
+   so rows scrolling underneath are smeared instead of showing through. */
 @utility dropdown-header {
   position: sticky;
   top: 0;
@@ -33,10 +50,15 @@
   color: var(--color-slate-400);
 }
 
-/* Border-only input/select/textarea shell; add background per instance. */
+/* Border-only input/select/textarea shell — transparent, so the page
+   backdrop shows through (cut-out look on the mica build). */
 @utility field {
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-slate-700);
+  &:focus {
+    border-color: var(--color-sky-700);
+    outline: none;
+  }
 }
 
 /* Border-only trigger button shell for dropdown triggers. Add border-color,

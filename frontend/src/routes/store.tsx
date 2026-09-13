@@ -229,7 +229,7 @@ function StorePage() {
         </div>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 border-t border-slate-800 bg-slate-950/95 backdrop-blur">
+      <div className="fixed inset-x-0 bottom-0 border-t border-slate-800 surface-float">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-6 gap-y-2 px-8 py-3">
           <div className="text-sm">
             <span className="text-slate-400">Frees </span>

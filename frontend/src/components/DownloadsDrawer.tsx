@@ -222,7 +222,7 @@ export function DownloadsDrawer() {
         exiting ? "opacity-0" : "opacity-100"
       }`}
     >
-      <div className="flex items-stretch gap-3 rounded-t border border-slate-700 bg-slate-900 px-3 py-2 shadow">
+      <div className="flex items-stretch gap-3 rounded-t border border-slate-700 surface-float px-3 py-2 shadow">
         <span
           className={`inline-block h-2 w-2 self-center rounded-full ${active ? "animate-pulse bg-sky-400" : stats.chunks_failed > 0 ? "bg-amber-400" : "bg-emerald-400"}`}
         />
@@ -254,7 +254,7 @@ export function DownloadsDrawer() {
           style={{ width: `${bytesPct}%` }}
         />
       </div>
-      <div className="space-y-1.5 rounded-b border-x border-b border-slate-700 bg-slate-900 px-3 py-3 text-sm shadow">
+      <div className="space-y-1.5 rounded-b border-x border-b border-slate-700 surface-float px-3 py-3 text-sm shadow">
         <Row label="Chunks">
           <span className="tabular-nums">
             {stats.chunks_completed.toLocaleString()} / {stats.chunks_total.toLocaleString()}

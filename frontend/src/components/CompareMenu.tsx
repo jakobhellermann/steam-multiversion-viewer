@@ -375,15 +375,15 @@ export function CompareMenu({
         Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
       </button>
       {open && (
-        <div className="dropdown-panel -right-25 z-10 flex max-h-96 w-128 bg-slate-900">
+        <div className="dropdown-panel -right-25 z-10 flex max-h-96 w-128 surface-float">
           <div className="flex w-56 flex-col border-r border-slate-800">
             {allCandidateBranches.length > 1 && (
-              <div className="relative z-20 shrink-0 border-b border-slate-800 bg-slate-900">
+              <div className="relative z-20 shrink-0 border-b border-slate-800">
                 <button
                   type="button"
                   onClick={() => setBranchMenuOpen((o) => !o)}
                   aria-expanded={branchMenuOpen}
-                  className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-800/60"
+                  className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-xs text-slate-400 hover:bg-slate-700/60"
                 >
                   <span className="truncate">
                     Branches: <span className="text-slate-300">{branchLabel}</span>
@@ -391,7 +391,7 @@ export function CompareMenu({
                   <span className="text-slate-500">{branchMenuOpen ? "▲" : "▼"}</span>
                 </button>
                 {branchMenuOpen && (
-                  <div className="dropdown-panel left-0 z-20 flex max-h-72 w-48 flex-col overflow-hidden bg-slate-900">
+                  <div className="dropdown-panel left-0 z-20 flex max-h-72 w-48 flex-col overflow-hidden surface-float">
                     <BranchFilterList
                       branches={allCandidateBranches}
                       hidden={hiddenBranches}
@@ -404,7 +404,7 @@ export function CompareMenu({
                 )}
               </div>
             )}
-            <div className="flex shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-400">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-800 px-3 py-1.5 text-xs text-slate-400">
               <span className="tabular-nums">compare to...</span>
               {count > 0 && (
                 <button
@@ -444,8 +444,8 @@ export function CompareMenu({
                           onClick={() => setActiveDepotId(g.depotId)}
                           className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
                             isActive
-                              ? "bg-slate-800 text-slate-100"
-                              : "text-slate-300 hover:bg-slate-800/60"
+                              ? "bg-slate-700 text-slate-100"
+                              : "text-slate-300 hover:bg-slate-700/60"
                           }`}
                         >
                           <span className="min-w-0 flex-1">
@@ -544,7 +544,7 @@ export function CompareMenu({
                         className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1 text-left text-sm select-none ${
                           checked
                             ? "bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
-                            : "text-slate-300 hover:bg-slate-800/60"
+                            : "text-slate-300 hover:bg-slate-700/60"
                         }`}
                       >
                         <span

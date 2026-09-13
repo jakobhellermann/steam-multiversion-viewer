@@ -736,7 +736,7 @@ function ImportExtrasModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="mx-auto mt-32 mb-16 w-160 max-w-[95vw] rounded border border-slate-700 bg-slate-900 shadow-xl">
+      <div className="mx-auto mt-32 mb-16 w-160 max-w-[95vw] rounded border border-slate-700 surface-float shadow-xl">
         <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
           <h3 className="text-base font-semibold">Track manifests in depot {depotId}</h3>
           <button
@@ -792,7 +792,7 @@ function ImportExtrasModal({
               "1 January 2025 – 12:00:00 UTC    1 year ago     1111111111111111111\n" +
               "2 January 2025 – 12:00:00 UTC    1 year ago     2222222222222222222 public-beta"
             }
-            className="w-full field bg-slate-950 px-3 py-2 font-mono text-xs focus:border-sky-700 focus:outline-none"
+            className="w-full field px-3 py-2 font-mono text-xs"
           />
           {signInGated && (
             <p className="rounded border border-amber-800/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-300">
@@ -802,7 +802,7 @@ function ImportExtrasModal({
           )}
           {parsed.length > 0 && (
             <div className="overflow-hidden rounded border border-slate-800">
-              <div className="flex justify-between border-b border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-400">
+              <div className="flex justify-between border-b border-slate-800 px-3 py-1.5 text-xs text-slate-400">
                 <span>{parsed.length} parsed</span>
                 <span className="text-slate-500">
                   {newOnly.length} new · {eligible.length - newOnly.length} already tracked
@@ -932,7 +932,7 @@ function BranchFilter({
         <span className="text-slate-500">{open ? "▲" : "▼"}</span>
       </button>
       {open && (
-        <div className="dropdown-panel right-0 z-10 flex max-h-96 w-64 flex-col overflow-hidden bg-slate-900">
+        <div className="dropdown-panel right-0 z-10 flex max-h-96 w-64 flex-col overflow-hidden surface-float">
           <BranchFilterList
             branches={branches}
             hidden={hidden}

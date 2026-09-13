@@ -173,7 +173,7 @@ export function ManifestSwitcher({
         </button>
       )}
       {open && (
-        <div className="dropdown-panel left-0 z-20 max-h-80 w-72 overflow-auto bg-slate-900">
+        <div className="dropdown-panel left-0 z-20 max-h-80 w-72 overflow-auto surface-float">
           <ul>
             {visible.map((m) => {
               const isCurrent = m.manifestId === currentManifestId && m.branch === currentBranch;
@@ -193,8 +193,8 @@ export function ManifestSwitcher({
                     }}
                     className={`flex items-center gap-2 px-3 py-1.5 text-sm ${
                       isCurrent
-                        ? "bg-slate-800 text-slate-100"
-                        : "text-slate-300 hover:bg-slate-800/60"
+                        ? "bg-slate-700 text-slate-100"
+                        : "text-slate-300 hover:bg-slate-700/60"
                     }`}
                   >
                     <span className="inline-block w-3 text-center text-sky-400">
