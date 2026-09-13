@@ -65,7 +65,17 @@ fn main() -> Result<()> {
     runtime.spawn(unmount_on_signal(state.clone()));
 
     if args.window {
-        window::run(&format!("http://{addr}"), state, runtime.handle().clone());
+        // The window loads this server's embedded frontend unless SMV_FRONTEND_URL
+        // points it elsewhere — e.g. the vite dev server (pnpm dev, port 6555)
+        // for hot reload, while vite keeps proxying /api to this server on 6556.
+        let url = match std::env::var("SMV_FRONTEND_URL") {
+            Ok(url) => {
+                tracing::info!(%url, "window opens external frontend URL");
+                url
+            }
+            Err(_) => format!("http://{addr}"),
+        };
+        window::run(&url, state, runtime.handle().clone());
     }
 
     if args.open {
