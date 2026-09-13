@@ -7,9 +7,11 @@ import {
   fetchAppInfo,
   fetchExtraManifests,
   fetchFileViewOptional,
+  fetchGameInfo,
   fetchManifestStatuses,
   fileRawUrl,
   type FileView,
+  type GameInfo,
   type ManifestRef,
 } from "../api";
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
@@ -148,6 +150,37 @@ function DiffPage() {
   const newSide = baseIsNewer ? urlBase : urlTarget;
   const oldSide = baseIsNewer ? urlTarget : urlBase;
 
+  // Detected game version per side, preferred over the raw id in the
+  // header labels. Same /game_info queries the manifest switcher and
+  // compare menu run (branch deliberately out of the key), so these are
+  // usually cache hits; `null` engine or missing bundleVersion falls
+  // back to the id below.
+  const baseGameInfo = useQuery({
+    queryKey: ["game-info", appid, depotId, manifestId],
+    queryFn: () => fetchGameInfo(appid, depotId, manifestId, branch),
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+  });
+  const targetGameInfo = useQuery({
+    queryKey: ["game-info", appid, targetDepotId, targetManifestId],
+    queryFn: () => fetchGameInfo(appid, targetDepotId, targetManifestId, targetBranch),
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+  });
+  const bundleVersion = (info: GameInfo | undefined): string | undefined =>
+    info?.engine?.engine === "unity" ? info.engine.data.bundle_version : undefined;
+  const oldSideVersion = bundleVersion(baseIsNewer ? targetGameInfo.data : baseGameInfo.data);
+  const newSideVersion = bundleVersion(baseIsNewer ? baseGameInfo.data : targetGameInfo.data);
+  // With different depots on the two sides, a bare version would hide
+  // which depot each side comes from — keep the depot in the label there.
+  const depotsDiffer = urlBase.depotId !== urlTarget.depotId;
+  const sideLabel = (side: { depotId: number; manifestId: string }, version?: string) =>
+    version == null
+      ? `${side.depotId}/${side.manifestId}`
+      : depotsDiffer
+        ? `${side.depotId}/${version}`
+        : version;
+
   const missing =
     (baseView.data === null ? "base" : null) ?? (targetView.data === null ? "target" : null);
 
@@ -265,8 +298,9 @@ function DiffPage() {
               })
             }
             className="font-mono text-rose-300 hover:underline"
+            title={`${oldSide.depotId}/${oldSide.manifestId}`}
           >
-            {oldSide.depotId}/{oldSide.manifestId}
+            {sideLabel(oldSide, oldSideVersion)}
             {oldSide.creation > 0 && (
               <span className="ml-1 text-rose-300/70">({formatDate(oldSide.creation)})</span>
             )}
@@ -288,8 +322,9 @@ function DiffPage() {
               })
             }
             className="font-mono text-emerald-300 hover:underline"
+            title={`${newSide.depotId}/${newSide.manifestId}`}
           >
-            {newSide.depotId}/{newSide.manifestId}
+            {sideLabel(newSide, newSideVersion)}
             {newSide.creation > 0 && (
               <span className="ml-1 text-emerald-300/70">({formatDate(newSide.creation)})</span>
             )}
