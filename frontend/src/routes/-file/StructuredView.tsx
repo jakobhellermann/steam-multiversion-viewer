@@ -716,7 +716,7 @@ export function Tree({
           tabIndex={0}
           aria-activedescendant={focusedId ? rowDomId(treeUid, focusedId) : undefined}
           onKeyDown={onKeyDown}
-          className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-2 focus:ring-1 focus:ring-sky-600/40 focus:outline-none"
+          className="h-full overflow-auto rounded border border-slate-800 surface-well p-2 focus:ring-1 focus:ring-sky-600/40 focus:outline-none"
         >
           {/* Spacer keeps the scroll thumb honest while we render only
               the rows in view. Items are absolute-positioned by the
@@ -753,7 +753,7 @@ export function Tree({
         <div
           ref={previewRef}
           data-scroll-restoration-id={previewScrollId}
-          className="h-full overflow-auto rounded border border-slate-800 bg-slate-950 p-3"
+          className="h-full overflow-auto rounded border border-slate-800 surface-well p-3"
         >
           {selectedNode ? (
             renderContent({

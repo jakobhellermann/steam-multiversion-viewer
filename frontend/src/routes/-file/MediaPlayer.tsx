@@ -24,7 +24,7 @@ export function MediaPlayer({ kind, src }: { kind: "audio" | "video"; src: strin
       ref={ref as React.RefObject<HTMLVideoElement>}
       src={src}
       controls
-      className="max-w-full rounded bg-slate-950"
+      className="max-w-full rounded surface-well"
     />
   );
 }

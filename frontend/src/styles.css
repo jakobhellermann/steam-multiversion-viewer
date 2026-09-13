@@ -24,6 +24,20 @@ html:not(.vibrancy-active) .surface-float {
   background-color: rgb(30 41 59);
 }
 
+/* Inset content surface (code panes, tree, media): an extra tint layer
+   (slate-900, same family as the page tint) — reads one hair SUNKEN below
+   the backdrop while the mica still shows through. */
+@utility surface-well {
+  background-color: rgb(15 23 42 / 0.45);
+}
+
+/* On the flat opaque page the tint wash is invisible (same color twice);
+   there the inset is a 900/950 mix instead — clearly sunken without the
+   near-black depth of slate-950. */
+html:not(.vibrancy-active) .surface-well {
+  background-color: rgb(9 15 31);
+}
+
 /* Popup panel anchored below its trigger. Add placement (left/right),
    z, size, overflow and display per instance, plus surface-float. */
 @utility dropdown-panel {
