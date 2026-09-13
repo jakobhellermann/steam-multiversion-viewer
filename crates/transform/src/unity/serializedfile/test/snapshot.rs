@@ -146,7 +146,6 @@ fn diff_added_removed_renamed() {
           children:
             - id: "obj:2"
               label: Player
-              default_collapsed: true
               status: changed
               has_content: true
               children:
