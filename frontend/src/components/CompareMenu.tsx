@@ -543,7 +543,7 @@ export function CompareMenu({
                         aria-pressed={checked}
                         className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1 text-left text-sm select-none ${
                           checked
-                            ? "bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
+                            ? "bg-sky-950/40 text-slate-100 hover:bg-sky-900/40"
                             : "text-slate-300 hover:bg-slate-700/60"
                         }`}
                       >
@@ -559,7 +559,7 @@ export function CompareMenu({
                           <span className="block truncate">{c.branch}</span>
                           <span
                             className={`block truncate text-xs ${
-                              checked ? "text-sky-400/70" : "text-slate-500"
+                              checked ? "text-slate-400" : "text-slate-500"
                             }`}
                           >
                             {c.creationTime > 0 ? formatDate(c.creationTime) : "date unknown"}
@@ -567,7 +567,7 @@ export function CompareMenu({
                         </span>
                         <span
                           className={`text-xs tabular-nums ${
-                            checked ? "text-sky-400/70" : "text-slate-500"
+                            checked ? "text-slate-400" : "text-slate-500"
                           } ${bundleVersionByKey.has(c.key) ? "" : "font-mono"}`}
                           title={bundleVersionByKey.has(c.key) ? c.manifestId : undefined}
                         >
