@@ -25,8 +25,8 @@ use std::process::Stdio;
 use std::sync::Mutex;
 
 use camino::Utf8Path;
-use tokio::process::Command;
 
+use crate::cache::tool_command;
 use crate::{TempInput, TransformError, tempfile_for};
 
 pub mod diff;
@@ -335,7 +335,7 @@ async fn run_warmer(
 ) -> Result<usize, TransformError> {
     let tmp_dll = tempfile_for(dll_bytes)?;
     let outdir = warmer_outdir()?;
-    let status = Command::new(ILSPYCMD)
+    let status = tool_command(ILSPYCMD)
         .arg("-p")
         .arg("--nested-directories")
         .arg("-o")
@@ -457,7 +457,7 @@ fn warmer_outdir() -> Result<WarmerOutdir, std::io::Error> {
 }
 
 async fn spawn_ilspy(tmp: &TempInput, args: &[&str]) -> Result<String, TransformError> {
-    let child = Command::new(ILSPYCMD)
+    let child = tool_command(ILSPYCMD)
         .args(args)
         .arg(tmp.path())
         .stdout(Stdio::piped())

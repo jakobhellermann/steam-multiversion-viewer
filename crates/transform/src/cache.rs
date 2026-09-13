@@ -189,9 +189,21 @@ pub async fn run_and_cache(
     Ok(text)
 }
 
+/// Builds the command for a CLI tool. The packaged app has no console, so
+/// on Windows each console child would flash its own terminal window.
+pub(crate) fn tool_command(cmd: &str) -> Command {
+    let mut command = Command::new(cmd);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 async fn run(tool: &CliTool, input_bytes: &[u8]) -> Result<String, TransformError> {
     let tmp = tempfile_for(input_bytes)?;
-    let child = Command::new(tool.cmd)
+    let child = tool_command(tool.cmd)
         .args(tool.args_before_path)
         .arg(tmp.path())
         .stdout(Stdio::piped())
