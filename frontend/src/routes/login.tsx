@@ -170,7 +170,7 @@ function PendingPanel({ pending }: { pending: NonNullable<AuthStatus["pending"]>
         </form>
         {pending.device_available && (
           <p className="text-xs text-slate-500">
-            …or just confirm the login in your Steam mobile app — no code needed.
+            …or just confirm the login in your Steam mobile app
           </p>
         )}
         {codeMutation.error && (
