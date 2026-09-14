@@ -1,6 +1,5 @@
 // TODO(ai-review): review for style and correctness
 import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { cancelDownloads, type DownloadStats } from "../api";
 import { consumeShowImmediately } from "../lib/downloadsUiSignal";
 import { formatBytes } from "../lib/format";
@@ -21,12 +20,6 @@ export function DownloadsDrawer() {
   // first time we see bytes_completed > 0 and zeroed when stats reset.
   const runStart = useRef<{ ts: number; bytes: number } | null>(null);
   const [overallRate, setOverallRate] = useState(0);
-  const queryClient = useQueryClient();
-  // Throttle `manifest-statuses` / `file-view` invalidations — these
-  // still go through the refetch path. `manifest-files` is patched
-  // directly via the SSE chunks event instead (see the listener below).
-  const lastInvalidate = useRef(0);
-  const lastCompletedSeen = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const activeNow =
@@ -124,18 +117,13 @@ export function DownloadsDrawer() {
       setStats(s);
       const now = performance.now();
       // Drop the buffer on reset (cancel zeroes bytes_completed); a
-      // shrinking value would otherwise produce a negative slope. Also
-      // reset the invalidation watermark — otherwise the next run's
-      // completedDelta stays ≤0 (lastCompletedSeen is stale from the
-      // previous run) and file-view never gets invalidated again.
+      // shrinking value would otherwise produce a negative slope.
       if (
         samples.current.length > 0 &&
         s.bytes_completed < samples.current[samples.current.length - 1].bytes
       ) {
         samples.current = [];
         runStart.current = null;
-        lastCompletedSeen.current = 0;
-        lastInvalidate.current = 0;
         setOverallRate(0);
       }
       samples.current.push({ ts: now, bytes: s.bytes_completed });
@@ -175,34 +163,22 @@ export function DownloadsDrawer() {
           setOverallRate(s.bytes_completed / Math.max(dt, 0.1));
         }
       }
-      // file-view + manifest-statuses still go through refetch on
-      // change. manifest-files is patched directly by the `chunks`
-      // listener below.
-      const completedDelta = s.chunks_completed + s.chunks_failed - lastCompletedSeen.current;
-      const idle = s.chunks_completed + s.chunks_failed === s.chunks_total && s.chunks_total > 0;
-      if (completedDelta > 0 && (now - lastInvalidate.current > 500 || idle)) {
-        lastInvalidate.current = now;
-        lastCompletedSeen.current = s.chunks_completed + s.chunks_failed;
-        queryClient.invalidateQueries({ queryKey: ["file-view"] });
-        queryClient.invalidateQueries({ queryKey: ["manifest-statuses"] });
-      }
-    };
-    const onChunks = (_e: MessageEvent) => {
-      // Per-file chunk presence used to be patched into the manifest-files
-      // cache here. Files are now an immutable query without chunks_present;
-      // a separate file-status query (TODO) will be patched instead.
+      // Chunk-store events deliberately do NOT invalidate page queries
+      // (`file-view`, `manifest-statuses`): those are snapshots per
+      // visit. SSE-driven invalidation here used to sustain a loop —
+      // a manifest the CDN refuses fails on every status request, the
+      // failure bumped chunks_failed, the invalidation refetched the
+      // status, which re-opened (and re-failed) the manifest.
     };
     es.addEventListener("stats", onStats);
-    es.addEventListener("chunks", onChunks);
     es.onerror = () => {
       // EventSource auto-reconnects; just leave it alone.
     };
     return () => {
       es.removeEventListener("stats", onStats);
-      es.removeEventListener("chunks", onChunks);
       es.close();
     };
-  }, [queryClient]);
+  }, []);
 
   if (!stats || stats.chunks_total === 0) return null;
   if (!visible) return null;

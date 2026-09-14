@@ -66,9 +66,9 @@ function AppDetail() {
     queryFn: () => fetchManifestStatuses(appid, manifestRefs),
     // Don't fire on the half-populated ref list before extras land.
     enabled: manifestRefs.length > 0 && extraQuery.isSuccess,
-    // Per-manifest missing-bytes change as the download manager makes
-    // progress; refetch on every mount.
-    refetchOnMount: "always",
+    // Snapshot per session (global staleTime: Infinity): missing-bytes
+    // drift while downloads run, but the drawer shows live truth
+    // during a run and the numbers are decision data, not progress.
   });
 
   return (
