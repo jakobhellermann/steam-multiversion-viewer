@@ -31,7 +31,7 @@ use rabex_env::Environment;
 use rabex_env::env::Data;
 use rabex_env::handle::SerializedFileHandle;
 use rabex_env::rabex::files::SerializedFile;
-use rabex_env::rabex::files::bundlefile::BundleFileReader;
+use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
 
 use crate::structured::Node;
 
@@ -74,6 +74,23 @@ pub(super) fn blob_node(entry_path: &str, size: i64) -> Node {
     }
 }
 
+/// Extraction config for opening a bundle. The env's unity version (from
+/// globalgamemanagers) serves as the fallback when the bundle header
+/// carries none (addressables); packed player data bundles do carry one
+/// and have no globalgamemanagers file, so a failing env must not abort
+/// the open.
+pub(super) fn extraction_config<
+    R: rabex_env::resolver::EnvResolver,
+    P: rabex_env::rabex::typetree::TypeTreeProvider,
+>(
+    env: &Environment<R, P>,
+) -> ExtractionConfig {
+    match env.unity_version() {
+        Ok(version) => ExtractionConfig::default().with_fallback_unity_version(version.clone()),
+        Err(_) => ExtractionConfig::default(),
+    }
+}
+
 /// Load a SerializedFile entry's bytes from the bundle and stash it in
 /// the side's env cache so PPtr resolution inside `diff_sections` can
 /// find it. Returns a handle keyed under the bare archive entry path.
@@ -92,10 +109,13 @@ where
         .with_context(|| format!("entry {entry_path} unexpectedly absent"))?;
     let mut sf = SerializedFile::from_reader(&mut Cursor::new(bytes.as_slice()))?;
     // Bundle entry SerializedFiles omit the unity version (it lives at
-    // the bundle level); backfill from the env so file-version-dependent
-    // reads (e.g. GameObject::path) resolve instead of erroring.
+    // the bundle level); backfill from the bundle header, or from the
+    // env for bundles that carry none.
     if sf.m_UnityVersion.is_none() {
-        sf.m_UnityVersion = Some(env.unity_version()?.clone());
+        sf.m_UnityVersion = match bundle.header().unity_revision.clone() {
+            Some(revision) => Some(revision),
+            None => Some(env.unity_version()?.clone()),
+        };
     }
     Ok(env.insert_cache(entry_path.into(), sf, Data::InMemory(bytes)))
 }

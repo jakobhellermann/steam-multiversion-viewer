@@ -9,7 +9,7 @@ use std::io::Cursor;
 
 use anyhow::Result;
 use rabex_env::Environment;
-use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
+use rabex_env::rabex::files::bundlefile::BundleFileReader;
 use rabex_env::rabex::files::unityfile::FileEntry;
 use rabex_env::resolver::EnvResolver;
 use tracing::info_span;
@@ -20,7 +20,9 @@ use crate::unity::serializedfile::tree::build_root_node;
 
 use crate::structured::human_bytes;
 
-use super::{ARCHIVE_ID_PREFIX, archive_prefix, blob_node, insert_archive_entry};
+use super::{
+    ARCHIVE_ID_PREFIX, archive_prefix, blob_node, extraction_config, insert_archive_entry,
+};
 
 /// Build the structured diff for a bundle path between two prebuilt
 /// envs. Per-entry: SF↔SF runs through [`diff_sections`], blob↔blob
@@ -44,12 +46,8 @@ fn open_bundle_from_bytes<R: EnvResolver, P: rabex_env::rabex::typetree::TypeTre
     env: &Environment<R, P>,
     bundle_bytes: rabex_env::env::Data,
 ) -> Result<BundleFileReader<Cursor<rabex_env::env::Data>>> {
-    let unity_version = {
-        let _span = info_span!("unity_version").entered();
-        env.unity_version()?.clone()
-    };
+    let config = extraction_config(env);
     let _span = info_span!("parse_bundle_header").entered();
-    let config = ExtractionConfig::default().with_fallback_unity_version(unity_version);
     Ok(BundleFileReader::from_reader(
         Cursor::new(bundle_bytes),
         &config,

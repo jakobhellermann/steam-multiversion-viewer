@@ -8,7 +8,7 @@ use std::io::Cursor;
 
 use anyhow::Result;
 use rabex_env::Environment;
-use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
+use rabex_env::rabex::files::bundlefile::BundleFileReader;
 use rabex_env::rabex::files::unityfile::FileEntry;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
@@ -17,7 +17,9 @@ use tracing::info_span;
 use crate::structured::{Node, StructuredTree};
 use crate::unity::serializedfile::tree::build_root_node;
 
-use super::{ARCHIVE_ID_PREFIX, archive_prefix, blob_node, insert_archive_entry};
+use super::{
+    ARCHIVE_ID_PREFIX, archive_prefix, blob_node, extraction_config, insert_archive_entry,
+};
 
 /// Construct the structured tree for the bundle at `path` (manifest-
 /// relative) using a prebuilt `env`. `bundle_bytes` must be supplied
@@ -30,15 +32,9 @@ pub fn build_tree<R: EnvResolver, P: TypeTreeProvider>(
     bundle_bytes: rabex_env::env::Data,
     path: &str,
 ) -> Result<StructuredTree> {
-    // Bundles don't carry a unity-version header — the version lives in
-    // the SerializedFiles inside, which the reader hasn't parsed yet at
-    // open time. Pull the version from globalgamemanagers via the env
-    // and hand it over as the bundle's fallback.
-    let unity_version = env.unity_version()?.clone();
     let bundle = {
         let _span = info_span!("parse_bundle_header").entered();
-        let config = ExtractionConfig::default().with_fallback_unity_version(unity_version);
-        BundleFileReader::from_reader(Cursor::new(bundle_bytes.as_ref()), &config)?
+        BundleFileReader::from_reader(Cursor::new(bundle_bytes.as_ref()), &extraction_config(env))?
     };
 
     build_tree_from_bundle(env, &bundle, path)
@@ -105,6 +101,10 @@ where
     let mut subtree = build_root_node(&handle, entry_path)?;
     subtree.id = format!("{ARCHIVE_ID_PREFIX}{entry_path}");
     subtree.kind = "archive".to_string();
+    // One archive entry is nothing to choose from — open it. Bundles with
+    // several serialized files open as a list; expanding them all on
+    // mount walks the whole tree.
+    subtree.default_collapsed = bundle.serialized_files().count() > 1;
     let prefix = archive_prefix(entry_path);
     for child in &mut subtree.children {
         child.prefix_ids(&prefix);
