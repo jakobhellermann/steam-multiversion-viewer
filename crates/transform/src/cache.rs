@@ -192,6 +192,7 @@ pub async fn run_and_cache(
 /// Builds the command for a CLI tool. The packaged app has no console, so
 /// on Windows each console child would flash its own terminal window.
 pub(crate) fn tool_command(cmd: &str) -> Command {
+    #[allow(unused_mut)]
     let mut command = Command::new(cmd);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
