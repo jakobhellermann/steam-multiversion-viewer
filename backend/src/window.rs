@@ -7,7 +7,7 @@ use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Window, WindowBuilder};
 use wry::WebViewBuilder;
 
-use steam_multiversion_viewer::state::AppState;
+use crate::state::AppState;
 
 #[cfg(target_os = "windows")]
 use crate::config::VibrancyEffect;

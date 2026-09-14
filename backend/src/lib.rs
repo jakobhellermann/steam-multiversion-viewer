@@ -7,4 +7,6 @@ pub mod history;
 pub mod http;
 pub mod routes;
 pub mod state;
+pub mod static_files;
 pub mod steam;
+pub mod window;

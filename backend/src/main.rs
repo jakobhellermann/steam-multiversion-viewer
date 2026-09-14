@@ -1,7 +1,5 @@
 #![recursion_limit = "256"]
 #![cfg_attr(all(windows, feature = "windowed"), windows_subsystem = "windows")]
-mod static_files;
-mod window;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -23,7 +21,7 @@ use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 
 use steam_multiversion_viewer::state::AppState;
-use steam_multiversion_viewer::{routes, steam};
+use steam_multiversion_viewer::{routes, static_files, steam, window};
 
 #[derive(OpenApi)]
 #[openapi(info(
