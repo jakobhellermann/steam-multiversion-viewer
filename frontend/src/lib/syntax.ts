@@ -6,7 +6,9 @@ import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 /// give the `Lang` type, the values are loaded into the highlighter.
 /// The fine-grained `shiki/core` bundle keeps rolldown from emitting a
 /// chunk per bundled grammar (~200 of them) that we never load. Add to
-/// this *and* to extToLang below.
+/// this *and* to extToLang below. `playmakerfsm` is ours, not from
+/// @shikijs/langs: a custom grammar for the backend's PlayMaker FSM
+/// pseudocode dump.
 const GRAMMARS = {
   xml: () => import("@shikijs/langs/xml"),
   json: () => import("@shikijs/langs/json"),
@@ -15,6 +17,7 @@ const GRAMMARS = {
   diff: () => import("@shikijs/langs/diff"),
   glsl: () => import("@shikijs/langs/glsl"),
   cpp: () => import("@shikijs/langs/cpp"),
+  playmakerfsm: () => import("./playmakerfsmGrammar"),
 } as const;
 export type Lang = keyof typeof GRAMMARS;
 
@@ -69,6 +72,7 @@ const MIME_TO_LANG: Record<string, Lang> = {
   "text/x-lua": "lua",
   "text/x-glsl": "glsl",
   "text/x-metal": "cpp",
+  "text/x-playmaker-fsm": "playmakerfsm",
 };
 
 export function langForMime(mime: string): Lang | null {

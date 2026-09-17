@@ -24,8 +24,8 @@ use playmakerfsm::component::SCRIPT_NAME;
 
 pub use playmakerfsm::context::GameContext;
 
-/// MIME type of the pseudocode body. No shiki grammar maps to it yet, so the
-/// frontend renders it unhighlighted.
+/// MIME type of the pseudocode body. The frontend maps it to its bundled
+/// custom shiki grammar (`frontend/src/lib/playmakerfsmGrammar.ts`).
 const MIME: &str = "text/x-playmaker-fsm";
 
 /// Read what this game knows beyond its FSM data, out of its managed
