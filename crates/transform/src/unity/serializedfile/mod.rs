@@ -15,6 +15,8 @@ pub mod tree;
 #[cfg(test)]
 pub(crate) mod test;
 
+use rabex_env::unity::types::GameObject;
+
 use crate::structured::Node;
 
 /// Widest a forced-spine terminal may fan out and still auto-open —
@@ -47,6 +49,24 @@ fn open_forced_spine_terminal(node: &mut Node) {
             node.default_collapsed = false;
         }
         _ => {}
+    }
+}
+
+pub(crate) fn pluralize(n: usize, word: &str) -> String {
+    if n == 1 {
+        word.to_string()
+    } else {
+        format!("{word}s")
+    }
+}
+
+/// Label for a GameObject row: its name, or `(unnamed)` when it has
+/// none.
+pub(crate) fn go_label(go: &GameObject) -> String {
+    if go.m_Name.is_empty() {
+        "(unnamed)".to_string()
+    } else {
+        go.m_Name.clone()
     }
 }
 

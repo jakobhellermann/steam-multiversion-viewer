@@ -211,13 +211,7 @@ pub(crate) fn diff_sections<R: EnvResolver, P: TypeTreeProvider>(
 
 // ---- shared helpers ------------------------------------------------------
 
-pub(super) fn pluralize(n: usize, word: &str) -> String {
-    if n == 1 {
-        word.to_string()
-    } else {
-        format!("{word}s")
-    }
-}
+pub(super) use super::{go_label, pluralize};
 
 pub(super) fn prune_unchanged(mut children: Vec<Node>) -> Vec<Node> {
     children.retain(|c| c.status != Some(NodeStatus::Unchanged) || !c.children.is_empty());

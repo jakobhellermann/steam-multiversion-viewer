@@ -104,11 +104,7 @@ fn build_gameobject_node<R: EnvResolver, P: TypeTreeProvider>(
     let component_count = gameobject.m_Component.len().saturating_sub(1);
     Ok(Node {
         id: format!("obj:{gameobject_path_id}"),
-        label: if gameobject.m_Name.is_empty() {
-            "(unnamed)".to_string()
-        } else {
-            gameobject.m_Name.clone()
-        },
+        label: super::go_label(gameobject),
         kind: "gameobject".to_string(),
         badge: (component_count > 0).then(|| {
             format!(

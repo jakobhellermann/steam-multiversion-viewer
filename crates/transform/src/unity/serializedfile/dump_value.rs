@@ -23,9 +23,10 @@ use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::{PPtr, PathId};
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
-use rabex_env::unity::types::{GameObject, MonoBehaviour};
+use rabex_env::unity::types::GameObject;
 use serde_value::Value;
 
+use crate::unity::class_label;
 use crate::unity::game_specific::{self, playmaker};
 
 use super::markers::{
@@ -490,20 +491,7 @@ fn qualify_pptr<R: EnvResolver, P: TypeTreeProvider>(
         }
     };
     let class_id_raw = obj.class_id();
-    // For MonoBehaviours the engine class name (`MonoBehaviour`) is
-    // uselessly generic — the actual script name is what users think
-    // of as the type. Substitute it into the marker's type suffix when
-    // available; everything else keeps the engine class name.
-    let class_id = if class_id_raw == ClassId::MonoBehaviour {
-        obj.cast::<MonoBehaviour>()
-            .mono_script()
-            .ok()
-            .flatten()
-            .map(|s| s.full_name().into_owned())
-            .unwrap_or_else(|| format!("{class_id_raw:?}"))
-    } else {
-        format!("{class_id_raw:?}")
-    };
+    let class_id = class_label(&obj.file, class_id_raw, pptr.m_PathID);
     let data = obj.read().ok();
     let target = data
         .as_ref()

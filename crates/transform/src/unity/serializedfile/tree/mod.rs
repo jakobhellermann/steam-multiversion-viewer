@@ -16,13 +16,7 @@ use rabex_env::resolver::EnvResolver;
 
 use crate::structured::{Node, StructuredTree};
 
-fn pluralize(n: usize, word: &str) -> String {
-    if n == 1 {
-        word.to_string()
-    } else {
-        format!("{word}s")
-    }
-}
+pub(super) use super::{go_label, pluralize};
 
 /// Resolves an object node id to its path id.
 pub fn parse_object_node_id(id: &str) -> Option<PathId> {

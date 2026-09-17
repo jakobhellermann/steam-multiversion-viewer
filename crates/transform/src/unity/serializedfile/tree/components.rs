@@ -4,10 +4,9 @@ use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::PathId;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
-use rabex_env::unity::types::MonoBehaviour;
 
 use crate::structured::Node;
-use crate::unity::object_name;
+use crate::unity::{class_label, object_name};
 
 /// Dispatches to the node builder for this engine class.
 #[tracing::instrument(level = "debug", skip_all, fields(?class_id, ?path_id))]
@@ -47,12 +46,7 @@ fn monobehaviour_node<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     path_id: PathId,
 ) -> Result<Node> {
-    let handle = file.object_at::<MonoBehaviour>(path_id)?;
-
-    let class_label = handle
-        .mono_script()?
-        .map(|s| s.full_name().into_owned())
-        .unwrap_or_else(|| format!("{:?}", ClassId::MonoBehaviour));
+    let class_label = class_label(file, ClassId::MonoBehaviour, path_id);
     let mut node = component_leaf(path_id, &class_label, &class_label);
     if let Some(name) = object_name(file, &class_label, path_id) {
         node = node.with_badge(name);

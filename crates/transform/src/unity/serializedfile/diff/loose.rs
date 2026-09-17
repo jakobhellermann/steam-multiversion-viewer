@@ -6,10 +6,9 @@ use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::PathId;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
-use rabex_env::unity::types::MonoBehaviour;
 
 use crate::structured::{Node, NodeStatus};
-use crate::unity::{NameOnly, object_name};
+use crate::unity::{NameOnly, class_label, object_name};
 
 use super::Side;
 use super::hierarchy::Covered;
@@ -175,15 +174,7 @@ fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
             .and_then(|h| h.read().ok())
             .map(|n| n.m_Name)
             .unwrap_or_default();
-        let label = if class_id == ClassId::MonoBehaviour {
-            file.object_at::<MonoBehaviour>(path_id)
-                .ok()
-                .and_then(|h| h.mono_script().ok().flatten())
-                .map(|s| s.full_name().into_owned())
-                .unwrap_or_else(|| format!("{class_id:?}"))
-        } else {
-            format!("{class_id:?}")
-        };
+        let label = class_label(file, class_id, path_id);
         out.push(RawLoose {
             class_id,
             label,

@@ -9,9 +9,11 @@
 
 use rabex_env::Environment;
 use rabex_env::handle::SerializedFileHandle;
+use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::PathId;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
+use rabex_env::unity::types::MonoBehaviour;
 
 pub mod bundle;
 pub mod game_specific;
@@ -24,6 +26,25 @@ pub mod serializedfile;
 pub(crate) struct NameOnly {
     #[serde(default)]
     pub(crate) m_Name: String,
+}
+
+/// The row's class label: for MonoBehaviours the script's full name
+/// (the engine class name is uselessly generic), else the engine
+/// class name. Script resolution failures fall back to the class
+/// name.
+pub(crate) fn class_label<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    class_id: ClassId,
+    path_id: PathId,
+) -> String {
+    if class_id != ClassId::MonoBehaviour {
+        return format!("{class_id:?}");
+    }
+    file.object_at::<MonoBehaviour>(path_id)
+        .ok()
+        .and_then(|h| h.mono_script().ok().flatten())
+        .map(|s| s.full_name().into_owned())
+        .unwrap_or_else(|| format!("{class_id:?}"))
 }
 
 /// The object's display name: the game-specific name (an FSM's

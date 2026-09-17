@@ -11,7 +11,7 @@ use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
 use crate::structured::{Node, NodeStatus};
 use crate::unity::object_name;
 
-use super::{BodyIndex, Side};
+use super::{BodyIndex, Side, go_label};
 
 type Transforms = BTreeMap<PathId, (Transform, GameObject)>;
 
@@ -333,14 +333,6 @@ fn subtree_one_side<R: EnvResolver, P: TypeTreeProvider>(
             status,
         )
     })
-}
-
-fn go_label(go: &GameObject) -> String {
-    if go.m_Name.is_empty() {
-        "(unnamed)".to_string()
-    } else {
-        go.m_Name.clone()
-    }
 }
 
 fn ordered_children<'t>(
