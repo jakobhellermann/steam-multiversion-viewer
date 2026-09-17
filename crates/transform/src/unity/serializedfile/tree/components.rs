@@ -18,7 +18,7 @@ pub(super) fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     loose: bool,
 ) -> Result<Node> {
     match class_id {
-        ClassId::MonoBehaviour => monobehaviour_node(file, path_id),
+        ClassId::MonoBehaviour => monobehaviour_node(file, path_id, loose),
         ClassId::Shader => shader_node(file, path_id),
         _ => ordinary_component_node(file, path_id, class_id, loose),
     }
@@ -31,43 +31,43 @@ fn ordinary_component_node<R: EnvResolver, P: TypeTreeProvider>(
     loose: bool,
 ) -> Result<Node> {
     let class_label = format!("{class_id:?}");
-    let display_label = if loose {
-        read_m_name(file, path_id)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| class_label.clone())
-    } else {
-        class_label.clone()
-    };
-    let mut node = component_leaf(path_id, &display_label, &class_label);
+    let mut node = component_leaf(path_id, &class_label, &class_label);
     if class_id == ClassId::Texture2D {
         node.content_mime = Some("image/png".to_string());
     }
-    if loose && display_label != class_label {
-        node = node.with_badge(class_label);
+    if loose && let Some(name) = read_m_name(file, path_id).filter(|s| !s.is_empty()) {
+        node = node.with_badge(name);
     }
     Ok(node)
 }
 
-/// Entry point for script-specific MonoBehaviour nodes.
+/// MonoBehaviour node: script class as label, the object's name as
+/// badge — the game-specific name (an FSM's `fsm.name`) if there is
+/// one, else `m_Name` for loose assets (ScriptableObjects).
 fn monobehaviour_node<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     path_id: PathId,
+    loose: bool,
 ) -> Result<Node> {
     let handle = file.object_at::<MonoBehaviour>(path_id)?;
 
     let Some(mono_script) = handle.mono_script()? else {
         let label = format!("{:?}", ClassId::MonoBehaviour);
-        return Ok(component_leaf(path_id, &label, &label));
+        let mut node = component_leaf(path_id, &label, &label);
+        if loose && let Some(name) = read_m_name(file, path_id).filter(|s| !s.is_empty()) {
+            node = node.with_badge(name);
+        }
+        return Ok(node);
     };
     let class_label = mono_script.full_name().into_owned();
-    let display_label = game_specific::monobehaviour_name(file, &class_label, path_id);
-    let mut node = component_leaf(
-        path_id,
-        display_label.as_deref().unwrap_or(&class_label),
-        &class_label,
-    );
-    if display_label.is_some() {
-        node = node.with_badge(class_label);
+    let mut node = component_leaf(path_id, &class_label, &class_label);
+    let name = game_specific::monobehaviour_name(file, &class_label, path_id).or_else(|| {
+        loose
+            .then(|| read_m_name(file, path_id).filter(|s| !s.is_empty()))
+            .flatten()
+    });
+    if let Some(name) = name {
+        node = node.with_badge(name);
     }
     Ok(node)
 }
@@ -83,8 +83,7 @@ fn shader_node<R: EnvResolver, P: TypeTreeProvider>(
         .and_then(|h| h.read())
     {
         if let Some(name) = super::super::shader::parsed_form_name(&value) {
-            node.label = name;
-            node.badge = Some(class_label);
+            node.badge = Some(name);
         }
         node.children =
             super::shader::shader_nodes(path_id, super::super::shader::program_groups(&value));

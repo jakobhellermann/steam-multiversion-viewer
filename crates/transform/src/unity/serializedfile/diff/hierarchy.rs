@@ -9,6 +9,7 @@ use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
 
 use crate::structured::{Node, NodeStatus};
+use crate::unity::game_specific;
 
 use super::{BodyIndex, Side};
 
@@ -296,13 +297,13 @@ fn subtree_one_side<R: EnvResolver, P: TypeTreeProvider>(
     let components = collect_components(file, go, transform_path_id, covered)?;
     for ((key, _occurrence), comp) in &components {
         children.push(Node {
-            badge: Some(format!("[{}]", comp.path_id)),
+            badge: component_name(file, key, comp),
             facets: [("class".to_string(), key.to_string())]
                 .into_iter()
                 .collect(),
             ..super::make_node(
                 super::one_sided_id(side, comp.path_id),
-                component_label(file, key, comp)?,
+                key.to_string(),
                 "component",
                 status,
             )
@@ -434,37 +435,33 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
             );
             let id = super::matched_pair_id(b.path_id, t.path_id);
             Ok(Node {
-                badge: if b.path_id == t.path_id {
-                    Some(format!("[{}]", b.path_id))
-                } else {
-                    Some(format!("[{} → {}]", t.path_id, b.path_id))
-                },
+                badge: component_name(base_file, key, b),
                 facets: [("class".to_string(), key.to_string())]
                     .into_iter()
                     .collect(),
-                ..super::make_node(id, component_label(base_file, key, b)?, "component", status)
+                ..super::make_node(id, key.to_string(), "component", status)
             })
         }
         (Some(b), None) => Ok(Node {
-            badge: Some(format!("[{}]", b.path_id)),
+            badge: component_name(base_file, key, b),
             facets: [("class".to_string(), key.to_string())]
                 .into_iter()
                 .collect(),
             ..super::make_node(
                 super::one_sided_id(Side::Base, b.path_id),
-                component_label(base_file, key, b)?,
+                key.to_string(),
                 "component",
                 NodeStatus::Added,
             )
         }),
         (None, Some(t)) => Ok(Node {
-            badge: Some(format!("[{}]", t.path_id)),
+            badge: component_name(target_file, key, t),
             facets: [("class".to_string(), key.to_string())]
                 .into_iter()
                 .collect(),
             ..super::make_node(
                 super::one_sided_id(Side::Target, t.path_id),
-                component_label(target_file, key, t)?,
+                key.to_string(),
                 "component",
                 NodeStatus::Removed,
             )
@@ -473,10 +470,15 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
     }
 }
 
-fn component_label<R: EnvResolver, P: TypeTreeProvider>(
-    _file: &SerializedFileHandle<'_, R, P>,
+/// Game-specific name (an FSM's `fsm.name`) as badge; the label is the
+/// class/script. Matched pairs badge from the base side.
+fn component_name<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
     key: &ComponentKey,
-    _comp: &Component,
-) -> Result<String> {
-    Ok(key.to_string())
+    comp: &Component,
+) -> Option<String> {
+    let ComponentKey::Script(script_name) = key else {
+        return None;
+    };
+    game_specific::monobehaviour_name(file, script_name, comp.path_id)
 }

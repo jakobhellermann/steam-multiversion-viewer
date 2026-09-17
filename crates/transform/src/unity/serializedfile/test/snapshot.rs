@@ -8,9 +8,10 @@
 
 use super::fixtures::{
     Scene, SceneNode, external_gameobject_with_transform, external_monoscript_file,
-    external_shader_file, external_text_asset_file, loose_monobehaviour_referencing_external,
-    loose_monobehaviour_with_script_typetree, preload_referencing_external,
-    preload_referencing_local, preload_with_dependency, with_diff_handles, with_handle,
+    external_shader_file, external_text_asset_file, loose_fsm_monobehaviour,
+    loose_monobehaviour_referencing_external, loose_monobehaviour_with_script_typetree,
+    loose_named_monobehaviour, preload_referencing_external, preload_referencing_local,
+    preload_with_dependency, with_diff_handles, with_handle,
 };
 use crate::structured::{NodeStatus, StructuredTree};
 use crate::unity::serializedfile::diff::diff_sections;
@@ -92,8 +93,8 @@ fn tree_small_scene() {
           badge: "1"
           children:
             - id: "obj:1"
-              label: test_bundle
-              badge: AssetBundle
+              label: AssetBundle
+              badge: test_bundle
               facets:
                 class: AssetBundle
               has_content: true
@@ -180,7 +181,7 @@ fn diff_added_removed_renamed() {
           children:
             - id: "obj:1"
               label: AssetBundle
-              badge: "[1]"
+              badge: test_bundle
               facets:
                 class: AssetBundle
               status: changed
@@ -531,6 +532,215 @@ fn diff_keeps_duplicate_components_on_matched_gameobject() {
 }
 
 #[test]
+fn diff_fsm_component_label_is_fsm_name() {
+    // Keyed and labelled by script, `fsm.name` as badge — a rename
+    // stays one Changed node.
+    let base_bytes = Scene::new()
+        .with_root(SceneNode::new("Bench").with_fsm("Attack"))
+        .write();
+    let target_bytes = Scene::new()
+        .with_root(SceneNode::new("Bench").with_fsm("Guard"))
+        .write();
+
+    let (label, badge, status, class) = with_diff_handles(
+        &[(PATH, base_bytes)],
+        &[(PATH, target_bytes)],
+        |base, target| {
+            let (children, _status) = diff_sections(base, target).unwrap();
+            let bench = find_node(&children, "Bench").expect("matched Bench present");
+            let fsm = bench
+                .children
+                .iter()
+                .find(|c| c.kind == "component")
+                .expect("FSM component node present");
+            (
+                fsm.label.clone(),
+                fsm.badge.clone(),
+                fsm.status,
+                fsm.facets.get("class").cloned(),
+            )
+        },
+    );
+
+    assert_eq!(label, "PlayMakerFSM");
+    assert_eq!(badge.as_deref(), Some("Attack"));
+    assert_eq!(status, Some(NodeStatus::Changed));
+    assert_eq!(class.as_deref(), Some("PlayMakerFSM"));
+}
+
+#[test]
+fn diff_fsm_component_one_sided_label_is_fsm_name() {
+    let base_bytes = Scene::new()
+        .with_root(SceneNode::new("Bench").with_fsm("Attack"))
+        .write();
+    let target_bytes = Scene::new().with_root(SceneNode::new("Other")).write();
+
+    let (label, badge) = with_diff_handles(
+        &[(PATH, base_bytes)],
+        &[(PATH, target_bytes)],
+        |base, target| {
+            let (children, _status) = diff_sections(base, target).unwrap();
+            let bench = find_node(&children, "Bench").expect("Bench node present");
+            let fsm = bench
+                .children
+                .iter()
+                .find(|c| c.kind == "component")
+                .expect("FSM component node present");
+            (fsm.label.clone(), fsm.badge.clone())
+        },
+    );
+
+    assert_eq!(label, "PlayMakerFSM");
+    assert_eq!(badge.as_deref(), Some("Attack"));
+}
+
+#[test]
+fn diff_loose_fsm_label_is_fsm_name() {
+    // The name stays display-only: as a match key, repeated FSM names
+    // would collapse distinct objects.
+    let base_bytes = loose_fsm_monobehaviour("Attack");
+    let target_bytes = loose_fsm_monobehaviour("Guard");
+
+    let (label, badge, status) = with_diff_handles(
+        &[(PATH, base_bytes)],
+        &[(PATH, target_bytes)],
+        |base, target| {
+            let (children, _status) = diff_sections(base, target).unwrap();
+            let loose = find_node(&children, "Loose components").expect("loose section present");
+            // The fixture's MonoScript sits loose too — pick by facet.
+            let fsm = loose
+                .children
+                .iter()
+                .find(|c| c.facets.get("class") == Some(&"PlayMakerFSM".to_string()))
+                .expect("FSM node present in the loose section");
+            (fsm.label.clone(), fsm.badge.clone(), fsm.status)
+        },
+    );
+
+    assert_eq!(label, "PlayMakerFSM");
+    assert_eq!(badge.as_deref(), Some("Attack"));
+    assert_eq!(status, Some(NodeStatus::Changed));
+}
+
+#[test]
+fn diff_loose_fsm_one_sided_label_is_fsm_name() {
+    let base_bytes = loose_fsm_monobehaviour("Attack");
+    let target_bytes = Scene::new().with_root(SceneNode::new("Other")).write();
+
+    let (label, badge, status) = with_diff_handles(
+        &[(PATH, base_bytes)],
+        &[(PATH, target_bytes)],
+        |base, target| {
+            let (children, _status) = diff_sections(base, target).unwrap();
+            let loose = find_node(&children, "Loose components").expect("loose section present");
+            let fsm = loose
+                .children
+                .iter()
+                .find(|c| c.facets.get("class") == Some(&"PlayMakerFSM".to_string()))
+                .expect("FSM node present in the loose section");
+            (fsm.label.clone(), fsm.badge.clone(), fsm.status)
+        },
+    );
+
+    assert_eq!(label, "PlayMakerFSM");
+    assert_eq!(badge.as_deref(), Some("Attack"));
+    assert_eq!(status, Some(NodeStatus::Added));
+}
+
+#[test]
+fn diff_loose_singleton_rename_stays_matched_and_shows_name() {
+    // The singleton rule drops names from the match key so renames
+    // keep pairing — but the badge shows the base side's name anyway.
+    let base_bytes = Scene::new()
+        .with_root(SceneNode::new("Bench"))
+        .with_asset_bundle("test_bundle")
+        .write();
+    let target_bytes = Scene::new()
+        .with_root(SceneNode::new("Bench"))
+        .with_asset_bundle("test_bundle_v2")
+        .write();
+
+    let (label, badge, status) = with_diff_handles(
+        &[(PATH, base_bytes)],
+        &[(PATH, target_bytes)],
+        |base, target| {
+            let (children, _status) = diff_sections(base, target).unwrap();
+            let loose = find_node(&children, "Loose components").expect("loose section present");
+            let bundle = loose
+                .children
+                .iter()
+                .find(|c| c.facets.get("class") == Some(&"AssetBundle".to_string()))
+                .expect("AssetBundle node present");
+            (bundle.label.clone(), bundle.badge.clone(), bundle.status)
+        },
+    );
+
+    assert_eq!(label, "AssetBundle");
+    assert_eq!(badge.as_deref(), Some("test_bundle"));
+    assert_eq!(status, Some(NodeStatus::Changed));
+}
+
+#[test]
+fn tree_loose_named_monobehaviour_badges_name() {
+    // ScriptableObject assets carry their asset name in m_Name — the
+    // tree badges it, like every other loose object.
+    let bytes = loose_named_monobehaviour("Under Hanging Golem");
+    let (label, badge) = with_handle(PATH, bytes, |handle| {
+        let root = build_root_node(handle, PATH).unwrap();
+        let roots = [root];
+        let node = find_node(&roots, "NamedBehaviour").expect("MB node present");
+        (node.label.clone(), node.badge.clone())
+    });
+
+    assert_eq!(label, "NamedBehaviour");
+    assert_eq!(badge.as_deref(), Some("Under Hanging Golem"));
+}
+
+#[test]
+fn diff_loose_named_monobehaviour_badges_name() {
+    // Singleton on both sides → matched despite the rename; the badge
+    // names the base side's asset.
+    let base_bytes = loose_named_monobehaviour("Alpha");
+    let target_bytes = loose_named_monobehaviour("Beta");
+
+    let (label, badge, status) = with_diff_handles(
+        &[(PATH, base_bytes)],
+        &[(PATH, target_bytes)],
+        |base, target| {
+            let (children, _status) = diff_sections(base, target).unwrap();
+            let loose = find_node(&children, "Loose components").expect("loose section present");
+            let mb = loose
+                .children
+                .iter()
+                .find(|c| c.facets.get("class") == Some(&"NamedBehaviour".to_string()))
+                .expect("named MB node present");
+            (mb.label.clone(), mb.badge.clone(), mb.status)
+        },
+    );
+
+    assert_eq!(label, "NamedBehaviour");
+    assert_eq!(badge.as_deref(), Some("Alpha"));
+    assert_eq!(status, Some(NodeStatus::Changed));
+}
+
+#[test]
+fn tree_fsm_component_label_is_fsm_name() {
+    // Pins the tree side so tree and diff can't drift apart.
+    let bytes = Scene::new()
+        .with_root(SceneNode::new("Bench").with_fsm("Attack"))
+        .write();
+    let (label, badge) = with_handle(PATH, bytes, |handle| {
+        let root = build_root_node(handle, PATH).unwrap();
+        let roots = [root];
+        let fsm = find_node(&roots, "PlayMakerFSM").expect("FSM node present");
+        (fsm.label.clone(), fsm.badge.clone())
+    });
+
+    assert_eq!(label, "PlayMakerFSM");
+    assert_eq!(badge.as_deref(), Some("Attack"));
+}
+
+#[test]
 fn diff_auto_expands_the_single_changed_root() {
     // The scene has several roots but only one changed, so the diff
     // shows just that root — its single-child chain should open by
@@ -659,15 +869,15 @@ fn tree_with_monobehaviours() {
           badge: "2"
           children:
             - id: "obj:5"
-              label: PlayerController
-              badge: MonoScript
+              label: MonoScript
+              badge: PlayerController
               facets:
                 class: MonoScript
               has_content: true
               children: []
             - id: "obj:6"
-              label: Inventory
-              badge: MonoScript
+              label: MonoScript
+              badge: Inventory
               facets:
                 class: MonoScript
               has_content: true

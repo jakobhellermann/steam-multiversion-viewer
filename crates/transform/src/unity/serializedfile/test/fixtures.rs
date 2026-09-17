@@ -61,6 +61,9 @@ pub(crate) struct SceneNode {
 pub(crate) struct ScriptRef {
     pub(crate) namespace: &'static str,
     pub(crate) class_name: &'static str,
+    /// PlayMakerFSM body: custom typetree with a `fsm` node plus a
+    /// `fsm.name` the game-specific labels read.
+    pub(crate) fsm_name: Option<String>,
 }
 
 impl Scene {
@@ -119,20 +122,19 @@ impl Scene {
 /// `m_ScriptTypeIndex` resolves to that script.
 #[derive(Default)]
 struct ScriptRegistry {
-    /// (namespace, class) → (monoscript path id, mb type id)
-    seen: HashMap<(&'static str, &'static str), (PathId, i32)>,
+    /// (namespace, class) → (monoscript path id, mb type id, script type index)
+    seen: HashMap<(&'static str, &'static str), (PathId, i32, i16)>,
 }
 
 impl ScriptRegistry {
-    /// Idempotently register a script. First call adds a MonoScript
-    /// object + a MonoBehaviour `SerializedType` + an `m_ScriptTypes`
-    /// entry pointing at the new MonoScript; subsequent calls with the
-    /// same key are O(1) lookups.
+    /// Idempotently register a script. Returns the MonoScript path id,
+    /// the plain-MB `m_TypeID`, and the `m_ScriptTypes` index (needed
+    /// for custom script typetrees).
     fn ensure<P: TypeTreeProvider>(
         &mut self,
         sfb: &mut SerializedFileBuilder<'_, P>,
         script: &ScriptRef,
-    ) -> (PathId, i32) {
+    ) -> (PathId, i32, i16) {
         let key = (script.namespace, script.class_name);
         if let Some(hit) = self.seen.get(&key) {
             return *hit;
@@ -186,8 +188,9 @@ impl ScriptRegistry {
         ty.m_ScriptTypeIndex = script_type_index;
         let mb_type_id = sfb.add_type_uncached(ty);
 
-        self.seen.insert(key, (script_path_id, mb_type_id));
-        (script_path_id, mb_type_id)
+        self.seen
+            .insert(key, (script_path_id, mb_type_id, script_type_index));
+        (script_path_id, mb_type_id, script_type_index)
     }
 }
 
@@ -211,6 +214,17 @@ impl SceneNode {
         self.scripts.push(ScriptRef {
             namespace,
             class_name,
+            fsm_name: None,
+        });
+        self
+    }
+
+    /// Attach a `PlayMakerFSM` named `fsm_name`.
+    pub(crate) fn with_fsm(mut self, fsm_name: &str) -> Self {
+        self.scripts.push(ScriptRef {
+            namespace: "",
+            class_name: "PlayMakerFSM",
+            fsm_name: Some(fsm_name.to_owned()),
         });
         self
     }
@@ -279,7 +293,18 @@ fn write_node<P: TypeTreeProvider>(
     sfb.add_object_at(transform_id, &transform).unwrap();
 
     for (mb_id, script_ref) in mb_ids.iter().zip(&node.scripts) {
-        let (script_path_id, mb_type_id) = scripts.ensure(sfb, script_ref);
+        let (script_path_id, mb_type_id, script_type_index) = scripts.ensure(sfb, script_ref);
+        if let Some(fsm_name) = &script_ref.fsm_name {
+            add_fsm_monobehaviour(
+                sfb,
+                *mb_id,
+                TypedPPtr::local(go_id),
+                TypedPPtr::local(script_path_id),
+                script_type_index,
+                fsm_name,
+            );
+            continue;
+        }
         let mb = MonoBehaviour {
             m_GameObject: TypedPPtr::local(go_id),
             m_Enabled: 1,
@@ -291,6 +316,76 @@ fn write_node<P: TypeTreeProvider>(
     }
 
     transform_id
+}
+
+/// Body of a `PlayMakerFSM`-shaped MonoBehaviour: the standard MB
+/// fields plus `fsm.name`.
+#[derive(Serialize)]
+#[allow(non_snake_case)]
+struct FsmMbBody {
+    m_GameObject: TypedPPtr<GameObject>,
+    m_Enabled: u8,
+    m_Script: TypedPPtr<MonoScript>,
+    m_Name: String,
+    fsm: FsmBody,
+}
+
+#[derive(Serialize)]
+struct FsmBody {
+    name: String,
+}
+
+/// MonoBehaviour with a script-specific typetree carrying `fsm.name`.
+fn add_fsm_monobehaviour<P: TypeTreeProvider>(
+    sfb: &mut SerializedFileBuilder<'_, P>,
+    path_id: PathId,
+    game_object: TypedPPtr<GameObject>,
+    script: TypedPPtr<MonoScript>,
+    script_type_index: i16,
+    fsm_name: &str,
+) {
+    let unity_version = sfb
+        .serialized
+        .m_UnityVersion
+        .as_ref()
+        .expect("builder always sets m_UnityVersion")
+        .clone();
+    let mut tt = sfb
+        .typetree_provider
+        .get_typetree_node(ClassId::MonoBehaviour, &unity_version)
+        .expect("embedded TPK is missing MonoBehaviour")
+        .into_owned();
+    // Script-class root so `read()` deserializes off the embedded
+    // tree instead of invoking the typetree generator.
+    tt.m_Type = "PlayMakerFSM".to_owned();
+    tt.children
+        .push(tt_node("Fsm", "fsm", vec![tt_leaf("string", "name")]));
+    let mut ty = SerializedType::simple(ClassId::MonoBehaviour, Some(tt));
+    ty.m_ScriptTypeIndex = script_type_index;
+    let type_id = sfb.add_type_uncached(ty);
+
+    let body = FsmMbBody {
+        m_GameObject: game_object,
+        m_Enabled: 1,
+        m_Script: script,
+        m_Name: String::new(),
+        fsm: FsmBody {
+            name: fsm_name.to_owned(),
+        },
+    };
+    // The TPK's MB typetree has no `fsm` child — serialize against ours.
+    let tt_ref = sfb.serialized.m_Types[type_id as usize]
+        .m_Type
+        .as_ref()
+        .expect("type tree present on the type we just added");
+    let data = serde_typetree::to_vec_endianed(&body, tt_ref, Endianness::Little).unwrap();
+    sfb.add_object_untyped_with(
+        path_id,
+        ClassId::MonoBehaviour,
+        type_id,
+        std::borrow::Cow::Owned(data),
+    )
+    .unwrap();
 }
 
 /// Minimal AssetBundle for the loose section. We don't care about the
@@ -585,6 +680,41 @@ pub(crate) fn external_monoscript_file(at: PathId, name: &str) -> Vec<u8> {
     sfb.write_vec().unwrap()
 }
 
+/// One loose `PlayMakerFSM` named `fsm_name` — lands in the diff's
+/// loose section.
+pub(crate) fn loose_fsm_monobehaviour(fsm_name: &str) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+    let script = MonoScript {
+        m_Name: "PlayMakerFSM".to_owned(),
+        m_ExecutionOrder: 0,
+        m_PropertiesHash: [0; 16],
+        m_ClassName: "PlayMakerFSM".to_owned(),
+        m_Namespace: String::new(),
+        m_AssemblyName: "Assembly-CSharp.dll".to_owned(),
+    };
+    let script_path_id = sfb.add_object(&script).unwrap();
+    let script_types = sfb.serialized.m_ScriptTypes.as_mut().unwrap();
+    let script_type_index: i16 = script_types.len().try_into().unwrap();
+    script_types.push(LocalSerializedObjectIdentifier {
+        m_LocalSerializedFileIndex: FileId::LOCAL,
+        m_LocalIdentifierInFile: script_path_id,
+    });
+
+    let mb_path_id = sfb.get_next_path_id();
+    add_fsm_monobehaviour(
+        &mut sfb,
+        mb_path_id,
+        TypedPPtr::null(),
+        TypedPPtr::local(script_path_id),
+        script_type_index,
+        fsm_name,
+    );
+    sfb.write_vec().unwrap()
+}
+
 /// A file with one loose `MonoBehaviour` whose `m_Script` points at
 /// `target_pid` in the external file `ext_path`. Not attached to a
 /// GameObject, so it lands in the loose section.
@@ -651,6 +781,52 @@ pub(crate) fn loose_monobehaviour_with_script_typetree(
         m_Name: String::new(),
     };
     sfb.add_object_with(&mb, 1, ClassId::MonoBehaviour, mb_type_id)
+        .unwrap();
+    sfb.write_vec().unwrap()
+}
+
+/// One loose plain-script MonoBehaviour named `m_name` — a
+/// ScriptableObject-shaped asset. Lands in the loose section.
+pub(crate) fn loose_named_monobehaviour(m_name: &str) -> Vec<u8> {
+    let unity_version: UnityVersion = TEST_UNITY_VERSION.parse().unwrap();
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let common = build_common_offset_map(&tpk.inner, &unity_version);
+    let mut sfb = SerializedFileBuilder::new(&unity_version, &tpk, &common, true);
+
+    let script = MonoScript {
+        m_Name: "NamedBehaviour".to_owned(),
+        m_ExecutionOrder: 0,
+        m_PropertiesHash: [0; 16],
+        m_ClassName: "NamedBehaviour".to_owned(),
+        m_Namespace: String::new(),
+        m_AssemblyName: "Assembly-CSharp.dll".to_owned(),
+    };
+    let script_path_id = sfb.add_object(&script).unwrap();
+    let script_types = sfb.serialized.m_ScriptTypes.as_mut().unwrap();
+    let script_type_index: i16 = script_types.len().try_into().unwrap();
+    script_types.push(LocalSerializedObjectIdentifier {
+        m_LocalSerializedFileIndex: FileId::LOCAL,
+        m_LocalIdentifierInFile: script_path_id,
+    });
+
+    let mut tt = sfb
+        .typetree_provider
+        .get_typetree_node(ClassId::MonoBehaviour, &unity_version)
+        .expect("embedded TPK is missing MonoBehaviour")
+        .into_owned();
+    tt.m_Type = "NamedBehaviour".to_owned();
+    let mut ty = SerializedType::simple(ClassId::MonoBehaviour, Some(tt));
+    ty.m_ScriptTypeIndex = script_type_index;
+    let mb_type_id = sfb.add_type_uncached(ty);
+
+    let mb = MonoBehaviour {
+        m_GameObject: TypedPPtr::null(),
+        m_Enabled: 1,
+        m_Script: TypedPPtr::local(script_path_id),
+        m_Name: m_name.to_owned(),
+    };
+    let mb_path_id = sfb.get_next_path_id();
+    sfb.add_object_with(&mb, mb_path_id, ClassId::MonoBehaviour, mb_type_id)
         .unwrap();
     sfb.write_vec().unwrap()
 }

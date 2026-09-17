@@ -9,7 +9,7 @@ use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::MonoBehaviour;
 
 use crate::structured::{Node, NodeStatus};
-use crate::unity::NameOnly;
+use crate::unity::{NameOnly, game_specific};
 
 use super::Side;
 use super::hierarchy::Covered;
@@ -43,11 +43,11 @@ pub(super) fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
     };
     let mut base_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
     for r in &base_raw {
-        base_items.insert(key_for(r), LooseItem { path_id: r.path_id });
+        base_items.insert(key_for(r), LooseItem::of(r));
     }
     let mut target_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
     for r in &target_raw {
-        target_items.insert(key_for(r), LooseItem { path_id: r.path_id });
+        target_items.insert(key_for(r), LooseItem::of(r));
     }
 
     let mut keys: Vec<LooseKey> = base_items
@@ -73,42 +73,45 @@ pub(super) fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
                     t.path_id,
                 );
                 let id = super::matched_pair_id(b.path_id, t.path_id);
+                let (label, badge) = loose_label(base_file, &key, &b);
                 Node {
-                    badge: if b.path_id == t.path_id {
-                        Some(format!("[{}]", b.path_id))
-                    } else {
-                        Some(format!("[{} → {}]", t.path_id, b.path_id))
-                    },
+                    badge,
                     facets: [("class".to_string(), key.label.clone())]
                         .into_iter()
                         .collect(),
-                    ..super::make_node(id, loose_label(&key, &b), "component", status)
+                    ..super::make_node(id, label, "component", status)
                 }
             }
-            (Some(b), None) => Node {
-                badge: Some(format!("[{}]", b.path_id)),
-                facets: [("class".to_string(), key.label.clone())]
-                    .into_iter()
-                    .collect(),
-                ..super::make_node(
-                    super::one_sided_id(Side::Base, b.path_id),
-                    loose_label(&key, &b),
-                    "component",
-                    NodeStatus::Added,
-                )
-            },
-            (None, Some(t)) => Node {
-                badge: Some(format!("[{}]", t.path_id)),
-                facets: [("class".to_string(), key.label.clone())]
-                    .into_iter()
-                    .collect(),
-                ..super::make_node(
-                    super::one_sided_id(Side::Target, t.path_id),
-                    loose_label(&key, &t),
-                    "component",
-                    NodeStatus::Removed,
-                )
-            },
+            (Some(b), None) => {
+                let (label, badge) = loose_label(base_file, &key, &b);
+                Node {
+                    badge,
+                    facets: [("class".to_string(), key.label.clone())]
+                        .into_iter()
+                        .collect(),
+                    ..super::make_node(
+                        super::one_sided_id(Side::Base, b.path_id),
+                        label,
+                        "component",
+                        NodeStatus::Added,
+                    )
+                }
+            }
+            (None, Some(t)) => {
+                let (label, badge) = loose_label(target_file, &key, &t);
+                Node {
+                    badge,
+                    facets: [("class".to_string(), key.label.clone())]
+                        .into_iter()
+                        .collect(),
+                    ..super::make_node(
+                        super::one_sided_id(Side::Target, t.path_id),
+                        label,
+                        "component",
+                        NodeStatus::Removed,
+                    )
+                }
+            }
             (None, None) => unreachable!(),
         };
         children.push(node);
@@ -136,6 +139,18 @@ struct LooseKey {
 
 struct LooseItem {
     path_id: PathId,
+    /// Raw `m_Name` — the key's singleton rule may have dropped it, the
+    /// badge shows it regardless.
+    name: String,
+}
+
+impl LooseItem {
+    fn of(raw: &RawLoose) -> Self {
+        Self {
+            path_id: raw.path_id,
+            name: raw.name.clone(),
+        }
+    }
 }
 
 struct RawLoose {
@@ -191,10 +206,17 @@ fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
     Ok(out)
 }
 
-fn loose_label(key: &LooseKey, _item: &LooseItem) -> String {
-    if key.name.is_empty() || key.name.starts_with("__pid:") {
-        key.label.clone()
-    } else {
-        format!("{}: {}", key.label, key.name)
+/// Class as label, the object's name as badge — the tree's rule. The
+/// name is display-only: the match key keeps its singleton rule, a
+/// renamed singleton stays one pair, badged from the base side.
+fn loose_label<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    key: &LooseKey,
+    item: &LooseItem,
+) -> (String, Option<String>) {
+    if let Some(name) = game_specific::monobehaviour_name(file, &key.label, item.path_id) {
+        return (key.label.clone(), Some(name));
     }
+    let badge = (!item.name.is_empty()).then(|| item.name.clone());
+    (key.label.clone(), badge)
 }
