@@ -299,7 +299,7 @@ function FileViewPage() {
             path,
             node_id: historyNodeId,
           }}
-          className="rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 hover:border-slate-600"
+          className="rounded border border-slate-700 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 hover:border-slate-600"
         >
           History
         </Link>
