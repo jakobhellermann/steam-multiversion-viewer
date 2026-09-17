@@ -9,7 +9,7 @@ use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
 
 use crate::structured::{Node, NodeStatus};
-use crate::unity::game_specific;
+use crate::unity::object_name;
 
 use super::{BodyIndex, Side};
 
@@ -470,8 +470,9 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
     }
 }
 
-/// Game-specific name (an FSM's `fsm.name`) as badge; the label is the
-/// class/script. Matched pairs badge from the base side.
+/// The component's name as badge (game-specific, else `m_Name`) —
+/// engine classes carry no names. Matched pairs badge from the base
+/// side.
 fn component_name<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     key: &ComponentKey,
@@ -480,5 +481,5 @@ fn component_name<R: EnvResolver, P: TypeTreeProvider>(
     let ComponentKey::Script(script_name) = key else {
         return None;
     };
-    game_specific::monobehaviour_name(file, script_name, comp.path_id)
+    object_name(file, script_name, comp.path_id)
 }

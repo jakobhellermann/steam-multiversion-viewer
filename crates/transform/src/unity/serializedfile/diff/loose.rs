@@ -9,7 +9,7 @@ use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::MonoBehaviour;
 
 use crate::structured::{Node, NodeStatus};
-use crate::unity::{NameOnly, game_specific};
+use crate::unity::{NameOnly, object_name};
 
 use super::Side;
 use super::hierarchy::Covered;
@@ -43,11 +43,11 @@ pub(super) fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
     };
     let mut base_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
     for r in &base_raw {
-        base_items.insert(key_for(r), LooseItem::of(r));
+        base_items.insert(key_for(r), LooseItem { path_id: r.path_id });
     }
     let mut target_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
     for r in &target_raw {
-        target_items.insert(key_for(r), LooseItem::of(r));
+        target_items.insert(key_for(r), LooseItem { path_id: r.path_id });
     }
 
     let mut keys: Vec<LooseKey> = base_items
@@ -139,18 +139,6 @@ struct LooseKey {
 
 struct LooseItem {
     path_id: PathId,
-    /// Raw `m_Name` — the key's singleton rule may have dropped it, the
-    /// badge shows it regardless.
-    name: String,
-}
-
-impl LooseItem {
-    fn of(raw: &RawLoose) -> Self {
-        Self {
-            path_id: raw.path_id,
-            name: raw.name.clone(),
-        }
-    }
 }
 
 struct RawLoose {
@@ -207,16 +195,16 @@ fn collect_loose<R: EnvResolver, P: TypeTreeProvider>(
 }
 
 /// Class as label, the object's name as badge — the tree's rule. The
-/// name is display-only: the match key keeps its singleton rule, a
-/// renamed singleton stays one pair, badged from the base side.
+/// name is read fresh for display only; the match key keeps its
+/// singleton rule, so a renamed singleton stays one pair, badged
+/// from the base side.
 fn loose_label<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     key: &LooseKey,
     item: &LooseItem,
 ) -> (String, Option<String>) {
-    if let Some(name) = game_specific::monobehaviour_name(file, &key.label, item.path_id) {
-        return (key.label.clone(), Some(name));
-    }
-    let badge = (!item.name.is_empty()).then(|| item.name.clone());
-    (key.label.clone(), badge)
+    (
+        key.label.clone(),
+        object_name(file, &key.label, item.path_id),
+    )
 }

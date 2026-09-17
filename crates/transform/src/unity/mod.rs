@@ -8,6 +8,8 @@
 //! all.
 
 use rabex_env::Environment;
+use rabex_env::handle::SerializedFileHandle;
+use rabex_env::rabex::objects::pptr::PathId;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 
@@ -22,6 +24,27 @@ pub mod serializedfile;
 pub(crate) struct NameOnly {
     #[serde(default)]
     pub(crate) m_Name: String,
+}
+
+/// The object's display name: the game-specific name (an FSM's
+/// `fsm.name`) when there is one, else `m_Name`. `class_or_script` is
+/// the row's class/script label — game-specific lookups key off it,
+/// everything else falls through to `m_Name`. None when nameless.
+pub(crate) fn object_name<R: EnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    class_or_script: &str,
+    path_id: PathId,
+) -> Option<String> {
+    if let Some(name) = game_specific::monobehaviour_name(file, class_or_script, path_id) {
+        return Some(name);
+    }
+    let name = file
+        .object_at::<NameOnly>(path_id)
+        .ok()?
+        .read()
+        .ok()?
+        .m_Name;
+    (!name.is_empty()).then_some(name)
 }
 
 /// Dump a unity serialized-file as text using a prebuilt `env`.

@@ -7,7 +7,7 @@ use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::MonoBehaviour;
 
 use crate::structured::Node;
-use crate::unity::{NameOnly, game_specific};
+use crate::unity::object_name;
 
 /// Dispatches to the node builder for this engine class.
 #[tracing::instrument(level = "debug", skip_all, fields(?class_id, ?path_id))]
@@ -18,7 +18,7 @@ pub(super) fn component_node<R: EnvResolver, P: TypeTreeProvider>(
     loose: bool,
 ) -> Result<Node> {
     match class_id {
-        ClassId::MonoBehaviour => monobehaviour_node(file, path_id, loose),
+        ClassId::MonoBehaviour => monobehaviour_node(file, path_id),
         ClassId::Shader => shader_node(file, path_id),
         _ => ordinary_component_node(file, path_id, class_id, loose),
     }
@@ -35,38 +35,26 @@ fn ordinary_component_node<R: EnvResolver, P: TypeTreeProvider>(
     if class_id == ClassId::Texture2D {
         node.content_mime = Some("image/png".to_string());
     }
-    if loose && let Some(name) = read_m_name(file, path_id).filter(|s| !s.is_empty()) {
+    if loose && let Some(name) = object_name(file, &class_label, path_id) {
         node = node.with_badge(name);
     }
     Ok(node)
 }
 
-/// MonoBehaviour node: script class as label, the object's name as
-/// badge — the game-specific name (an FSM's `fsm.name`) if there is
-/// one, else `m_Name` for loose assets (ScriptableObjects).
+/// MonoBehaviour node: script class as label, the object's name
+/// (game-specific, else `m_Name`) as badge.
 fn monobehaviour_node<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     path_id: PathId,
-    loose: bool,
 ) -> Result<Node> {
     let handle = file.object_at::<MonoBehaviour>(path_id)?;
 
-    let Some(mono_script) = handle.mono_script()? else {
-        let label = format!("{:?}", ClassId::MonoBehaviour);
-        let mut node = component_leaf(path_id, &label, &label);
-        if loose && let Some(name) = read_m_name(file, path_id).filter(|s| !s.is_empty()) {
-            node = node.with_badge(name);
-        }
-        return Ok(node);
-    };
-    let class_label = mono_script.full_name().into_owned();
+    let class_label = handle
+        .mono_script()?
+        .map(|s| s.full_name().into_owned())
+        .unwrap_or_else(|| format!("{:?}", ClassId::MonoBehaviour));
     let mut node = component_leaf(path_id, &class_label, &class_label);
-    let name = game_specific::monobehaviour_name(file, &class_label, path_id).or_else(|| {
-        loose
-            .then(|| read_m_name(file, path_id).filter(|s| !s.is_empty()))
-            .flatten()
-    });
-    if let Some(name) = name {
+    if let Some(name) = object_name(file, &class_label, path_id) {
         node = node.with_badge(name);
     }
     Ok(node)
@@ -98,15 +86,4 @@ fn component_leaf(path_id: PathId, display_label: &str, class_label: &str) -> No
         .with_facet("class", class_label);
     node.has_content = true;
     node
-}
-
-fn read_m_name<R: EnvResolver, P: TypeTreeProvider>(
-    file: &SerializedFileHandle<'_, R, P>,
-    path_id: PathId,
-) -> Option<String> {
-    file.object_at::<NameOnly>(path_id)
-        .ok()?
-        .read()
-        .ok()
-        .map(|n| n.m_Name)
 }
