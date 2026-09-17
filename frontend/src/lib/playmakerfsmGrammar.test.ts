@@ -3,20 +3,18 @@ import { describe, expect, test } from "vitest";
 
 import { highlight, langForMime } from "./syntax";
 
-/// The github-dark colors the scope choices in `playmakerfsmGrammar.ts`
-/// are made against, in the casing shiki emits them (upper-case hex).
-const KEYWORD = "#F97583"; // red: fsm/state/on/var, →, =
-const ENTITY = "#B392F0"; // purple: action names, FSM name, property members
-const STATE = "#85E89D"; // green: state names
-const CONSTANT = "#79B8FF"; // blue: events, numbers, bools, Self
-const PARAM = "#FFAB70"; // orange: param labels, variable names
-const STRING = "#9ECBFF"; // light blue: quoted strings
-const COMMENT = "#6A737D"; // gray: comments, (file) suffixes
-const INVALID = "#FDAEB7"; // pink italic: undecodable residue
+/// github-dark colors, in the casing shiki emits them (upper-case hex).
+const KEYWORD = "#F97583"; // keywords, operators
+const ENTITY = "#B392F0"; // action names, FSM name, property members
+const STATE = "#85E89D"; // state names
+const CONSTANT = "#79B8FF"; // events, numbers, bools, Self
+const PARAM = "#FFAB70"; // param labels, variable names
+const STRING = "#9ECBFF"; // quoted strings
+const COMMENT = "#6A737D"; // comments, (file) suffixes
+const INVALID = "#FDAEB7"; // undecodable residue
 
-/// The crate's documented layout, plus one action holding every
-/// construct the pseudocode renderer emits that the documented sample
-/// leaves out (object refs, template controls, enums, layers).
+/// The crate's documented layout, extended with one action holding the
+/// constructs it leaves out (object refs, template control, enum, layer).
 const SAMPLE = [
   "// uses template: bell_shrine",
   "fsm Bell Shrine {",
@@ -45,9 +43,9 @@ const SAMPLE = [
   "}",
 ].join("\n");
 
-/// Assert `text` got the given color in shiki's github-dark output.
-/// vscode-textmate glues the whitespace ahead of a match onto the
-/// matched token, so the assertion tolerates leading span content.
+/// Assert `text` got the given color. vscode-textmate glues the
+/// whitespace ahead of a match onto the matched token, so tolerate
+/// leading span content.
 const colored = (color: string, text: string) => {
   const escaped = text.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
   return new RegExp(`color:${color}[^>]*>[^<]*${escaped}<`);
@@ -59,8 +57,8 @@ describe("playmakerfsm grammar", () => {
   });
 
   test("the JS regex engine accepts every pattern", async () => {
-    // Highlighter construction throws on a pattern oniguruma-to-es can't
-    // translate; a single successful render covers all rules at once.
+    // A pattern oniguruma-to-es can't translate throws at highlighter
+    // construction, so one successful render covers all rules.
     await expect(highlight(SAMPLE, "playmakerfsm")).resolves.toBeTypeOf("string");
   });
 
@@ -72,12 +70,12 @@ describe("playmakerfsm grammar", () => {
     expect(html).toMatch(colored(KEYWORD, "on"));
     expect(html).toMatch(colored(KEYWORD, "var"));
     expect(html).toMatch(colored(KEYWORD, "→"));
-    expect(html).toMatch(colored(KEYWORD, "bool")); // var type via storage.type
+    expect(html).toMatch(colored(KEYWORD, "bool")); // storage.type
   });
 
   test("names: states green, actions and members purple, FSM name typed", async () => {
     const html = await highlight(SAMPLE, "playmakerfsm");
-    expect(html).toMatch(colored(ENTITY, "Bell Shrine")); // fsm header
+    expect(html).toMatch(colored(ENTITY, "Bell Shrine"));
     expect(html).toMatch(colored(ENTITY, "SetBoolValue"));
     expect(html).toMatch(colored(ENTITY, "RunTemplate"));
     expect(html).toMatch(colored(ENTITY, "Transform.position"));
@@ -91,14 +89,14 @@ describe("playmakerfsm grammar", () => {
     expect(html).toMatch(colored(CONSTANT, "true"));
     expect(html).toMatch(colored(CONSTANT, "(none)"));
     expect(html).toMatch(colored(CONSTANT, "Self"));
-    expect(html).toMatch(colored(CONSTANT, "(1, 0.5, 0)")); // whole vector
-    expect(html).toMatch(colored(CONSTANT, "Default")); // layer via support.type
+    expect(html).toMatch(colored(CONSTANT, "(1, 0.5, 0)"));
+    expect(html).toMatch(colored(CONSTANT, "Default")); // layer
     expect(html).toMatch(colored(STRING, '"On"'));
     expect(html).toMatch(colored(PARAM, "boolVariable"));
     expect(html).toMatch(colored(PARAM, "Bell")); // template binding
   });
 
-  test("comments and file suffixes are gray residue", async () => {
+  test("comments and file suffixes are gray", async () => {
     const html = await highlight(SAMPLE, "playmakerfsm");
     expect(html).toMatch(colored(COMMENT, "// arm the bell"));
     expect(html).toMatch(colored(COMMENT, "// from any state"));
@@ -107,7 +105,6 @@ describe("playmakerfsm grammar", () => {
 
   test("undecodable residue is flagged invalid", async () => {
     const html = await highlight(SAMPLE, "playmakerfsm");
-    // shiki HTML-escapes the angle brackets.
     expect(html).toMatch(colored(INVALID, "(3B)"));
     // shiki HTML-escapes `<` as `&#x3C;`.
     expect(html).toMatch(colored(INVALID, "&#x3C;deleted action>"));

@@ -3,12 +3,12 @@ import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 
 /// Grammars we ship, as lazy imports. Single source of truth: the keys
-/// give the `Lang` type, the values are loaded into the highlighter.
-/// The fine-grained `shiki/core` bundle keeps rolldown from emitting a
-/// chunk per bundled grammar (~200 of them) that we never load. Add to
-/// this *and* to extToLang below. `playmakerfsm` is ours, not from
-/// @shikijs/langs: a custom grammar for the backend's PlayMaker FSM
-/// pseudocode dump.
+/// give the `Lang` type, the values are registered into the highlighter
+/// on first use of that language (see `ensureLang`). The fine-grained
+/// `shiki/core` bundle keeps rolldown from emitting a chunk per bundled
+/// grammar (~200 of them) that we never load. Add to this *and* to
+/// extToLang below. `playmakerfsm` is ours, not from @shikijs/langs: a
+/// custom grammar for the backend's PlayMaker FSM pseudocode dump.
 const GRAMMARS = {
   xml: () => import("@shikijs/langs/xml"),
   json: () => import("@shikijs/langs/json"),
@@ -25,21 +25,31 @@ const THEME = "github-dark";
 
 let highlighterPromise: Promise<HighlighterCore> | null = null;
 
-/// Lazily build a single shared Highlighter — shiki recommends one
-/// instance per app, and our grammars together weigh a few hundred KB
-/// we don't want to ship on first paint.
+/// Lazily build a single shared Highlighter (shiki recommends one
+/// instance per app). It starts empty — grammar chunks are fetched only
+/// for languages actually rendered, so opening a JSON file doesn't pull
+/// the lua/glsl/cpp chunks over the network.
 export function getHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighterCore({
       themes: [import("@shikijs/themes/github-dark")],
-      langs: Object.values(GRAMMARS).map((load) => load()),
+      langs: [],
       // JS regex engine over oniguruma-wasm: drops the ~600KB wasm chunk.
-      // Our grammars translate cleanly; a future grammar the JS engine can't
-      // express throws here loudly rather than mis-highlighting in silence.
+      // A grammar the JS engine can't express throws here loudly rather
+      // than mis-highlighting in silence.
       engine: createJavaScriptRegexEngine(),
     });
   }
   return highlighterPromise;
+}
+
+const loadedLangs = new Set<Lang>();
+
+async function ensureLang(lang: Lang): Promise<void> {
+  if (loadedLangs.has(lang)) return;
+  const h = await getHighlighter();
+  await h.loadLanguage(GRAMMARS[lang]());
+  loadedLangs.add(lang);
 }
 
 const EXT_TO_LANG: Record<string, Lang> = {
@@ -82,6 +92,6 @@ export function langForMime(mime: string): Lang | null {
 /// Render `code` as syntax-highlighted HTML. Returns the HTML string of
 /// a `<pre>` element ready for `dangerouslySetInnerHTML`.
 export async function highlight(code: string, lang: Lang): Promise<string> {
-  const h = await getHighlighter();
+  const [h] = await Promise.all([getHighlighter(), ensureLang(lang)]);
   return h.codeToHtml(code, { lang, theme: THEME });
 }

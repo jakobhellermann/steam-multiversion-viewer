@@ -1,8 +1,8 @@
 // TODO(ai-review): review for style and correctness
 //
-// Shiki (TextMate) grammar for the `text/x-playmaker-fsm` pseudocode the
-// backend's PlayMakerFSM dumper emits (`playmakerfsm::pseudo::render` in the
-// playmakerfsm crate — that renderer's output is this grammar's spec):
+// Shiki grammar for the `text/x-playmaker-fsm` pseudocode the backend's
+// PlayMakerFSM dumper emits (`playmakerfsm::pseudo::render` — that
+// renderer's output is this grammar's spec):
 //
 //   fsm Bell Shrine {
 //     start Init
@@ -16,17 +16,10 @@
 //     var On: bool = false
 //   }
 //
-// Scope choices are made against the `github-dark` theme the viewer ships:
-// keywords red (`#f97583`), action names / property members purple
-// (`entity.*`), state names green (`entity.name.tag`), events / numbers /
-// `Self` blue (`constant.*`, `support.*`), parameter labels orange
-// (`variable.parameter`), strings light-blue, comments and the `(file)`
-// suffix of object references gray, and undecodable residue (`(3B)` raw
-// bytes, `<deleted action>`, `loose:` refs) pink-italic `invalid.deprecated`.
-//
-// Every rule must translate through shiki's JavaScript regex engine
-// (oniguruma-to-es): keep to plain classes, lazy quantifiers and
-// lookarounds — no `\G`, backreferences or possessive groups.
+// Scopes picked against github-dark: keywords red, action names and
+// property members purple, state names green, events/numbers/constants
+// blue, parameter labels orange, strings light-blue, comments and
+// `(file)` suffixes gray, undecodable residue pink-italic.
 
 import type { LanguageRegistration } from "shiki/core";
 
@@ -38,18 +31,17 @@ const grammar: LanguageRegistration = {
   scopeName: "source.playmakerfsm",
 
   patterns: [
-    // Structural lines first: each is anchored to the line start, so its
-    // keywords only color in place (a param named `start` stays plain) and
-    // mid-line values can't be mistaken for headers.
+    // Structural lines first, anchored to the line start so their
+    // keywords only color in place (a param named `start` stays plain).
     { include: "#fsm-header" },
     { include: "#state-header" },
     { include: "#start-line" },
     { include: "#transition-line" },
     { include: "#var-decl" },
     { include: "#action-line" },
-    // Then, in an order where each rule's lookalikes are claimed by an
-    // earlier rule: `(unset var)` before the `var` keyword, vectors and
-    // raw bytes before numbers, event targets before generic calls.
+    // Value rules ordered so each rule's lookalikes are claimed first:
+    // `(unset var)` before the `var` keyword, vectors and raw bytes
+    // before numbers, event targets before generic calls.
     { include: "#comment" },
     { include: "#string" },
     { include: "#deleted-action" },
@@ -77,7 +69,7 @@ const grammar: LanguageRegistration = {
   ],
 
   repository: {
-    /// `fsm Bell Shrine {` — the FSM name is the block's headline.
+    /// `fsm Bell Shrine {`.
     "fsm-header": {
       match: "^\\s*(fsm)\\s+(.+?)\\s*(\\{)\\s*$",
       captures: {
@@ -98,7 +90,6 @@ const grammar: LanguageRegistration = {
       },
     },
 
-    /// `start Init`.
     "start-line": {
       match: "^\\s*(start)\\s+(.+?)\\s*$",
       captures: {
@@ -107,10 +98,9 @@ const grammar: LanguageRegistration = {
       },
     },
 
-    /// `on RESET → Init`, with the trailing `// from any state` of global
-    /// transitions left to the comment rule via the lookahead. Event and
-    /// state names can contain spaces, so both are lazy up to their
-    /// separators.
+    /// `on RESET → Init`; the trailing `// from any state` is left to the
+    /// comment rule via the lookahead. Event and state names may contain
+    /// spaces, hence the lazy captures.
     "transition-line": {
       match: "^\\s*(on)\\s+(.+?)\\s+(→)\\s+(.+?)\\s*(?=//|$)",
       captures: {
@@ -121,8 +111,8 @@ const grammar: LanguageRegistration = {
       },
     },
 
-    /// `var On: bool = false` — only the prefix; the value is tokenized
-    /// by the shared value rules below the anchored ones.
+    /// `var On: bool = false` — prefix only; the value is tokenized by
+    /// the shared value rules.
     "var-decl": {
       match: "^\\s*(var)\\s+(.+?)\\s*:\\s*([A-Za-z_]\\w*)\\s*(=)",
       captures: {
@@ -133,7 +123,7 @@ const grammar: LanguageRegistration = {
       },
     },
 
-    /// An action call at the start of a state body: `SetBoolValue(`.
+    /// An action call at the start of a state body.
     "action-line": {
       match: "^\\s*([A-Za-z_]\\w*)\\s*\\(",
       captures: { "1": { name: "entity.name.function.playmakerfsm" } },
@@ -166,14 +156,14 @@ const grammar: LanguageRegistration = {
       name: "invalid.deprecated.playmakerfsm",
     },
 
-    /// Placeholder param values. Before `#var-keyword`, which would
-    /// otherwise color the `var` in `(unset var)`.
+    /// Placeholder param values; must precede `#var-keyword`, which
+    /// would color the `var` in `(unset var)`.
     "missing-value": {
       match: "\\((?:unset var|unset|unused|none)\\)",
       name: "constant.language.missing.playmakerfsm",
     },
 
-    /// Params the decoder couldn't slice — kept as their byte length.
+    /// Params the decoder couldn't slice, kept as their byte length.
     "raw-bytes": {
       match: "\\(\\d+B\\)",
       name: "invalid.deprecated.playmakerfsm",
@@ -184,30 +174,27 @@ const grammar: LanguageRegistration = {
       name: "constant.language.null.playmakerfsm",
     },
 
-    /// A `Fn(<TypeName>)` call whose declared parameter the decoder
-    /// couldn't read.
+    /// `Fn(<TypeName>)` — a declared parameter the decoder couldn't read.
     "type-arg": {
       match: "<([A-Za-z_][\\w.]*)>",
       captures: { "1": { name: "support.type.playmakerfsm" } },
     },
 
-    /// An object the dump can resolve to a path id but not a name.
+    /// An object resolvable to a path id but not a name.
     "loose-ref": {
       match: "\\bloose:\\d+",
       name: "invalid.deprecated.playmakerfsm",
     },
 
-    /// Numeric vectors: `(1, 0.5, 0)`. Digits/dots/commas only, so this
+    /// Numeric vectors, `(1, 0.5, 0)`: digits/dots/commas only, so it
     /// never claims the `(file)` suffix of an object reference.
     vector: {
       match: "\\([0-9.,\t -]+\\)",
       name: "constant.numeric.playmakerfsm",
     },
 
-    /// The `(file)` of `Some/Path (sharedassets1.assets)` — always a
-    /// space-separated paren group with letters inside, after vectors and
-    /// raw bytes have claimed their own paren groups. Matched from the
-    /// `(` (lookbehind for the space) so the token starts at the paren.
+    /// The `(file)` of `Some/Path (sharedassets1.assets)` — matched from
+    /// the `(` so the token starts at the paren.
     "file-suffix": {
       match: "(?<= )\\([^()\\n]*[A-Za-z][^()\\n]*\\)",
       name: "comment.playmakerfsm",
@@ -223,24 +210,23 @@ const grammar: LanguageRegistration = {
       name: "constant.language.boolean.playmakerfsm",
     },
 
-    /// `Transform.position on var "Target"` — the property before the
-    /// `on` (which `#on-keyword` colors further down).
+    /// `Transform.position on var "Target"` — the member before the `on`.
     "property-member": {
       match: "\\b([A-Za-z_][\\w.]*)\\s+(?=on\\b)",
       captures: { "1": { name: "entity.other.attribute-name.playmakerfsm" } },
     },
 
-    /// Event-target kinds and the owner keyword. Word chars, `/` or `:`
-    /// before the name would mean it's an object path segment instead.
+    /// Event-target kinds and the owner keyword; a word char, `/` or `:`
+    /// before it means it's an object path segment instead.
     "event-target": {
       match:
         "(?<![\\w./:])(?:Self|GameObjectFSM|GameObject|FSMComponent|BroadcastAll|HostFSM|SubFSMs)(?=[\\s(),\\]]|$)",
       name: "support.constant.playmakerfsm",
     },
 
-    /// Enum and layer values: `SomeEnum(2)`, `Default(0)`. Runs before
-    /// `#generic-call`, so a call with a bare int argument shares this
-    /// color — the two shapes are indistinguishable in the pseudocode.
+    /// Enum and layer values, `SomeEnum(2)` / `Default(0)`. A call with a
+    /// bare int argument shares this color — the shapes are
+    /// indistinguishable in the pseudocode.
     "enum-value": {
       match: "\\b([A-Za-z_]\\w*)\\((\\d+)\\)",
       captures: {
@@ -249,8 +235,7 @@ const grammar: LanguageRegistration = {
       },
     },
 
-    /// `template=bell_shrine` — before `#param-label`, which would color
-    /// the word like any other `name=` argument.
+    /// `template=bell_shrine`; must precede `#param-label`.
     "template-label": {
       match: "\\b(template)(=)",
       captures: {
@@ -259,8 +244,7 @@ const grammar: LanguageRegistration = {
       },
     },
 
-    /// The binding lists of a template control: `in[`, `out[`,
-    /// `vars[`, `events[`.
+    /// Template binding-list labels: `in[`, `out[`, `vars[`, `events[`.
     "list-label": {
       match: "\\b(?:in|out|vars|events)(?=\\[)",
       name: "keyword.other.playmakerfsm",
@@ -278,15 +262,14 @@ const grammar: LanguageRegistration = {
       name: "keyword.other.playmakerfsm",
     },
 
-    /// A template binding's variable: `Bell <- var "On"`, `Done ->
-    /// FINISHED`, `Ticks = 3`. Names may contain spaces, so the capture
-    /// is lazy up to the arrow or `=` (which `#param-label` claims).
+    /// A template binding's variable, `Bell <- var "On"`; lazy up to
+    /// the arrow since names may contain spaces.
     binding: {
       match: "([A-Za-z_][\\w ]*?)(?=\\s*(?:<-|->))",
       captures: { "1": { name: "variable.parameter.playmakerfsm" } },
     },
 
-    /// A named action argument: `boolVariable=`. The name class excludes
+    /// A named action argument, `boolVariable=`. The name class excludes
     /// punctuation, so a label never spills across a `,` or `(`.
     "param-label": {
       match: "([A-Za-z_][\\w ]*?)(=)",
@@ -296,8 +279,7 @@ const grammar: LanguageRegistration = {
       },
     },
 
-    /// Any other call: `DoThing(...)` mid-line, after enum values and
-    /// event targets have claimed their lookalikes.
+    /// Any other call, `DoThing(...)` mid-line.
     "generic-call": {
       match: "\\b([A-Za-z_]\\w*)(?=\\()",
       captures: { "1": { name: "entity.name.function.playmakerfsm" } },
