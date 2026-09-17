@@ -149,6 +149,10 @@ async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>, AppState)
             get(routes::downloads::downloads_events),
         )
         .route("/api/docs", get(scalar_html))
+        .route(
+            "/api/third-party-notices",
+            get(static_files::third_party_notices),
+        )
         .fallback(static_files::serve)
         .layer(middleware::from_fn(http_log))
         .with_state(state.clone());

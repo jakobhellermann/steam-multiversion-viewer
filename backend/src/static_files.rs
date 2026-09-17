@@ -25,6 +25,20 @@ use rust_embed::RustEmbed;
 #[folder = "../frontend/dist"]
 struct FrontendAssets;
 
+/// Serve the generated `THIRD-PARTY-NOTICES.html` (from `cargo about`)
+/// as a standalone HTML page.
+pub async fn third_party_notices() -> Response {
+    let html = include_str!("../../THIRD-PARTY-NOTICES.html");
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        Body::from(html),
+    )
+        .into_response()
+}
+
 /// Axum fallback handler — strips the leading slash, looks the path
 /// up in [`FrontendAssets`], serves it with a matching `Content-Type`.
 /// On miss falls back to `index.html` so single-page-app routes work

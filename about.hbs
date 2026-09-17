@@ -1,70 +1,182 @@
 <html>
-
-<head>
+  <head>
+    <meta charset="utf-8" />
     <style>
-        @media (prefers-color-scheme: dark) {
-            body {
-                background: #333;
-                color: white;
-            }
-            a {
-                color: skyblue;
-            }
-        }
-        .container {
-            font-family: sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        .intro {
-            text-align: center;
-        }
-        .licenses-list {
-            list-style-type: none;
-            margin: 0;
-            padding: 0;
-        }
-        .license-used-by {
-            margin-top: -10px;
-        }
-        .license-text {
-            max-height: 200px;
-            overflow-y: scroll;
-            white-space: pre-wrap;
-        }
+      :root {
+        color-scheme: dark;
+        --bg: #0f172a;
+        --bg-2: #1e293b;
+        --text: #e2e8f0;
+        --text-muted: #94a3b8;
+        --text-dim: #64748b;
+        --accent: #38bdf8;
+        --accent-hover: #0284c7;
+        --border: #1e293b;
+        --code-bg: #1e293b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, system-ui, -apple-system, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+      }
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 24px 16px 64px;
+      }
+      .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 24px;
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 14px;
+      }
+      .back-link:hover {
+        color: var(--accent);
+      }
+      .intro {
+        margin-bottom: 32px;
+      }
+      .intro h1 {
+        font-size: 24px;
+        font-weight: 700;
+        margin: 0 0 8px;
+      }
+      .intro p {
+        color: var(--text-muted);
+        margin: 0;
+        font-size: 14px;
+      }
+      .licenses-overview {
+        list-style: none;
+        padding: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 40px;
+      }
+      .licenses-overview li {
+        display: inline;
+      }
+      .licenses-overview a {
+        display: inline-block;
+        padding: 4px 10px;
+        background: var(--bg-2);
+        border-radius: 6px;
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 13px;
+        transition: background 0.15s;
+      }
+      .licenses-overview a:hover {
+        background: var(--accent);
+        color: #0f172a;
+      }
+      .section-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 40px 0 16px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .licenses-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .license {
+        margin-bottom: 32px;
+        padding: 16px;
+        background: var(--bg-2);
+        border-radius: 8px;
+        border: 1px solid var(--border);
+      }
+      .license h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0 0 8px;
+        color: var(--accent);
+      }
+      .license h4 {
+        font-size: 12px;
+        font-weight: 500;
+        margin: 0 0 4px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .license-used-by {
+        list-style: none;
+        padding: 0;
+        margin: 0 0 12px;
+        font-size: 13px;
+      }
+      .license-used-by li {
+        display: inline;
+      }
+      .license-used-by li + li::before {
+        content: " · ";
+        color: var(--text-dim);
+      }
+      .license-used-by a {
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+      .license-used-by a:hover {
+        color: var(--accent);
+      }
+      .license-text {
+        margin: 0;
+        padding: 12px;
+        background: var(--code-bg);
+        border-radius: 6px;
+        font-family: ui-monospace, 'Fira Code', 'Cascadia Code', monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        max-height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--text-muted);
+      }
     </style>
-</head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  </head>
+  <body>
+    <div class="container">
+      <a href="/settings" class="back-link">&larr; Back to Settings</a>
 
-<body>
-    <main class="container">
-        <div class="intro">
-            <h1>Third Party Licenses</h1>
-            <p>This page lists the licenses of the projects used in cargo-about.</p>
-        </div>
-    
-        <h2>Overview of licenses:</h2>
-        <ul class="licenses-overview">
-            {{#each overview}}
-            <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+      <div class="intro">
+        <h1>Third Party Licenses</h1>
+      </div>
+
+      <h2 class="section-title">Overview of licenses</h2>
+      <ul class="licenses-overview">
+        {{#each overview}}
+        <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+        {{/each}}
+      </ul>
+
+      <h2 class="section-title">All license texts</h2>
+      <ul class="licenses-list">
+        {{#each licenses}}
+        <li class="license">
+          <h3 id="{{id}}">{{name}}</h3>
+          <h4>Used by</h4>
+          <ul class="license-used-by">
+            {{#each used_by}}
+            <li><a href="{{#if crate.repository}} {{crate.repository}} {{else}} https://crates.io/crates/{{crate.name}} {{/if}}">{{crate.name}} {{crate.version}}</a></li>
             {{/each}}
-        </ul>
-
-        <h2>All license text:</h2>
-        <ul class="licenses-list">
-            {{#each licenses}}
-            <li class="license">
-                <h3 id="{{id}}">{{name}}</h3>
-                <h4>Used by:</h4>
-                <ul class="license-used-by">
-                    {{#each used_by}}
-                    <li><a href="{{#if crate.repository}} {{crate.repository}} {{else}} https://crates.io/crates/{{crate.name}} {{/if}}">{{crate.name}} {{crate.version}}</a></li>
-                    {{/each}}
-                </ul>
-                <pre class="license-text">{{text}}</pre>
-            </li>
-            {{/each}}
-        </ul>
-    </main>
-</body>
-
+          </ul>
+          <pre class="license-text">{{text}}</pre>
+        </li>
+        {{/each}}
+      </ul>
+    </div>
+  </body>
 </html>

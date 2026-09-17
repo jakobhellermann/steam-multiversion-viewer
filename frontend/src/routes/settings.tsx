@@ -21,9 +21,26 @@ function SettingsPage() {
         <div className="space-y-8">
           <SettingsForm config={query.data} onSaved={onSaved} />
           {vibrancySupported() && <VibrancySection config={query.data} onSaved={onSaved} />}
+          <AboutSection />
         </div>
       )}
     </div>
+  );
+}
+
+function AboutSection() {
+  return (
+    <section className="border-t border-slate-800 pt-6">
+      <h2 className="text-lg font-semibold">About</h2>
+      <p className="mt-1 text-sm">
+        <a
+          href="/api/third-party-notices"
+          className="text-sky-400 hover:text-sky-300 underline"
+        >
+          Third Party Licenses
+        </a>
+      </p>
+    </section>
   );
 }
 
