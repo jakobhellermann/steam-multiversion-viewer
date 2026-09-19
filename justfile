@@ -22,4 +22,4 @@ licenses:
 	cargo about generate about.hbs -o THIRD-PARTY-NOTICES.html
 
 ai-debt *filter:
-    rg -F 'TODO(ai-review)' -g '!justfile' -g '!CLAUDE.md' -g '!docs/plan.md' {{ filter }}
+    rg -F 'TODO(ai-review)' -g '!justfile' -g '!AGENTS.md' {{ filter }}
