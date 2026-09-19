@@ -414,6 +414,14 @@ export type FileHistoryEntry = ManifestRef & {
   previous?: ManifestRef;
 };
 
+export type ManifestHistoryEntry = ManifestRef & {
+  creation_time: number;
+  previous?: ManifestRef;
+  added: number;
+  removed: number;
+  changed: number;
+};
+
 export async function fetchFileHistory(
   appid: AppId,
   current: ManifestRef,
@@ -425,6 +433,19 @@ export async function fetchFileHistory(
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ current, previous, path, node_id: nodeId }),
+  });
+  if (!r.ok) throw new Error(await extractErrorMessage(r));
+  return r.json();
+}
+
+export async function fetchManifestHistory(
+  appid: AppId,
+  manifests: ManifestRef[],
+): Promise<ManifestHistoryEntry[]> {
+  const r = await fetch(`/api/apps/${appid}/manifests/history`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ manifests }),
   });
   if (!r.ok) throw new Error(await extractErrorMessage(r));
   return r.json();

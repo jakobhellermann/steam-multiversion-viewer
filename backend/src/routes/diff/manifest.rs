@@ -103,7 +103,7 @@ pub async fn manifest_diff(
     // `Changed` wins over `Added`: added-vs-A-but-changed-vs-B is still demonstrably different somewhere.
     let mut absent_in_all: HashSet<&str> = base_by_path.keys().copied().collect();
     let mut changed: HashSet<String> = HashSet::new();
-    while let Some((_, _, result)) = others.next().await {
+    while let Some((_, result)) = others.next().await {
         let snap = result?;
         let other = snap.manifest();
         for f in &other.files {
@@ -214,7 +214,7 @@ pub async fn file_diff_targets(
 
     let path = body.path.as_str();
     let mut statuses = Vec::new();
-    while let Some((depot_id, manifest_id, result)) = others.next().await {
+    while let Some((r, result)) = others.next().await {
         let status = match result {
             Ok(snap) => {
                 let other_fp = snap
@@ -232,14 +232,19 @@ pub async fn file_diff_targets(
                 }
             }
             Err(err) => {
-                tracing::warn!(%depot_id, %manifest_id, %err, "open_manifest failed in file diff");
+                tracing::warn!(
+                    depot_id = %r.depot_id,
+                    manifest_id = %r.manifest_id,
+                    %err,
+                    "open_manifest failed in file diff"
+                );
                 // Treat a fetch error as "different" so the candidate still surfaces for investigation.
                 FileDiffStatus::Different
             }
         };
         statuses.push(FileDiffTargetStatus {
-            depot_id,
-            manifest_id,
+            depot_id: r.depot_id,
+            manifest_id: r.manifest_id,
             status,
         });
     }
@@ -329,15 +334,20 @@ pub async fn manifest_diff_targets(
     );
 
     let mut matching_targets: Vec<ManifestRefShort> = Vec::new();
-    while let Some((depot_id, manifest_id, result)) = others.next().await {
+    while let Some((r, result)) = others.next().await {
         let snap = match result {
             Ok(s) => s,
             Err(err) => {
                 // Same policy as `file_diff_targets`: treat an unfetchable target as different so it still surfaces.
-                tracing::warn!(%depot_id, %manifest_id, %err, "open_manifest failed in manifest_diff_targets");
+                tracing::warn!(
+                    depot_id = %r.depot_id,
+                    manifest_id = %r.manifest_id,
+                    %err,
+                    "open_manifest failed in manifest_diff_targets"
+                );
                 matching_targets.push(ManifestRefShort {
-                    depot_id,
-                    manifest_id,
+                    depot_id: r.depot_id,
+                    manifest_id: r.manifest_id,
                 });
                 continue;
             }
@@ -368,8 +378,8 @@ pub async fn manifest_diff_targets(
         }
         if has_diff {
             matching_targets.push(ManifestRefShort {
-                depot_id,
-                manifest_id,
+                depot_id: r.depot_id,
+                manifest_id: r.manifest_id,
             });
         }
     }
@@ -582,14 +592,13 @@ pub fn content_id(f: &DepotFile) -> ContentId<'_> {
     }
 }
 
-/// Opens every distinct `(depot_id, manifest_id)` in `refs`, deduped, `exclude` skipped, bounded by an 8-wide semaphore.
-fn open_manifests_concurrently<'a>(
+/// Opens every distinct `(depot_id, manifest_id)` in `refs`, deduped, `exclude` skipped, bounded by an 8-wide semaphore. Yields each ref alongside its result.
+pub(crate) fn open_manifests_concurrently<'a>(
     state: &'a AppState,
     appid: AppId,
     refs: &'a [ManifestRef],
     exclude: Option<(DepotId, ManifestId)>,
-) -> FuturesUnordered<impl Future<Output = (DepotId, ManifestId, Result<Snapshot, VfsError>)> + 'a>
-{
+) -> FuturesUnordered<impl Future<Output = (ManifestRef, Result<Snapshot, VfsError>)> + 'a> {
     let sem = Arc::new(Semaphore::new(8));
     let fu = FuturesUnordered::new();
     let mut seen = HashSet::new();
@@ -601,15 +610,13 @@ fn open_manifests_concurrently<'a>(
             continue;
         }
         let sem = sem.clone();
-        let depot_id = r.depot_id;
-        let manifest_id = r.manifest_id;
-        let branch = r.branch.clone();
+        let r = r.clone();
         fu.push(async move {
             let _permit = sem.acquire().await.expect("semaphore not closed");
             let result = state
-                .open_manifest(appid, depot_id, manifest_id, &branch)
+                .open_manifest(appid, r.depot_id, r.manifest_id, &r.branch)
                 .await;
-            (depot_id, manifest_id, result)
+            (r, result)
         });
     }
     fu

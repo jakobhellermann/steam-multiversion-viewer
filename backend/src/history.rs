@@ -1,31 +1,27 @@
-//! Format-agnostic file and structured-node history.
+//! Format-agnostic history: files and structured nodes across a version
+//! set, and the version set's own manifest-level history.
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use steam_vent_depot::Manifest;
 use transform::structured::{NodeId, NodeStatus};
 use utoipa::ToSchema;
 
 use crate::http::ApiError;
 use crate::routes::Result;
+use crate::routes::diff::manifest::{ContentId, content_id, open_manifests_concurrently};
 use crate::routes::diff::structured::{
     StructuredDiffRequest, StructuredDiffSide, build_structured_diff,
 };
+use crate::routes::library::ManifestRef;
 use crate::state::{AppState, Snapshot};
-use crate::steam::{AppId, DepotId, ManifestId};
+use crate::steam::AppId;
 
-/// One manifest to compare in a history request.
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct HistoryManifest {
-    pub depot_id: DepotId,
-    pub manifest_id: ManifestId,
-    #[serde(default = "default_branch")]
-    pub branch: String,
-}
-
-fn default_branch() -> String {
-    "public".to_owned()
-}
+/// Manifest reference as the history endpoints take it.
+pub type HistoryManifest = ManifestRef;
 
 impl From<&HistoryManifest> for StructuredDiffSide {
     fn from(value: &HistoryManifest) -> Self {
@@ -313,5 +309,181 @@ fn history_status(status: NodeStatus) -> HistoryStatus {
         NodeStatus::Changed => HistoryStatus::Changed,
         NodeStatus::Added => HistoryStatus::Added,
         NodeStatus::Removed => HistoryStatus::Removed,
+    }
+}
+
+/// Input for a depot's version history.
+#[derive(Deserialize, ToSchema)]
+pub struct ManifestHistoryRequest {
+    /// The tracked version set; duplicates by (depot, manifest) keep
+    /// their first entry.
+    pub manifests: Vec<HistoryManifest>,
+}
+
+/// One version of the depot with its transition from the next-older
+/// tracked version.
+#[derive(Serialize, ToSchema)]
+pub struct ManifestHistoryEntry {
+    #[serde(flatten)]
+    pub manifest: HistoryManifest,
+    pub creation_time: u32,
+    /// The next-older version; `None` on the oldest row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous: Option<HistoryManifest>,
+    /// Paths only in this version.
+    pub added: u64,
+    /// Paths only in the previous version.
+    pub removed: u64,
+    /// Paths in both versions with different content.
+    pub changed: u64,
+}
+
+/// Build the depot's version history across the given manifest set,
+/// newest first. Like [`build_file_history`], the walk is a property of
+/// the version set: there is no "current" version to anchor to, and
+/// Steam exposes no complete history API here — the UI hands in the
+/// tracked set. Each row's counts come from the manifest metadata only
+/// (content sha or symlink target); no file content is downloaded.
+pub async fn build_manifest_history(
+    state: &AppState,
+    appid: AppId,
+    request: &ManifestHistoryRequest,
+) -> Result<Vec<ManifestHistoryEntry>> {
+    let mut versions: Vec<(HistoryManifest, Snapshot)> = Vec::new();
+    let mut opens = open_manifests_concurrently(state, appid, &request.manifests, None);
+    while let Some((manifest, result)) = opens.next().await {
+        versions.push((manifest, result?));
+    }
+    versions.sort_by_key(|(_, snapshot)| Reverse(snapshot.manifest().creation_time));
+
+    let mut entries = Vec::with_capacity(versions.len());
+    for (index, (manifest, snapshot)) in versions.iter().enumerate() {
+        let (previous, added, removed, changed) = match versions.get(index + 1) {
+            Some((previous, previous_snapshot)) => {
+                let (added, removed, changed) =
+                    transition_counts(snapshot.manifest(), previous_snapshot.manifest());
+                (Some(previous.clone()), added, removed, changed)
+            }
+            None => (None, 0, 0, 0),
+        };
+        entries.push(ManifestHistoryEntry {
+            manifest: manifest.clone(),
+            creation_time: snapshot.manifest().creation_time,
+            previous,
+            added,
+            removed,
+            changed,
+        });
+    }
+    Ok(entries)
+}
+
+/// Symmetric path-level transition from `older` into `newer`: counts of
+/// paths added (only in `newer`), removed (only in `older`), and changed
+/// (in both with different content). Directory entries don't count;
+/// identity is the content sha or the symlink target.
+fn transition_counts(newer: &Manifest, older: &Manifest) -> (u64, u64, u64) {
+    let mut older_ids: HashMap<&str, ContentId> = HashMap::with_capacity(older.files.len());
+    for file in &older.files {
+        if file.is_dir() {
+            continue;
+        }
+        older_ids.insert(file.path.as_str(), content_id(file));
+    }
+
+    let mut newer_paths: HashSet<&str> = HashSet::with_capacity(newer.files.len());
+    let mut added = 0;
+    let mut changed = 0;
+    for file in &newer.files {
+        if file.is_dir() {
+            continue;
+        }
+        newer_paths.insert(file.path.as_str());
+        match older_ids.get(file.path.as_str()) {
+            None => added += 1,
+            Some(id) if *id != content_id(file) => changed += 1,
+            Some(_) => {}
+        }
+    }
+    let removed = older_ids
+        .keys()
+        .filter(|path| !newer_paths.contains(*path))
+        .count() as u64;
+
+    (added, removed, changed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use steam_vent_depot::{DepotFile, DepotFileKind, FileHash};
+
+    fn file(path: &str, sha: [u8; 20]) -> DepotFile {
+        DepotFile {
+            path: path.to_owned(),
+            size: 0,
+            kind: DepotFileKind::File {
+                sha: FileHash(sha),
+                executable: false,
+                chunks: vec![],
+            },
+        }
+    }
+
+    fn symlink(path: &str, target: &str) -> DepotFile {
+        DepotFile {
+            path: path.to_owned(),
+            size: 0,
+            kind: DepotFileKind::Symlink {
+                target: target.to_owned(),
+            },
+        }
+    }
+
+    fn manifest(files: Vec<DepotFile>) -> Manifest {
+        Manifest {
+            depot_id: 1,
+            manifest_id: 1,
+            creation_time: 0,
+            size_uncompressed: 0,
+            size_compressed: 0,
+            files,
+        }
+    }
+
+    #[test]
+    fn counts_added_removed_changed() {
+        let older = manifest(vec![
+            file("kept.bin", [1; 20]),
+            file("changed.bin", [2; 20]),
+            file("removed.bin", [3; 20]),
+        ]);
+        let newer = manifest(vec![
+            file("kept.bin", [1; 20]),
+            file("changed.bin", [9; 20]),
+            file("added.bin", [4; 20]),
+        ]);
+        assert_eq!(transition_counts(&newer, &older), (1, 1, 1));
+    }
+
+    #[test]
+    fn symlink_target_is_identity_and_dirs_dont_count() {
+        let older = manifest(vec![
+            symlink("link", "old-target"),
+            DepotFile {
+                path: "dir".to_owned(),
+                size: 0,
+                kind: DepotFileKind::Directory,
+            },
+        ]);
+        let newer = manifest(vec![
+            symlink("link", "new-target"),
+            DepotFile {
+                path: "dir".to_owned(),
+                size: 0,
+                kind: DepotFileKind::Directory,
+            },
+        ]);
+        assert_eq!(transition_counts(&newer, &older), (0, 0, 1));
     }
 }

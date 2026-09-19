@@ -1,32 +1,26 @@
 import ReactDOM from "react-dom/client";
-import {
-  RouterProvider,
-  createRouter,
-  parseSearchWith,
-  stringifySearchWith,
-} from "@tanstack/react-router";
+import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fetchLibrary } from "./api";
 import { createQueryClient } from "./queryClient";
 import { routeTree } from "./routeTree.gen";
+import { parseSearch, stringifySearch } from "./searchParams";
 
 const queryClient = createQueryClient();
 
 // Always have the library warm so navigating back is instant.
 queryClient.prefetchQuery({ queryKey: ["library"], queryFn: fetchLibrary });
 
-// Custom (de)serialiser that keeps URL search-param values as strings,
-// disabling the default JSON-ish coercion that turns `?id=12345…` into
-// a `number`. Steam manifest IDs are i64s that exceed
-// `Number.MAX_SAFE_INTEGER`, so the default round-trips them with
-// precision loss — we keep them verbatim.
+// Custom (de)serialiser that keeps URL search-param values as strings
+// lives in `./searchParams` — shared with the test router so route
+// tests build the same URLs as the app.
 const router = createRouter({
   routeTree,
   defaultPreload: "intent",
   defaultPreloadStaleTime: Infinity,
   scrollRestoration: true,
-  parseSearch: parseSearchWith((s) => s),
-  stringifySearch: stringifySearchWith((v) => (typeof v === "string" ? v : String(v))),
+  parseSearch,
+  stringifySearch,
   context: { queryClient } as { queryClient: QueryClient },
 });
 

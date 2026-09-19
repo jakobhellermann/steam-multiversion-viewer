@@ -411,7 +411,7 @@ pub struct ManifestStatusRequest {
     pub manifests: Vec<ManifestRef>,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct ManifestRef {
     pub depot_id: DepotId,
     pub manifest_id: ManifestId,

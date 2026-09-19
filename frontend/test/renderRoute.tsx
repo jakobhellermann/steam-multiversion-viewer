@@ -4,6 +4,7 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createQueryClient } from "#/queryClient";
 import { routeTree } from "#/routeTree.gen";
+import { parseSearch, stringifySearch } from "#/searchParams";
 
 export type RenderRouteOptions = {
   /** Initial URL stack. First entry wins; later entries simulate prior navigations. */
@@ -21,6 +22,10 @@ export function renderRoute(opts: RenderRouteOptions = {}) {
     routeTree,
     history,
     context: { queryClient },
+    // Same search (de)serialisation as the app router, so tests build
+    // the URLs the app builds.
+    parseSearch,
+    stringifySearch,
     // Disable intent-preload so tests don't fire hover-driven prefetches.
     defaultPreload: false,
   });

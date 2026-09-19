@@ -108,7 +108,9 @@ export function HistoryView({
   );
   const versions = useQueries({
     queries: entries.map((entry) => ({
-      queryKey: ["game-info", appid, entry.depot_id, entry.manifest_id, entry.branch],
+      // game_info is content-addressed (same gid → same info); key
+      // without the branch so the manifest page's cache entries apply.
+      queryKey: ["game-info", appid, entry.depot_id, entry.manifest_id],
       queryFn: () => fetchGameInfo(appid, entry.depot_id, entry.manifest_id, entry.branch),
       staleTime: Infinity,
     })),

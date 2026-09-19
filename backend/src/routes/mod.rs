@@ -40,6 +40,7 @@ pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
         .routes(routes!(library::manifest_statuses))
         .routes(routes!(game_info::game_info))
         .routes(routes!(history::file_history))
+        .routes(routes!(history::manifest_history))
         .routes(routes!(files::manifest_file))
         .routes(routes!(files::manifest_file_raw))
         .routes(routes!(files::manifest_file_transformed))

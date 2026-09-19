@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 
-import { fetchAppInfo, fetchExtraManifests, fetchManifestStatuses, type ManifestRef } from "../api";
+import { fetchManifestStatuses, type ManifestRef } from "../api";
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { formatDate } from "../lib/format";
+import { useDepotManifests } from "../lib/useDepotManifests";
 import { HistoryView } from "./-file/HistoryView";
 
 type Search = {
@@ -34,15 +35,19 @@ function FileHistoryPage() {
   const depotId = Number(depotIdParam);
   const branch = branchSearch ?? "public";
 
-  const appInfo = useQuery({ queryKey: ["app", appid], queryFn: () => fetchAppInfo(appid) });
-  const extras = useQuery({
-    queryKey: ["extra-manifests", appid],
-    queryFn: () => fetchExtraManifests(appid),
+  const {
+    appInfo,
+    extras,
+    manifests: previous,
+    ready,
+  } = useDepotManifests(appid, depotId, {
+    manifest_id: manifestId,
+    branch,
   });
 
   // Statuses for the breadcrumb's manifest label. Same key as the other
   // sub-pages so it's usually a cache hit; it also covers every manifest
-  // `previous` below can contain, which the table's dates come from.
+  // `previous` can contain, which the table's dates come from.
   const compareRefs = useMemo<ManifestRef[]>(() => {
     const seen = new Set<string>();
     const refs: ManifestRef[] = [];
@@ -75,29 +80,6 @@ function FileHistoryPage() {
     queryFn: () => fetchManifestStatuses(appid, compareRefs),
     enabled: compareRefs.length > 0 && extras.isSuccess,
   });
-
-  // Manifests to compare against: every tracked manifest of this depot.
-  const previous = useMemo<ManifestRef[]>(() => {
-    const refs = new Map<string, ManifestRef>();
-    refs.set(`${depotId}/${manifestId}`, { depot_id: depotId, manifest_id: manifestId, branch });
-    const depot = appInfo.data?.depots.find((entry) => entry.depot_id === depotId);
-    for (const manifest of depot?.manifests ?? []) {
-      refs.set(`${depotId}/${manifest.manifest_id}`, {
-        depot_id: depotId,
-        manifest_id: manifest.manifest_id,
-        branch: manifest.branch,
-      });
-    }
-    for (const manifest of extras.data ?? []) {
-      if (manifest.depot_id !== depotId) continue;
-      refs.set(`${depotId}/${manifest.manifest_id}`, {
-        depot_id: depotId,
-        manifest_id: manifest.manifest_id,
-        branch: manifest.branch ?? "public",
-      });
-    }
-    return [...refs.values()];
-  }, [appInfo.data, branch, depotId, extras.data, manifestId]);
 
   const currentCreation = (statusQuery.data ?? []).find(
     (status) => status.depot_id === depotId && status.manifest_id === manifestId,
@@ -172,7 +154,7 @@ function FileHistoryPage() {
         path={path}
         nodeId={nodeId}
         statuses={statusQuery.data}
-        inputsReady={appInfo.isSuccess && extras.isSuccess}
+        inputsReady={ready}
       />
     </main>
   );

@@ -944,6 +944,7 @@ function FilesPanel({
             </button>
           )}
         </div>
+        <ExtensionFilter extCounts={extCounts} selected={extFilter} onChange={setExtFilter} />
         {deepTarget && (
           <label
             className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 select-none"
@@ -979,7 +980,13 @@ function FilesPanel({
             searchBase={{ depot_id: Number(depotId), manifest_id: manifestId, branch }}
           />
         )}
-        <ExtensionFilter extCounts={extCounts} selected={extFilter} onChange={setExtFilter} />
+        <Link
+          to="/apps/$appid/depots/$depotId/history"
+          params={{ appid, depotId }}
+          className="rounded border border-slate-700 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 hover:border-slate-600"
+        >
+          History
+        </Link>
       </div>
       <TreeList
         rows={rows}
