@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::response::{IntoResponse as _, Response};
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,7 @@ use utoipa::ToSchema;
 use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
+use crate::http::{CacheSeconds, ImmutableCache};
 use crate::routes::Result;
 use crate::routes::library::ManifestRef;
 
@@ -450,6 +452,7 @@ pub struct DeepDiffQuery {
 /// Like [`manifest_diff`], but a changed Unity file only counts when its structured diff is non-empty (normalization noise like PPtr renumbering and HingeJoint2D m_ConnectedAnchor float noise is dropped); DLLs stay fingerprint-level since decompiling is expensive.
 /// `Added`/`Removed` rows pass through as-is — no base-side content to structural-diff.
 /// Downloads both sides of every Unity candidate, so this is far pricier than `manifest_diff`.
+/// Served `immutable` because the response is a pure function of the two manifests — unless any per-file diff errored during the sweep (errors keep the file as `changed`, and caching that approximation would freeze it).
 #[utoipa::path(
     get,
     path = "/api/apps/{appid}/depots/{depot_id}/manifests/{manifest_id}/structured-diff-filter",
@@ -457,12 +460,12 @@ pub struct DeepDiffQuery {
     params(DeepDiffQuery),
     responses((status = 200, body = ManifestDiffResponse))
 )]
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(manifest_id = %manifest_id, target_depot_id = %q.target_depot_id, target_manifest_id = %q.target_manifest_id))]
 pub async fn manifest_diff_deep(
     State(state): State<AppState>,
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<DeepDiffQuery>,
-) -> Result<Json<ManifestDiffResponse>> {
+) -> Result<Response> {
     state.steam()?; // 401 if not logged in
     let base_snap = state
         .open_manifest(appid, depot_id, manifest_id, &q.branch)
@@ -542,10 +545,21 @@ pub async fn manifest_diff_deep(
             size: None,
         });
     }
-    tracing::info!(total_changed, "deep diff: starting sweep");
+    tracing::info!("deep diff: sweeping {total_changed} changed files");
     let mut kept_changed = 0usize;
+    let mut errored_changed = 0usize;
     let mut done_changed = 0usize;
-    for (checkpoint_index, chunk) in changed_candidates.chunks(CHECKPOINT_LEN).enumerate() {
+    /// Per-file sweep outcome. An errored diff keeps the file as
+    /// `changed`, but taints the response: it is no longer a pure
+    /// function of the manifests, so it must not be cached
+    /// immutably.
+    #[cfg_attr(not(feature = "unity"), allow(dead_code))]
+    enum Verdict {
+        Kept(String),
+        Dropped,
+        Errored(String),
+    }
+    for chunk in changed_candidates.chunks(CHECKPOINT_LEN) {
         let sem = Arc::new(Semaphore::new(8));
         let mut fu = FuturesUnordered::new();
         for path in chunk {
@@ -563,7 +577,7 @@ pub async fn manifest_diff_deep(
             fu.push(async move {
                 let _permit = sem.acquire().await.expect("semaphore not closed");
                 if !is_deep_comparable(&path) {
-                    return Some(path);
+                    return Verdict::Kept(path);
                 }
                 #[cfg(feature = "unity")]
                 {
@@ -586,11 +600,11 @@ pub async fn manifest_diff_deep(
                     )
                     .await
                     {
-                        Ok(tree) if tree.has_no_changes() => None,
-                        Ok(_) => Some(path),
+                        Ok(tree) if tree.has_no_changes() => Verdict::Dropped,
+                        Ok(_) => Verdict::Kept(path),
                         Err(err) => {
                             tracing::warn!(%path, reason = ?err, "deep diff: structured diff failed; keeping");
-                            Some(path)
+                            Verdict::Errored(path)
                         }
                     };
                 }
@@ -598,15 +612,29 @@ pub async fn manifest_diff_deep(
                 unreachable!("is_deep_comparable is always false without the unity feature")
             });
         }
-        while let Some(result) = fu.next().await {
-            if let Some(path) = result {
-                kept_changed += 1;
-                entries.push(ManifestDiffEntry {
-                    path,
-                    status: ManifestDiffStatus::Changed,
-                    size: None,
-                });
+        while let Some(verdict) = fu.next().await {
+            match verdict {
+                Verdict::Dropped => {}
+                Verdict::Kept(path) => {
+                    kept_changed += 1;
+                    entries.push(ManifestDiffEntry {
+                        path,
+                        status: ManifestDiffStatus::Changed,
+                        size: None,
+                    });
+                }
+                Verdict::Errored(path) => {
+                    kept_changed += 1;
+                    errored_changed += 1;
+                    entries.push(ManifestDiffEntry {
+                        path,
+                        status: ManifestDiffStatus::Changed,
+                        size: None,
+                    });
+                }
             }
+            done_changed += 1;
+            tracing::info!(parent: None, "deep diff: {done_changed}/{total_changed}");
         }
         #[allow(unused_mut)]
         let mut cached_bytes = 0u64;
@@ -621,27 +649,21 @@ pub async fn manifest_diff_deep(
                 super::structured::evict_cache(envs);
             }
         }
-        done_changed += chunk.len();
-        tracing::info!(
-            checkpoint_index,
-            chunk_len = chunk.len(),
-            cached_bytes,
-            evicted,
-            done_changed,
-            total_changed,
-            elapsed = ?started.elapsed(),
-            "deep diff: checkpoint"
-        );
+        tracing::debug!(cached_bytes, evicted, "deep diff: env cache checkpoint");
     }
     entries.extend(removed);
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     tracing::info!(
-        total_changed,
-        kept_changed,
+        errored_changed,
         elapsed = ?started.elapsed(),
-        "deep diff filter done"
+        "deep diff: done, {kept_changed}/{total_changed} kept"
     );
-    Ok(Json(ManifestDiffResponse { entries }))
+    let body = Json(ManifestDiffResponse { entries });
+    Ok(if errored_changed == 0 {
+        (ImmutableCache, body).into_response()
+    } else {
+        (CacheSeconds(0), body).into_response()
+    })
 }
 
 #[derive(PartialEq, Eq)]
