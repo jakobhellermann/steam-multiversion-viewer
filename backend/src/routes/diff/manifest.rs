@@ -59,7 +59,7 @@ pub enum ManifestDiffStatus {
 
 /// Manifest path-level diff
 ///
-/// `Changed` (differs from some `other`) or `Added` (absent from every `other`); identity is `(kind, size, sha, linktarget)`.
+/// `Changed` (differs from some `other`) or `Added` (absent from every `other`); identity is the content sha, or the symlink target ([`content_id`]).
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/manifests/diff",
@@ -157,7 +157,7 @@ pub struct FileDiffTargetsRequest {
     ]
 }))]
 pub struct FileDiffTargetsResponse {
-    /// Per `other`: `same`, `different`, or `missing`; identity is the file's content sha (kind/linktarget tie-break for symlinks).
+    /// Per `other`: `same`, `different`, or `missing`; identity is the content sha, or the symlink target.
     pub statuses: Vec<FileDiffTargetStatus>,
 }
 
@@ -511,7 +511,7 @@ pub async fn manifest_diff_deep(
                     )
                     .await
                     {
-                        Ok(tree) if structured_diff_is_empty(&tree) => None,
+                        Ok(tree) if tree.has_no_changes() => None,
                         Ok(_) => Some(path),
                         Err(err) => {
                             tracing::warn!(%path, reason = ?err, "deep diff: structured diff failed; keeping");
@@ -568,13 +568,13 @@ pub async fn manifest_diff_deep(
 }
 
 #[derive(PartialEq, Eq)]
-enum ContentId<'a> {
+pub enum ContentId<'a> {
     File(FileHash),
     Symlink(&'a str),
     Directory,
 }
 
-fn content_id(f: &DepotFile) -> ContentId<'_> {
+pub fn content_id(f: &DepotFile) -> ContentId<'_> {
     match &f.kind {
         DepotFileKind::File { sha, .. } => ContentId::File(*sha),
         DepotFileKind::Symlink { target } => ContentId::Symlink(target),
@@ -616,7 +616,7 @@ fn open_manifests_concurrently<'a>(
 }
 
 /// Which file types the deep filter structural-diffs: Unity serialized files and bundles (DLLs stay fingerprint-level; decompiling is expensive).
-fn is_deep_comparable(path: &str) -> bool {
+pub fn is_deep_comparable(path: &str) -> bool {
     #[cfg(feature = "unity")]
     {
         matches!(
@@ -629,16 +629,6 @@ fn is_deep_comparable(path: &str) -> bool {
         let _ = path;
         false
     }
-}
-
-/// True when a structured diff has no actual difference: unchanged root, no children.
-#[cfg(feature = "unity")]
-fn structured_diff_is_empty(tree: &transform::structured::StructuredTree) -> bool {
-    tree.root.children.is_empty()
-        && matches!(
-            tree.root.status,
-            None | Some(transform::structured::NodeStatus::Unchanged)
-        )
 }
 
 #[cfg(test)]

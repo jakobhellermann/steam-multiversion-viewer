@@ -2,13 +2,13 @@
 //! Exercises the deep-compare code path (the `manifest_diff_deep`
 //! route) standalone and prints timing: for every `changed` Unity file
 //! between two manifests, build the structured diff and check whether
-//! it's empty (no structured difference). Mirrors the route's logic —
-//! env cached once per side, candidates diffed with bounded
-//! concurrency — but reads through the VFS instead of the download
-//! manager, so run it once warm (chunks already on disk) to measure the
-//! pure diff work.
+//! it's empty (no structured difference). Candidates come from the
+//! route's `content_id`/`is_deep_comparable`, but reads go through the
+//! VFS instead of the download manager, so run it once warm (chunks
+//! already on disk) to measure the pure diff work.
 //!
 //! `cargo run --release --example manifest_deep_diff`
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -22,11 +22,11 @@ use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
-use steam_vent_depot::{DepotFile, FileHash, FileType};
+use steam_multiversion_viewer::routes::diff::manifest::{content_id, is_deep_comparable};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use transform::Transformer;
-use transform::structured::{NodeStatus, StructuredTree};
+use transform::structured::StructuredTree;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -88,11 +88,7 @@ async fn main() -> Result<()> {
             .await?,
     );
 
-    // Candidates: same fingerprint test as the route, 1:1.
-    fn fp(f: &DepotFile) -> (FileType, u64, Option<FileHash>, Option<&str>) {
-        (f.file_type(), f.size, f.sha(), f.linktarget())
-    }
-    let mut target_by_path = std::collections::HashMap::new();
+    let mut target_by_path = HashMap::new();
     for f in &target.manifest().files {
         if !f.is_dir() {
             target_by_path.insert(f.path.as_str(), f);
@@ -107,7 +103,7 @@ async fn main() -> Result<()> {
         let Some(tf) = target_by_path.get(f.path.as_str()) else {
             continue;
         };
-        if fp(f) == fp(tf) {
+        if content_id(f) == content_id(tf) {
             continue;
         }
         changed += 1;
@@ -157,7 +153,7 @@ async fn main() -> Result<()> {
                     );
                     let elapsed = t.elapsed();
                     match result {
-                        Ok(tree) => Some((path, elapsed, is_empty(&tree))),
+                        Ok(tree) => Some((path, elapsed, tree.has_no_changes())),
                         Err(err) => {
                             eprintln!("  ! {path}: {err}");
                             None
@@ -205,17 +201,6 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn is_deep_comparable(path: &str) -> bool {
-    matches!(
-        transform::tools::transformer_for(path, None),
-        Some(Transformer::UnitySerialized | Transformer::UnityBundle)
-    )
-}
-
-fn is_empty(tree: &StructuredTree) -> bool {
-    tree.root.children.is_empty() && matches!(tree.root.status, None | Some(NodeStatus::Unchanged))
 }
 
 fn diff_one(

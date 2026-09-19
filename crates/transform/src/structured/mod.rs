@@ -202,6 +202,14 @@ pub struct StructuredTree {
     pub root: Node,
 }
 
+impl StructuredTree {
+    /// Diff trees: no actual difference (unchanged root, no children).
+    pub fn has_no_changes(&self) -> bool {
+        self.root.children.is_empty()
+            && matches!(self.root.status, None | Some(NodeStatus::Unchanged))
+    }
+}
+
 /// Result returned by the lazy node-content endpoint.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[schema(example = json!({

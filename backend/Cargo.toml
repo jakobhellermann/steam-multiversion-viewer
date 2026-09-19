@@ -58,6 +58,30 @@ tracing-timetree = { git = "https://github.com/jakobhellermann/tracing-timetree"
 insta = { version = "1", features = ["yaml"] }
 dhat = "0.3"
 
+[[example]]
+name = "manifest_deep_diff"
+required-features = ["unity"]
+
+[[example]]
+name = "bundle_diff"
+required-features = ["unity"]
+
+[[example]]
+name = "bundle_tree"
+required-features = ["unity"]
+
+[[example]]
+name = "bundle_tree_value"
+required-features = ["unity"]
+
+[[example]]
+name = "unity_serialized_diff"
+required-features = ["unity"]
+
+[[example]]
+name = "unity_serialized_diff_value"
+required-features = ["unity"]
+
 [target.'cfg(target_os = "linux")'.dependencies]
 steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["fuse"] }
 

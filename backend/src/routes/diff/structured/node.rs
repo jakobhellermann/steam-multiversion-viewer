@@ -604,6 +604,7 @@ mod tests {
     /// Matched-pair (both sides see the same object) inside a bundle:
     /// `archive:<entry>/obj:N`. Both per-side targets resolve to the
     /// same `(entry, pid)`.
+    #[cfg(feature = "unity")]
     #[test]
     fn parse_bundle_node_id_matched_pair() {
         let (base, target) = parse_bundle_node_id("archive:CAB-abc/obj:42");
@@ -613,6 +614,7 @@ mod tests {
 
     /// One-sided row inside a matched archive subtree: the side marker lives *inside* the archive prefix.
     /// Regression test for the "id has no body" bug where the outer split saw no side prefix against `archive:CAB-.../target:obj:335`.
+    #[cfg(feature = "unity")]
     #[test]
     fn parse_bundle_node_id_one_sided_target() {
         let (base, target) =
@@ -624,6 +626,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "unity")]
     #[test]
     fn parse_bundle_node_id_one_sided_base() {
         let (base, target) = parse_bundle_node_id("archive:CAB-abc/base:obj:7");
@@ -633,6 +636,7 @@ mod tests {
 
     /// Renumbered object: same logical asset on both sides but its
     /// path-id changed between manifests.
+    #[cfg(feature = "unity")]
     #[test]
     fn parse_bundle_node_id_mod_pair() {
         let (base, target) = parse_bundle_node_id("archive:CAB-abc/mod:obj:10,obj:11");
@@ -641,6 +645,7 @@ mod tests {
     }
 
     /// Section header / class-stats row inside an archive: no per-object body to dump.
+    #[cfg(feature = "unity")]
     #[test]
     fn parse_bundle_node_id_non_object_inner() {
         let (base, target) = parse_bundle_node_id("archive:CAB-abc/section:hierarchy");
@@ -649,6 +654,7 @@ mod tests {
     }
 
     /// Ids that don't even carry the archive prefix don't belong in this endpoint at all.
+    #[cfg(feature = "unity")]
     #[test]
     fn parse_bundle_node_id_no_archive_prefix() {
         let (base, target) = parse_bundle_node_id("obj:42");
