@@ -1,16 +1,32 @@
 // TODO(ai-review): review for style and correctness
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
-import { useMemo, type ReactNode } from "react";
+import { useQueries, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { CircleAlert, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 
-import { fetchGameInfo, fetchManifestHistory, type ManifestHistoryEntry } from "../api";
+import {
+  fetchGameInfo,
+  fetchManifestDiffDeep,
+  fetchManifestHistory,
+  manifestDiffDeepKey,
+  type ManifestDiffEntry,
+  type ManifestHistoryEntry,
+} from "../api";
 import { BranchFilter } from "../components/BranchFilter";
 import { ErrorBox } from "../components/ErrorBox";
 import { formatDate } from "../lib/format";
 import { useBranchFilter } from "../lib/useBranchFilter";
 import { manifestRefOf, useDepotManifests } from "../lib/useDepotManifests";
 
+type Search = {
+  /// Deep-compare toggle. In the URL so it survives reloads and links.
+  deep?: boolean;
+};
+
 export const Route = createFileRoute("/apps/$appid/depots/$depotId/history")({
+  validateSearch: (search: Record<string, unknown>): Search => ({
+    deep: search.deep === true || search.deep === "true" ? true : undefined,
+  }),
   component: DepotHistoryPage,
 });
 
@@ -51,7 +67,96 @@ function DepotHistoryPage() {
     staleTime: Infinity,
   });
 
-  const entries = historyQuery.data ?? [];
+  const entries = useMemo(() => historyQuery.data ?? [], [historyQuery.data]);
+
+  const navigate = useNavigate({ from: Route.fullPath });
+  const deepCompare = Route.useSearch().deep ?? false;
+  // Set synchronously here (the driver's queryFn starts before any
+  // effect could update it) and re-synced by the effect below for
+  // URL-driven changes (back/forward).
+  const deepPausedRef = useRef(!deepCompare);
+  const setDeepCompare = (next: boolean) => {
+    deepPausedRef.current = !next;
+    navigate({
+      search: (prev) => ({ ...prev, deep: next ? true : undefined }),
+      replace: true,
+      resetScroll: false,
+    });
+  };
+
+  // Deep compare refines only `changed` — added/removed rows pass
+  // through the sweep untouched.
+  const deepPairs = useMemo(
+    () =>
+      entries.flatMap((entry) => {
+        if (entry.previous == null || entry.changed === 0) return [];
+        return [
+          {
+            base: {
+              depot_id: entry.depot_id,
+              manifest_id: entry.manifest_id,
+              branch: entry.branch,
+            },
+            target: entry.previous,
+          },
+        ];
+      }),
+    [entries],
+  );
+  const deepPairIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    deepPairs.forEach((pair, i) => m.set(`${pair.base.manifest_id}/${pair.target.manifest_id}`, i));
+    return m;
+  }, [deepPairs]);
+
+  const queryClient = useQueryClient();
+  // One pair at a time: each sweep downloads both sides of its
+  // changed files and holds a private rabex env pair on the backend,
+  // so parallel pairs would multiply memory and CDN load.
+  useQuery({
+    queryKey: [
+      "history-deep-sweep",
+      appid,
+      deepPairs.map((p) => `${p.base.manifest_id}/${p.target.manifest_id}`).join(","),
+    ],
+    queryFn: async ({ signal }) => {
+      for (const pair of deepPairs) {
+        if (deepPausedRef.current) return;
+        try {
+          await queryClient.fetchQuery({
+            queryKey: manifestDiffDeepKey(appid, pair.base, pair.target),
+            queryFn: () => fetchManifestDiffDeep(appid, pair.base, pair.target, signal),
+            staleTime: Infinity,
+          });
+        } catch {
+          // One failed pair doesn't stop the chain; its row flags the error.
+          if (signal.aborted) return;
+        }
+      }
+    },
+    enabled: deepCompare && deepPairs.length > 0,
+    staleTime: Infinity,
+  });
+  // A stopped driver counts as fresh — switching deep compare back on
+  // has to kick it explicitly.
+  useEffect(() => {
+    deepPausedRef.current = !deepCompare;
+    if (deepCompare) {
+      queryClient.invalidateQueries({ queryKey: ["history-deep-sweep", appid] });
+    }
+  }, [deepCompare, appid, queryClient]);
+  // Rows only subscribe — the driver owns which pair fetches when.
+  const deepResults = useQueries({
+    queries: deepPairs.map((pair) => ({
+      queryKey: manifestDiffDeepKey(appid, pair.base, pair.target),
+      queryFn: () => fetchManifestDiffDeep(appid, pair.base, pair.target),
+      enabled: false,
+      staleTime: Infinity,
+    })),
+  });
+  const deepDone = deepResults.filter((r) => r.data != null || r.isError).length;
+  const deepRunning = deepCompare && deepDone < deepResults.length;
+
   const versions = useQueries({
     queries: entries.map((entry) => ({
       // Content-addressed key (same gid → same info), shared with the
@@ -100,6 +205,25 @@ function DepotHistoryPage() {
             refetches with a different version set, so anything
             attached to it would shift under the cursor. */}
         <div className="flex shrink-0 items-center gap-2">
+          {deepPairs.length > 0 && (
+            <label className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 select-none">
+              <input
+                type="checkbox"
+                checked={deepCompare}
+                onChange={(e) => setDeepCompare(e.target.checked)}
+                className="accent-sky-500"
+              />
+              Deep compare
+              {deepRunning && (
+                <>
+                  <Loader2 size={13} className="animate-spin text-slate-500" />
+                  <span className="text-slate-500 tabular-nums">
+                    {deepDone}/{deepResults.length}
+                  </span>
+                </>
+              )}
+            </label>
+          )}
           {showBranchFilter && (
             <BranchFilter
               branches={branches}
@@ -138,6 +262,16 @@ function DepotHistoryPage() {
             {entries.map((entry, index) => {
               const gameVersion = versions[index]?.data?.engine?.data.bundle_version;
               const created = formatDate(entry.creation_time);
+              const pairIndex =
+                entry.previous != null
+                  ? deepPairIndex.get(`${entry.manifest_id}/${entry.previous.manifest_id}`)
+                  : undefined;
+              const deep = deepTransition(
+                entry,
+                deepCompare,
+                pairIndex,
+                pairIndex != null ? deepResults[pairIndex] : undefined,
+              );
               return (
                 <tr
                   key={`${entry.depot_id}-${entry.manifest_id}`}
@@ -148,6 +282,7 @@ function DepotHistoryPage() {
                       entry={entry}
                       appidParam={appidParam}
                       depotIdParam={depotIdParam}
+                      deep={deepCompare}
                       className="text-slate-500 tabular-nums"
                     >
                       {created}
@@ -158,6 +293,7 @@ function DepotHistoryPage() {
                       entry={entry}
                       appidParam={appidParam}
                       depotIdParam={depotIdParam}
+                      deep={deepCompare}
                       className={gameVersion ? "text-sky-300" : "text-slate-600"}
                     >
                       {gameVersion ? `v${gameVersion}` : "—"}
@@ -168,10 +304,11 @@ function DepotHistoryPage() {
                       entry={entry}
                       appidParam={appidParam}
                       depotIdParam={depotIdParam}
+                      deep={deepCompare}
                       primary
                       className="tabular-nums"
                     >
-                      <Transition entry={entry} />
+                      <Transition entry={entry} deep={deep} />
                     </RowLink>
                   </td>
                   {showBranchColumn && (
@@ -180,6 +317,7 @@ function DepotHistoryPage() {
                         entry={entry}
                         appidParam={appidParam}
                         depotIdParam={depotIdParam}
+                        deep={deepCompare}
                         className="text-slate-500"
                       >
                         {entry.branch}
@@ -201,37 +339,100 @@ function hasChanges(entry: ManifestHistoryEntry): boolean {
   return entry.added > 0 || entry.removed > 0 || entry.changed > 0;
 }
 
+/// Deep-compare state of one history row.
+function deepTransition(
+  entry: ManifestHistoryEntry,
+  active: boolean,
+  pairIndex: number | undefined,
+  result: UseQueryResult<ManifestDiffEntry[]> | undefined,
+): { phase: "done"; changed: number } | { phase: "pending" } | { phase: "failed" } {
+  if (!active || entry.previous == null || pairIndex == null) {
+    return { phase: "done", changed: entry.changed };
+  }
+  if (result?.isError) return { phase: "failed" };
+  if (result?.data != null) {
+    return {
+      phase: "done",
+      changed: result.data.filter((e) => e.status === "changed").length,
+    };
+  }
+  return { phase: "pending" };
+}
+
 /// The changes cell: `+added −removed changed` with per-kind colours,
 /// zero components omitted; `initial` for the oldest tracked version,
-/// `unchanged` for one with no changes against its predecessor.
-function Transition({ entry }: { entry: ManifestHistoryEntry }) {
+/// `unchanged` for one with no changes against its predecessor. Deep
+/// compare replaces the `changed` count in place. `whitespace-nowrap`
+/// keeps the row height stable across states — without it the pending
+/// spinner's width can wrap the cell.
+function Transition({
+  entry,
+  deep,
+}: {
+  entry: ManifestHistoryEntry;
+  deep: ReturnType<typeof deepTransition>;
+}) {
   if (!entry.previous) return <span className="text-slate-500">initial</span>;
-  if (!hasChanges(entry)) return <span className="text-slate-500">unchanged</span>;
+  const changed = deep.phase === "done" ? deep.changed : entry.changed;
+  if (entry.added === 0 && entry.removed === 0 && changed === 0) {
+    return <span className="text-slate-500">unchanged</span>;
+  }
   const parts: ReactNode[] = [];
-  if (entry.changed > 0) {
+  // added/removed are final under deep compare; dimming them anyway
+  // marks the cell as one pending unit, not just `changed`.
+  const dimmed = deep.phase === "pending";
+  if (deep.phase === "pending") {
+    parts.push(
+      <span key="changed" className="text-slate-500">
+        {entry.changed}
+      </span>,
+    );
+  } else if (deep.phase === "failed") {
     parts.push(
       <span key="changed" className="text-amber-300">
         {entry.changed}
       </span>,
     );
+  } else if (changed > 0) {
+    parts.push(
+      <span key="changed" className="text-amber-300">
+        {changed}
+      </span>,
+    );
   }
   if (entry.added > 0) {
     parts.push(
-      <span key="added" className="text-emerald-300">
+      <span key="added" className={dimmed ? "text-slate-500" : "text-emerald-300"}>
         +{entry.added}
       </span>,
     );
   }
   if (entry.removed > 0) {
     parts.push(
-      <span key="removed" className="text-rose-300">
+      <span key="removed" className={dimmed ? "text-slate-500" : "text-rose-300"}>
         −{entry.removed}
       </span>,
     );
   }
   return (
-    <span className="tabular-nums">
+    <span className="whitespace-nowrap tabular-nums">
       {parts.flatMap((part, index) => (index === 0 ? [part] : [" ", part]))}
+      {deep.phase === "pending" && (
+        <>
+          {" "}
+          <Loader2 size={11} className="inline-block animate-spin text-slate-500 align-[-2px]" />
+        </>
+      )}
+      {deep.phase === "failed" && (
+        <>
+          {" "}
+          <CircleAlert
+            size={11}
+            className="inline-block text-rose-400 align-[-2px]"
+            title="deep compare failed for this transition"
+          />
+        </>
+      )}
     </span>
   );
 }
@@ -242,10 +443,12 @@ function Transition({ entry }: { entry: ManifestHistoryEntry }) {
 /// previous version — the diff view —, unchanged and initial ones the
 /// manifest page itself, where a diff against an identical predecessor
 /// would show nothing. The manifest id rides along as the tooltip.
+/// `deep` arms deep compare on the target page.
 function RowLink({
   entry,
   appidParam,
   depotIdParam,
+  deep = false,
   primary = false,
   className = "",
   children,
@@ -253,6 +456,7 @@ function RowLink({
   entry: ManifestHistoryEntry;
   appidParam: string;
   depotIdParam: string;
+  deep?: boolean;
   primary?: boolean;
   className?: string;
   children: ReactNode;
@@ -269,6 +473,7 @@ function RowLink({
       search={{
         branch: entry.branch === "public" ? undefined : entry.branch,
         compare_to: diffTarget?.manifest_id,
+        deep: deep ? true : undefined,
       }}
       title={`manifest ${entry.manifest_id}`}
       tabIndex={primary ? undefined : -1}

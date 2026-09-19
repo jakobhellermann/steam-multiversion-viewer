@@ -14,6 +14,7 @@ import {
   fetchManifestFiles,
   fetchManifestInfo,
   fetchManifestStatuses,
+  manifestDiffDeepKey,
   type AppId,
   type AppInfo,
   type ExtraManifestEntry,
@@ -573,21 +574,19 @@ function FilesPanel({
     [navigate],
   );
   const deepTarget = diffRefs.length === 1 ? diffRefs[0] : undefined;
+  const deepBase: ManifestRef = {
+    depot_id: Number(depotId),
+    manifest_id: manifestId,
+    branch,
+  };
   const deepQuery = useQuery({
-    queryKey: [
-      "manifest-diff-deep",
-      appid,
-      depotId,
-      manifestId,
-      branch,
-      deepTarget ? `${deepTarget.depot_id}/${deepTarget.manifest_id}` : "",
-    ],
-    queryFn: () =>
-      fetchManifestDiffDeep(
-        Number(appid),
-        { depot_id: Number(depotId), manifest_id: manifestId, branch },
-        deepTarget!,
-      ),
+    // Pair key via the shared helper, so history deep compare and this
+    // query share one cache entry.
+    queryKey:
+      deepTarget != null
+        ? manifestDiffDeepKey(Number(appid), deepBase, deepTarget)
+        : ["manifest-diff-deep", Number(appid), "no-target"],
+    queryFn: () => fetchManifestDiffDeep(Number(appid), deepBase, deepTarget!),
     enabled: deepCompare && deepTarget != null,
     staleTime: Infinity,
     gcTime: 10 * 60 * 1000,
@@ -832,10 +831,7 @@ function FilesPanel({
         </div>
         <ExtensionFilter extCounts={extCounts} selected={extFilter} onChange={setExtFilter} />
         {deepTarget && (
-          <label
-            className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 select-none"
-            title="Download and structural-diff every changed file, hiding those with no structured difference"
-          >
+          <label className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-sm whitespace-nowrap text-slate-300 select-none">
             <input
               type="checkbox"
               checked={deepCompare}

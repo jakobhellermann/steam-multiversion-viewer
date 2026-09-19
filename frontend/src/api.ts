@@ -237,6 +237,7 @@ export async function fetchManifestDiffDeep(
   appid: AppId,
   base: ManifestRef,
   target: ManifestRef,
+  signal?: AbortSignal,
 ): Promise<ManifestDiffEntry[]> {
   const qs = new URLSearchParams({
     branch: base.branch,
@@ -246,10 +247,25 @@ export async function fetchManifestDiffDeep(
   });
   const r = await fetch(
     `/api/apps/${appid}/depots/${base.depot_id}/manifests/${base.manifest_id}/structured-diff-filter?${qs}`,
+    { signal },
   );
   if (!r.ok) throw new Error(await extractErrorMessage(r));
   const body: { entries: ManifestDiffEntry[] } = await r.json();
   return body.entries;
+}
+
+/// Cache key for one deep-diff pair. Keyed by manifest ids only —
+/// the result is content-addressed (same gids → same entries
+/// regardless of branch), so branch must stay out of the key.
+export function manifestDiffDeepKey(appid: AppId, base: ManifestRef, target: ManifestRef) {
+  return [
+    "manifest-diff-deep",
+    appid,
+    base.depot_id,
+    base.manifest_id,
+    target.depot_id,
+    target.manifest_id,
+  ] as const;
 }
 
 /// `{depot_id, manifest_id}` of a target whose at-least-one-path-
