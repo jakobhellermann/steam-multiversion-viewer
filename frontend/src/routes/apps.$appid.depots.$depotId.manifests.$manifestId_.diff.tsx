@@ -191,14 +191,17 @@ function DiffPage() {
   // answers to either, `mod:obj:B,obj:T` hands back that side's id. No
   // counterpart (a one-sided row, or nothing selected) → fall through
   // to the Link's plain navigation without a hash.
+  const selectedHash = (side: "base" | "target"): string | undefined => {
+    const raw = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+    return raw ? projectRefToSide(raw, side) : undefined;
+  };
   const openSide = (
     e: React.MouseEvent<HTMLAnchorElement>,
     side: "base" | "target",
     dest: { depotId: string; manifestId: string; branch: string },
   ) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-    const raw = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-    const hash = raw ? projectRefToSide(raw, side) : undefined;
+    const hash = selectedHash(side);
     if (!hash) return;
     e.preventDefault();
     navigate({
@@ -207,6 +210,17 @@ function DiffPage() {
       search: { branch: dest.branch === "public" ? undefined : dest.branch, path },
       hash,
     });
+  };
+
+  // Middle-/ctrl-click never reach `openSide` (no `click` event for
+  // button 1) — the browser opens whatever `href` holds at that
+  // moment. Write the projected node into the rendered href on
+  // mousedown, so new tabs land on the focused object too.
+  const hrefWithSelection = (e: React.MouseEvent<HTMLAnchorElement>, side: "base" | "target") => {
+    const hash = selectedHash(side);
+    if (!hash) return;
+    const plain = e.currentTarget.getAttribute("href")?.split("#")[0];
+    if (plain) e.currentTarget.setAttribute("href", `${plain}#${encodeURIComponent(hash)}`);
   };
 
   return (
@@ -290,6 +304,7 @@ function DiffPage() {
               manifestId: oldSide.manifestId,
             }}
             search={{ branch: oldSide.branch === "public" ? undefined : oldSide.branch, path }}
+            onMouseDown={(e) => hrefWithSelection(e, "target")}
             onClick={(e) =>
               openSide(e, "target", {
                 depotId: String(oldSide.depotId),
@@ -314,6 +329,7 @@ function DiffPage() {
               manifestId: newSide.manifestId,
             }}
             search={{ branch: newSide.branch === "public" ? undefined : newSide.branch, path }}
+            onMouseDown={(e) => hrefWithSelection(e, "base")}
             onClick={(e) =>
               openSide(e, "base", {
                 depotId: String(newSide.depotId),
