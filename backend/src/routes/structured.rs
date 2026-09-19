@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
+#[cfg(feature = "unity")]
 use axum::http::header;
+#[cfg(feature = "unity")]
 use axum::response::{IntoResponse as _, Response};
 use serde::Deserialize;
 
@@ -378,6 +380,7 @@ pub async fn manifest_file_structured_node(
         (status = 415, description = "Node is not a renderable texture")
     )
 )]
+#[cfg(feature = "unity")]
 #[tracing::instrument(skip_all, fields(path = %q.path, node_id = %q.node_id))]
 pub async fn manifest_file_structured_node_image(
     State(state): State<AppState>,

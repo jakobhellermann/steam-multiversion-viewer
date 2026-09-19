@@ -5,8 +5,9 @@
 //! differ and categorise the cause:
 //!   * `il-length-differs` — instruction count is different
 //!   * `il-content-differs` — same length, different ops/operands
-//!   * `field-only` — only a field hash differs
-//!   * `type-header` — top-level type bits differ
+//!     * `field-only` — only a field hash differs
+//!     * `type-header` — top-level type bits differ
+//!
 //! Helps decide whether to invest in narrowing further or call it
 //! done.
 

@@ -18,7 +18,7 @@
 //! PATH (same dependency the route handler has).
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -234,7 +234,7 @@ async fn decompile_and_write(
     to_sha: &[u8; 20],
     to_bytes: &[u8],
     fqn: &str,
-    out_dir: &PathBuf,
+    out_dir: &Path,
 ) -> Result<()> {
     let (from_text, to_text) = tokio::try_join!(
         dll::decompile_type(store_root, from_sha, from_bytes, fqn),

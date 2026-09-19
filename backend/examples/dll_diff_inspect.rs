@@ -171,8 +171,8 @@ fn compare(from_res: &Resolution<'_>, to_res: &Resolution<'_>) {
                     bb.instructions.len()
                 );
                 let d = similar::TextDiff::from_lines(
-                    &format!("{:#?}", ba.instructions),
-                    &format!("{:#?}", bb.instructions),
+                    format!("{:#?}", ba.instructions),
+                    format!("{:#?}", bb.instructions),
                 )
                 .unified_diff()
                 .context_radius(3)

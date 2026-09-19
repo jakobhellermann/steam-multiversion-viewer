@@ -62,6 +62,12 @@ pub struct MountDeps {
     pub downloads: Arc<ChunkService>,
 }
 
+impl Default for MountManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MountManager {
     pub fn new() -> Self {
         Self {

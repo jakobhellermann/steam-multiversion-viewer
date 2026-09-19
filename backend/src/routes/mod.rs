@@ -28,7 +28,7 @@ pub(super) fn default_branch() -> String {
 }
 
 pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
-    router
+    let router = router
         .routes(routes!(auth::status))
         .routes(routes!(auth::login))
         .routes(routes!(auth::login_code))
@@ -45,8 +45,10 @@ pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
         .routes(routes!(files::manifest_file_raw))
         .routes(routes!(files::manifest_file_transformed))
         .routes(routes!(structured::manifest_file_structured))
-        .routes(routes!(structured::manifest_file_structured_node))
-        .routes(routes!(structured::manifest_file_structured_node_image))
+        .routes(routes!(structured::manifest_file_structured_node));
+    #[cfg(feature = "unity")]
+    let router = router.routes(routes!(structured::manifest_file_structured_node_image));
+    router
         .routes(routes!(diff::manifest::manifest_diff))
         .routes(routes!(diff::manifest::manifest_diff_deep))
         .routes(routes!(diff::manifest::manifest_diff_targets))

@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
         let data_dir = game_files.data_dir().display().to_string();
         let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
         let env = Environment::new(game_files, tpk);
-        Ok(bundle::build_tree(&env, &data_dir, BUNDLE_PATH)?)
+        bundle::build_tree(&env, &data_dir, BUNDLE_PATH)
     })
     .await??;
     println!(

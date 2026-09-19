@@ -126,13 +126,13 @@ async fn main() -> Result<()> {
         let target_tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
         let target_env = Environment::new(target_game_files, target_tpk);
 
-        Ok(bundle::build_diff(
+        bundle::build_diff(
             &base_env,
             &base_data_dir,
             &target_env,
             &target_data_dir,
             PATH,
-        )?)
+        )
     })
     .await??;
     let elapsed = started_diff.elapsed();
