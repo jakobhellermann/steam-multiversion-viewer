@@ -390,7 +390,7 @@ pub struct DeepDiffQuery {
 
 /// Deep manifest diff
 ///
-/// Like [`manifest_diff`], but a changed Unity file only counts when its structured diff is non-empty (normalization noise like PPtr renumbering is dropped); DLLs stay fingerprint-level since decompiling is expensive.
+/// Like [`manifest_diff`], but a changed Unity file only counts when its structured diff is non-empty (normalization noise like PPtr renumbering and HingeJoint2D m_ConnectedAnchor float noise is dropped); DLLs stay fingerprint-level since decompiling is expensive.
 /// Downloads both sides of every Unity candidate, so this is far pricier than `manifest_diff`.
 #[utoipa::path(
     get,

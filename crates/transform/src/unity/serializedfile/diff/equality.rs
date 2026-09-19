@@ -62,17 +62,29 @@ fn objects_equal_modulo_pptr<R: EnvResolver, P: TypeTreeProvider>(
     ) else {
         return false;
     };
+    // HingeJoint2D.m_ConnectedAnchor.y differs by up to ~10 f32 ulps
+    // between same-depot manifests with the object otherwise identical.
+    let float_tolerance = base_handle.class_id() == ClassId::HingeJoint2D
+        && target_handle.class_id() == ClassId::HingeJoint2D;
     let (Ok(base_val), Ok(target_val)) = (base_handle.read(), target_handle.read()) else {
         return false;
     };
-    values_equal_modulo_pptr(base_file, &base_val, target_file, &target_val)
+    values_equal_modulo_pptr(
+        base_file,
+        &base_val,
+        target_file,
+        &target_val,
+        float_tolerance,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn values_equal_modulo_pptr<R: EnvResolver, P: TypeTreeProvider>(
     base_file: &SerializedFileHandle<'_, R, P>,
     base: &Value,
     target_file: &SerializedFileHandle<'_, R, P>,
     target: &Value,
+    float_tolerance: bool,
 ) -> bool {
     if base == target {
         return true;
@@ -84,17 +96,46 @@ fn values_equal_modulo_pptr<R: EnvResolver, P: TypeTreeProvider>(
             }
             bm.len() == tm.len()
                 && bm.iter().zip(tm).all(|((bk, bv), (tk, tv))| {
-                    bk == tk && values_equal_modulo_pptr(base_file, bv, target_file, tv)
+                    bk == tk
+                        && values_equal_modulo_pptr(base_file, bv, target_file, tv, float_tolerance)
                 })
         }
         (Value::Seq(bs), Value::Seq(ts)) => {
             bs.len() == ts.len()
-                && bs
-                    .iter()
-                    .zip(ts)
-                    .all(|(bv, tv)| values_equal_modulo_pptr(base_file, bv, target_file, tv))
+                && bs.iter().zip(ts).all(|(bv, tv)| {
+                    values_equal_modulo_pptr(base_file, bv, target_file, tv, float_tolerance)
+                })
         }
+        (Value::F32(b), Value::F32(t)) if float_tolerance => floats_equal(*b as f64, *t as f64),
+        (Value::F64(b), Value::F64(t)) if float_tolerance => floats_equal(*b, *t),
         _ => false,
+    }
+}
+
+// Absolute floor because the relative term collapses near zero;
+// observed anchors at ~0 differ by ~2e-7 between manifests.
+fn floats_equal(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-5 * a.abs().max(b.abs()) + 1e-6
+}
+
+#[cfg(test)]
+mod tests {
+    use super::floats_equal;
+
+    #[test]
+    fn few_ulp_diffs_are_equal() {
+        assert!(floats_equal(1.4599998, 1.4600008));
+        assert!(floats_equal(-0.0, 0.0));
+        assert!(floats_equal(999999.0, 999_999.5));
+        assert!(floats_equal(1.9073486328125e-06, 2.096707703458378e-06));
+        assert!(floats_equal(0.0, 1e-7));
+    }
+
+    #[test]
+    fn real_edits_differ() {
+        assert!(!floats_equal(1.46, 1.47));
+        assert!(!floats_equal(0.0, 0.002));
+        assert!(!floats_equal(-1.46, 1.46));
     }
 }
 
