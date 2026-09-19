@@ -278,7 +278,12 @@ fn print_tree(node: &transform::structured::Node, depth: usize) {
         .as_deref()
         .map(|b| format!("  [{b}]"))
         .unwrap_or_default();
-    println!("{}{}{status}{badge}", "  ".repeat(depth), node.label);
+    let mime = node
+        .content_mime
+        .as_deref()
+        .map(|m| format!("  <{m}>"))
+        .unwrap_or_default();
+    println!("{}{}{status}{badge}{mime}", "  ".repeat(depth), node.label);
     for child in &node.children {
         print_tree(child, depth + 1);
     }

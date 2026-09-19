@@ -8,7 +8,7 @@ use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 
 use crate::structured::{Node, NodeStatus};
-use crate::unity::{NameOnly, class_label, object_name};
+use crate::unity::{NameOnly, class_label, content_mime_for_class, object_name};
 
 use super::Side;
 use super::hierarchy::Covered;
@@ -42,11 +42,23 @@ pub(super) fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
     };
     let mut base_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
     for r in &base_raw {
-        base_items.insert(key_for(r), LooseItem { path_id: r.path_id });
+        base_items.insert(
+            key_for(r),
+            LooseItem {
+                path_id: r.path_id,
+                class_id: r.class_id,
+            },
+        );
     }
     let mut target_items: BTreeMap<LooseKey, LooseItem> = BTreeMap::new();
     for r in &target_raw {
-        target_items.insert(key_for(r), LooseItem { path_id: r.path_id });
+        target_items.insert(
+            key_for(r),
+            LooseItem {
+                path_id: r.path_id,
+                class_id: r.class_id,
+            },
+        );
     }
 
     let mut keys: Vec<LooseKey> = base_items
@@ -88,6 +100,7 @@ pub(super) fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
                     facets: [("class".to_string(), key.label.clone())]
                         .into_iter()
                         .collect(),
+                    content_mime: content_mime_for_class(b.class_id),
                     ..super::make_node(
                         super::one_sided_id(Side::Base, b.path_id),
                         label,
@@ -103,6 +116,7 @@ pub(super) fn diff_loose<R: EnvResolver, P: TypeTreeProvider>(
                     facets: [("class".to_string(), key.label.clone())]
                         .into_iter()
                         .collect(),
+                    content_mime: content_mime_for_class(t.class_id),
                     ..super::make_node(
                         super::one_sided_id(Side::Target, t.path_id),
                         label,
@@ -138,6 +152,7 @@ struct LooseKey {
 
 struct LooseItem {
     path_id: PathId,
+    class_id: ClassId,
 }
 
 struct RawLoose {

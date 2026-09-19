@@ -1,12 +1,18 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 
-import { fetchStructuredDiff, fetchStructuredDiffNode, type StructuredNode } from "../../api";
+import {
+  fetchStructuredDiff,
+  fetchStructuredDiffNode,
+  structuredNodeImageUrl,
+  type StructuredNode,
+} from "../../api";
+import { mediaKindForMime } from "../../lib/mediaKind";
 import { type Lang, langForMime } from "../../lib/syntax";
 import { useDelayedFlag } from "../../lib/useDelayedFlag";
-import { HighlightedPre } from "./FilePreview";
+import { HighlightedPre, MediaView } from "./FilePreview";
 import { makeDiffPostProcess, makePostProcess } from "./markers";
 import { focusUnlessSelecting, scopeSelectAll } from "./selection";
 import { NODE_SPINNER_DELAY_MS, NodePanelSpinner, Tree } from "./StructuredView";
@@ -118,6 +124,12 @@ function DiffNodeBody({
   // frontend just hands the raw tree id over. `has_content` gates the
   // fetch so we don't probe section / class-stat rows.
   const enabled = !!node.has_content;
+  // One-sided texture rows are renderable like in the non-diff view —
+  // against whichever manifest the side prefix names.
+  const mediaKind = node.content_mime ? mediaKindForMime(node.content_mime) : null;
+  const mediaSide = mediaKind ? imageSideOf(node.id) : null;
+  const [mediaFailedFor, setMediaFailedFor] = useState<string | null>(null);
+  const showMedia = mediaKind != null && mediaSide != null && mediaFailedFor !== node.id;
   const content = useQuery({
     queryKey: [
       "structured-diff-node",
@@ -141,7 +153,7 @@ function DiffNodeBody({
         path,
         node.id,
       ),
-    enabled,
+    enabled: enabled && !showMedia,
     staleTime: Infinity,
     gcTime: Infinity,
     retry: false,
@@ -164,6 +176,18 @@ function DiffNodeBody({
     // selection.
     lastSettledRef.current = null;
     return null;
+  }
+  if (showMedia && mediaSide && mediaKind) {
+    const m = mediaSide.side === "base" ? base : target;
+    return (
+      <MediaView
+        kind={mediaKind}
+        src={structuredNodeImageUrl(appid, m.depotId, m.manifestId, m.branch, path, mediaSide.id)}
+        alt={node.id}
+        imgClassName="[image-rendering:pixelated]"
+        onError={() => setMediaFailedFor(node.id)}
+      />
+    );
   }
   if (content.data) {
     lastSettledRef.current = {
@@ -263,4 +287,18 @@ function DiffContentPane({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
+}
+
+/// One-sided diff ids carry the side as a prefix on the last segment
+/// (`…/base:obj:3`); the plain image endpoint wants that manifest and
+/// the un-prefixed id. Matched-pair ids (`mod:…`) have no single side.
+function imageSideOf(nodeId: string): { side: "base" | "target"; id: string } | null {
+  const slash = nodeId.lastIndexOf("/");
+  const dir = nodeId.slice(0, slash + 1);
+  const leaf = nodeId.slice(slash + 1);
+  if (leaf.startsWith("base:")) return { side: "base", id: dir + leaf.slice("base:".length) };
+  if (leaf.startsWith("target:")) {
+    return { side: "target", id: dir + leaf.slice("target:".length) };
+  }
+  return null;
 }

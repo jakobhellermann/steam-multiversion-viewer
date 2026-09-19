@@ -9,7 +9,7 @@ use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
 
 use crate::structured::{Node, NodeStatus};
-use crate::unity::object_name;
+use crate::unity::{content_mime_for_class, object_name};
 
 use super::{BodyIndex, Side, go_label};
 
@@ -439,6 +439,10 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
             facets: [("class".to_string(), key.to_string())]
                 .into_iter()
                 .collect(),
+            content_mime: match key {
+                ComponentKey::ClassId(c) => content_mime_for_class(*c),
+                _ => None,
+            },
             ..super::make_node(
                 super::one_sided_id(Side::Base, b.path_id),
                 key.to_string(),
@@ -451,6 +455,10 @@ fn component_diff_node<R: EnvResolver, P: TypeTreeProvider>(
             facets: [("class".to_string(), key.to_string())]
                 .into_iter()
                 .collect(),
+            content_mime: match key {
+                ComponentKey::ClassId(c) => content_mime_for_class(*c),
+                _ => None,
+            },
             ..super::make_node(
                 super::one_sided_id(Side::Target, t.path_id),
                 key.to_string(),

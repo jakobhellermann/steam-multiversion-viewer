@@ -28,6 +28,11 @@ pub(crate) fn relative_to_data_dir<'a>(data_dir: &str, path: &'a str) -> &'a str
         .unwrap_or(path)
 }
 
+/// Node content mime for classes with a renderable body (Texture2D → PNG).
+pub(crate) fn content_mime_for_class(class_id: ClassId) -> Option<String> {
+    (class_id == ClassId::Texture2D).then(|| "image/png".to_string())
+}
+
 #[derive(serde::Deserialize, Default)]
 #[allow(non_snake_case)]
 pub(crate) struct NameOnly {

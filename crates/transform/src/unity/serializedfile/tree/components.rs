@@ -6,7 +6,7 @@ use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 
 use crate::structured::Node;
-use crate::unity::{class_label, object_name};
+use crate::unity::{class_label, content_mime_for_class, object_name};
 
 /// Dispatches to the node builder for this engine class.
 #[tracing::instrument(level = "debug", skip_all, fields(?class_id, ?path_id))]
@@ -31,9 +31,7 @@ fn ordinary_component_node<R: EnvResolver, P: TypeTreeProvider>(
 ) -> Result<Node> {
     let class_label = format!("{class_id:?}");
     let mut node = component_leaf(path_id, &class_label, &class_label);
-    if class_id == ClassId::Texture2D {
-        node.content_mime = Some("image/png".to_string());
-    }
+    node.content_mime = content_mime_for_class(class_id);
     if loose && let Some(name) = object_name(file, &class_label, path_id) {
         node = node.with_badge(name);
     }
