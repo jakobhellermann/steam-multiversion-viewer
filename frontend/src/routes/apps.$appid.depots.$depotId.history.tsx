@@ -420,13 +420,13 @@ function Transition({
       {deep.phase === "pending" && (
         <>
           {" "}
-          <Loader2 size={11} className="inline-block animate-spin text-slate-500 align-[-2px]" />
+          <Loader2 size={11} className="inline-block animate-spin align-[-2px] text-slate-500" />
         </>
       )}
       {deep.phase === "failed" && (
         <>
           {" "}
-          <CircleAlert size={11} className="inline-block text-rose-400 align-[-2px]">
+          <CircleAlert size={11} className="inline-block align-[-2px] text-rose-400">
             <title>deep compare failed for this transition</title>
           </CircleAlert>
         </>
