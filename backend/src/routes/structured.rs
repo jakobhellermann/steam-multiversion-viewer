@@ -123,7 +123,7 @@ pub async fn manifest_file_structured(
         }
         #[cfg(feature = "unity")]
         Some(Transformer::AddressablesCatalog) => {
-            let bytes = snapshot.read_full(&path).await?.to_vec();
+            let bytes = snapshot.read_full(&path).await?;
             let label = path.clone();
             let tree = tokio::task::spawn_blocking(move || {
                 transform::unity::addressables::build_tree(&bytes, &label)
@@ -229,7 +229,7 @@ pub async fn manifest_file_structured_node(
 
     #[cfg(feature = "unity")]
     if let Some(key) = transform::unity::addressables::parse_key_node_id(&q.node_id) {
-        let bytes = snapshot.read_full(&q.path).await?.to_vec();
+        let bytes = snapshot.read_full(&q.path).await?;
         let key = key.to_string();
         let text = tokio::task::spawn_blocking(move || {
             transform::unity::addressables::dump_key_json(&bytes, &key)

@@ -61,11 +61,15 @@ pub struct StoreManifest {
     pub creation_time: u32,
     pub chunks_total: u32,
     pub chunks_present: u32,
-    /// Uncompressed footprint of every chunk this manifest references.
+    /// Compressed footprint if every chunk this manifest references were
+    /// downloaded (wire size; the frames on disk track it within a few
+    /// percent).
     pub bytes_total: u64,
-    /// Bytes currently on disk for this manifest's chunks.
+    /// Bytes currently on disk for this manifest's chunks (actual file
+    /// sizes).
     pub bytes_on_disk: u64,
-    /// Bytes reclaimed by deleting only this manifest (its exclusive chunks).
+    /// Bytes reclaimed by deleting only this manifest (its exclusive
+    /// chunks, actual file sizes).
     pub bytes_unique: u64,
 }
 
@@ -74,7 +78,26 @@ pub struct StoreManifest {
 #[tracing::instrument(skip_all)]
 pub async fn store_overview(State(state): State<AppState>) -> Result<Json<StoreOverview>> {
     let model = state.store_model()?;
-    let index = state.store_index.read().expect("store_index poisoned");
+
+    // Cloned out of the index so the read lock is free before the stat
+    // calls: the same process serves the FUSE mount on this runtime.
+    let present: HashSet<ChunkHash> = {
+        let index = state.store_index.read().expect("store_index poisoned");
+        index.present_chunks().clone()
+    };
+
+    // Actual file sizes: `chunk_size` (wire size) only approximates the
+    // frames, and this route exists to state disk usage.
+    let chunks_root = state.store.chunks_root();
+    let file_size: HashMap<ChunkHash, u64> = present
+        .iter()
+        .map(|sha| {
+            let len = std::fs::metadata(chunks_root.join(sha.to_string()))
+                .map(|m| m.len())
+                .unwrap_or(0);
+            (*sha, len)
+        })
+        .collect();
 
     let mut apps: BTreeMap<u32, BTreeMap<u32, Vec<StoreManifest>>> = BTreeMap::new();
     // Union per app, so a shared chunk counts once toward the app total.
@@ -87,9 +110,8 @@ pub async fn store_overview(State(state): State<AppState>) -> Result<Json<StoreO
         let mut bytes_unique = 0u64;
         let app_set = app_present.entry(node.app_id.0).or_default();
         for sha in &node.chunks {
-            let size = model.chunk_size.get(sha).copied().unwrap_or(0);
-            bytes_total += size;
-            if index.has_chunk(sha) {
+            bytes_total += model.chunk_size.get(sha).copied().unwrap_or(0);
+            if let Some(size) = file_size.get(sha) {
                 chunks_present += 1;
                 bytes_on_disk += size;
                 app_set.insert(*sha);
@@ -114,30 +136,20 @@ pub async fn store_overview(State(state): State<AppState>) -> Result<Json<StoreO
     }
 
     let mut total_ref_bytes = 0u64;
-    for (sha, size) in &model.chunk_size {
-        if index.has_chunk(sha) {
-            total_ref_bytes += size;
-        }
-    }
-
-    // Present on disk but in no manifest; size comes from the file itself.
-    let chunks_root = state.store.chunks_root();
     let mut unref = UnreferencedBucket {
         chunks: 0,
         bytes: 0,
     };
-    for sha in index.present_chunks() {
+    for (sha, size) in &file_size {
         if model.chunk_refs.contains_key(sha) {
-            continue;
+            total_ref_bytes += size;
+        } else {
+            unref.chunks += 1;
+            unref.bytes += size;
         }
-        unref.chunks += 1;
-        unref.bytes += std::fs::metadata(chunks_root.join(sha.to_string()))
-            .map(|m| m.len())
-            .unwrap_or(0);
     }
 
-    let total_chunks_on_disk = index.present_chunks().len() as u64;
-    drop(index);
+    let total_chunks_on_disk = present.len() as u64;
 
     let mut apps: Vec<StoreApp> = apps
         .into_iter()
@@ -146,7 +158,7 @@ pub async fn store_overview(State(state): State<AppState>) -> Result<Json<StoreO
                 .get(&app_id)
                 .map(|set| {
                     set.iter()
-                        .map(|s| model.chunk_size.get(s).copied().unwrap_or(0))
+                        .map(|s| file_size.get(s).copied().unwrap_or(0))
                         .sum()
                 })
                 .unwrap_or(0);
@@ -191,11 +203,13 @@ pub struct PruneRequest {
     /// is freed only when every manifest referencing it is in this set.
     #[serde(default)]
     pub free_chunks: Vec<StoreManifestRef>,
-    /// Delete these manifests' metadata (postcard). Chunks are untouched, so
-    /// any still on disk become unreferenced.
+    /// Delete these manifests' metadata (postcard). Their chunks stay on
+    /// disk, and the `include_unreferenced` sweep treats them as already
+    /// gone, so one pass removes metadata and chunks together.
     #[serde(default)]
     pub delete_metadata: Vec<StoreManifestRef>,
-    /// Also delete chunks referenced by no cached manifest.
+    /// Also delete chunks referenced by no cached manifest
+    /// (`delete_metadata` manifests count as already gone).
     #[serde(default)]
     pub include_unreferenced: bool,
 }
@@ -220,11 +234,35 @@ pub async fn prune_preview(
     Json(body): Json<PruneRequest>,
 ) -> Result<Json<PruneResult>> {
     let model = state.store_model()?;
-    let index = state.store_index.read().expect("store_index poisoned");
-    let (stats, _) = model.freed_by(&delete_set(&body.free_chunks), |s| index.has_chunk(s));
+    // The same chunk sets the prune will delete (freed and orphan sets are
+    // disjoint: freed chunks are excluded from the sweep) so preview and
+    // result agree even where the frames deviate from the wire size.
+    let (freed, orphans): (Vec<ChunkHash>, Vec<ChunkHash>) = {
+        let index = state.store_index.read().expect("store_index poisoned");
+        let freed = model.freed_by(&delete_set(&body.free_chunks), |s| index.has_chunk(s));
+        let orphans = if body.include_unreferenced {
+            let kept = model.referenced_chunks_excluding(&delete_set(&body.delete_metadata));
+            index
+                .present_chunks()
+                .iter()
+                .filter(|s| !kept.contains(*s) && !freed.contains(s))
+                .copied()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        (freed, orphans)
+    };
+    let chunks_root = state.store.chunks_root();
+    let mut freed_bytes = 0u64;
+    for sha in freed.iter().chain(&orphans) {
+        freed_bytes += std::fs::metadata(chunks_root.join(sha.to_string()))
+            .map(|m| m.len())
+            .unwrap_or(0);
+    }
     Ok(Json(PruneResult {
-        freed_bytes: stats.bytes,
-        freed_chunks: stats.chunks,
+        freed_bytes,
+        freed_chunks: (freed.len() + orphans.len()) as u64,
     }))
 }
 
@@ -240,25 +278,26 @@ pub async fn prune(
 
     let freed = {
         let index = state.store_index.read().expect("store_index poisoned");
-        model
-            .freed_by(&delete_set(&body.free_chunks), |s| index.has_chunk(s))
-            .1
+        model.freed_by(&delete_set(&body.free_chunks), |s| index.has_chunk(s))
     };
 
     let mut freed_bytes = 0u64;
     let mut freed_chunks = 0u64;
     for sha in &freed {
+        freed_bytes += std::fs::metadata(chunks_root.join(sha.to_string()))
+            .map(|m| m.len())
+            .unwrap_or(0);
         remove_chunk(&chunks_root, sha)?;
-        freed_bytes += model.chunk_size.get(sha).copied().unwrap_or(0);
         freed_chunks += 1;
     }
 
     let orphans: Vec<ChunkHash> = if body.include_unreferenced {
         let index = state.store_index.read().expect("store_index poisoned");
+        let kept = model.referenced_chunks_excluding(&delete_set(&body.delete_metadata));
         index
             .present_chunks()
             .iter()
-            .filter(|s| !model.chunk_refs.contains_key(s))
+            .filter(|s| !kept.contains(*s) && !freed.contains(s))
             .copied()
             .collect()
     } else {

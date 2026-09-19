@@ -88,6 +88,10 @@ impl StoreIndex {
     }
 
     /// Aggregate stats for a single manifest against the current indexes.
+    /// Sizes here describe the *content*: the compressed ones are wire sizes
+    /// (what a download moves), the uncompressed one is the plaintext size.
+    /// Neither is a disk-footprint claim — the store persists compressed
+    /// frames; the store routes state those.
     pub fn manifest_stats(&self, m: &Manifest) -> ManifestStats {
         // Deduplicate by chunk SHA within the manifest — Steam can list the
         // same chunk in multiple files (e.g. as a shared section), and we
@@ -118,7 +122,7 @@ impl StoreIndex {
 pub struct ManifestStats {
     pub chunks_total: u32,
     pub chunks_missing: u32,
-    /// Uncompressed bytes — total disk footprint when fully downloaded.
+    /// Uncompressed plaintext bytes — the manifest's content size.
     pub bytes_total: u64,
     /// Compressed bytes — total download size of the whole manifest.
     pub bytes_total_compressed: u64,

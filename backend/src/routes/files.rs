@@ -306,7 +306,7 @@ pub async fn manifest_file_raw(
     Ok((
         ImmutableCache,
         [(header::CONTENT_TYPE, mime.as_ref().to_string())],
-        bytes.to_vec(),
+        bytes,
     )
         .into_response())
 }

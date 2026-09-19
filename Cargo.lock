@@ -49,6 +49,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
 name = "another-steam-totp"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -572,9 +578,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.4.6"
+version = "1.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3eb0f42d6c360dc3f8a821f6bf2fdea7f72bfd36b3076eb0e6d1e9e0752fff4"
+checksum = "54413ede23c2daf518f35156dfde027feb2374004d63bd497f983c8db9c0e313"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1414,9 +1420,9 @@ dependencies = [
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.12"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
+checksum = "ef25905e51abafe4dcea6c15fec58c57b601cdbd0ee53d22ea1d3016c587d39b"
 
 [[package]]
 name = "flate2"
@@ -1932,6 +1938,11 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+]
 
 [[package]]
 name = "heapless"
@@ -2559,6 +2570,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d3a9855747c17eaf4383823f135220716ab49bea5fbea7dd42cc9a92f8aa31"
 dependencies = [
  "logos-codegen",
+]
+
+[[package]]
+name = "lru"
+version = "0.18.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff9840bcc50b71349309900da0ce7279aa336ae71d73250b07998932c7d97c25"
+dependencies = [
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -3528,7 +3548,7 @@ dependencies = [
 [[package]]
 name = "projfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-depot-vfs#d267a0d49b1d856f96cd380ef6b78e3a70103658"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#472ee52710f5b20c296641449dd9a0f7cfd0a277"
 dependencies = [
  "windows 0.62.2",
 ]
@@ -4607,7 +4627,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "steam-depot-mount"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-depot-vfs#d267a0d49b1d856f96cd380ef6b78e3a70103658"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#472ee52710f5b20c296641449dd9a0f7cfd0a277"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4627,10 +4647,11 @@ dependencies = [
 [[package]]
 name = "steam-depot-vfs"
 version = "0.1.0"
-source = "git+https://github.com/jakobhellermann/steam-depot-vfs#d267a0d49b1d856f96cd380ef6b78e3a70103658"
+source = "git+https://github.com/jakobhellermann/steam-depot-vfs#472ee52710f5b20c296641449dd9a0f7cfd0a277"
 dependencies = [
  "bytes",
  "directories",
+ "lru",
  "postcard",
  "serde",
  "serde_json",
@@ -4640,6 +4661,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "zstd",
 ]
 
 [[package]]

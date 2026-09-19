@@ -24,15 +24,10 @@ pub struct StoreModel {
     pub manifests: Vec<ManifestNode>,
     /// Number of distinct manifests referencing each chunk.
     pub chunk_refs: HashMap<ChunkHash, u32>,
-    /// Uncompressed size, which equals the on-disk footprint (the FS cache
-    /// stores plaintext chunk bytes).
+    /// CDN wire size of each chunk. Approximates the on-disk frame size
+    /// within a few percent; used for full-download projections. Exact
+    /// disk usage is read from the files themselves.
     pub chunk_size: HashMap<ChunkHash, u64>,
-}
-
-#[derive(Default, Clone, Copy)]
-pub struct FreedStats {
-    pub bytes: u64,
-    pub chunks: u64,
 }
 
 impl StoreModel {
@@ -59,7 +54,7 @@ impl StoreModel {
                         chunks.push(chunk.sha);
                         chunk_size
                             .entry(chunk.sha)
-                            .or_insert_with(|| u64::from(chunk.size_uncompressed));
+                            .or_insert_with(|| u64::from(chunk.size_compressed));
                     }
                 }
             }
@@ -83,12 +78,13 @@ impl StoreModel {
     }
 
     /// Present chunks whose every referencing manifest lies within
-    /// `delete_set`, with their aggregate stats.
+    /// `delete_set`. Exact byte accounting is left to the caller, who can
+    /// stat the files — `chunk_size` only approximates them.
     pub fn freed_by(
         &self,
         delete_set: &HashSet<ManifestKey>,
         is_present: impl Fn(&ChunkHash) -> bool,
-    ) -> (FreedStats, Vec<ChunkHash>) {
+    ) -> Vec<ChunkHash> {
         let mut refs_in_set: HashMap<ChunkHash, u32> = HashMap::new();
         for node in &self.manifests {
             if delete_set.contains(&(node.app_id, node.depot_id, node.manifest_id)) {
@@ -98,17 +94,31 @@ impl StoreModel {
             }
         }
 
-        let mut stats = FreedStats::default();
-        let mut freed = Vec::new();
-        for (sha, in_set) in refs_in_set {
-            let total = self.chunk_refs.get(&sha).copied().unwrap_or(0);
-            if in_set == total && is_present(&sha) {
-                stats.bytes += self.chunk_size.get(&sha).copied().unwrap_or(0);
-                stats.chunks += 1;
-                freed.push(sha);
+        refs_in_set
+            .into_iter()
+            .filter(|(sha, in_set)| {
+                let total = self.chunk_refs.get(sha).copied().unwrap_or(0);
+                *in_set == total && is_present(sha)
+            })
+            .map(|(sha, _)| sha)
+            .collect()
+    }
+
+    /// Chunks referenced by the manifests NOT in `excluded`. The store
+    /// routes' unreferenced sweep runs it with the `delete_metadata` set,
+    /// so one prune pass also removes those manifests' chunks.
+    pub fn referenced_chunks_excluding(
+        &self,
+        excluded: &HashSet<ManifestKey>,
+    ) -> HashSet<ChunkHash> {
+        let mut refs = HashSet::new();
+        for node in &self.manifests {
+            if excluded.contains(&(node.app_id, node.depot_id, node.manifest_id)) {
+                continue;
             }
+            refs.extend(&node.chunks);
         }
-        (stats, freed)
+        refs
     }
 }
 
@@ -147,20 +157,30 @@ mod tests {
         (AppId(1), DepotId(2), ManifestId(m))
     }
 
+    fn freed_set(
+        model: &StoreModel,
+        keys: &[ManifestKey],
+        present: impl Fn(&ChunkHash) -> bool,
+    ) -> HashSet<ChunkHash> {
+        model
+            .freed_by(&keys.iter().copied().collect(), present)
+            .into_iter()
+            .collect()
+    }
+
     #[test]
     fn freed_is_non_additive_for_shared_chunks() {
         let model = model();
         let present = |_: &ChunkHash| true;
 
-        let a = model.freed_by(&[key(10)].into_iter().collect(), present).0;
-        let b = model.freed_by(&[key(20)].into_iter().collect(), present).0;
-        let both = model
-            .freed_by(&[key(10), key(20)].into_iter().collect(), present)
-            .0;
+        let a = freed_set(&model, &[key(10)], present);
+        let b = freed_set(&model, &[key(20)], present);
+        let both = freed_set(&model, &[key(10), key(20)], present);
 
-        assert_eq!((a.bytes, a.chunks), (100, 1));
-        assert_eq!((b.bytes, b.chunks), (100, 1));
-        assert_eq!((both.bytes, both.chunks), (300, 3));
+        // Order comes out of a HashMap; compare as sets.
+        assert_eq!(a, [sha(1)].into_iter().collect());
+        assert_eq!(b, [sha(3)].into_iter().collect());
+        assert_eq!(both, [sha(1), sha(2), sha(3)].into_iter().collect());
     }
 
     #[test]
@@ -168,9 +188,28 @@ mod tests {
         let model = model();
         // Only sha(1) on disk; sha(2)/sha(3) missing.
         let present = |s: &ChunkHash| *s == sha(1);
-        let both = model
-            .freed_by(&[key(10), key(20)].into_iter().collect(), present)
-            .0;
-        assert_eq!((both.bytes, both.chunks), (100, 1));
+        let both = freed_set(&model, &[key(10), key(20)], present);
+        assert_eq!(both, [sha(1)].into_iter().collect());
+    }
+
+    #[test]
+    fn referenced_chunks_excluding_drops_only_the_excluded_manifests() {
+        let model = model();
+
+        let none: HashSet<ManifestKey> = HashSet::new();
+        assert_eq!(
+            model.referenced_chunks_excluding(&none),
+            [sha(1), sha(2), sha(3)].into_iter().collect()
+        );
+        // sha(1) is only referenced by manifest 10.
+        assert_eq!(
+            model.referenced_chunks_excluding(&[key(10)].into_iter().collect()),
+            [sha(2), sha(3)].into_iter().collect()
+        );
+        // sha(2) survives excluding one of its two referrers.
+        assert_eq!(
+            model.referenced_chunks_excluding(&[key(10), key(20)].into_iter().collect()),
+            HashSet::new()
+        );
     }
 }
