@@ -119,6 +119,18 @@ pub async fn manifest_file_structured(
             .await?;
             Ok((ImmutableCache, Json(tree)))
         }
+        #[cfg(feature = "unity")]
+        Some(Transformer::AddressablesCatalog) => {
+            let bytes = snapshot.read_full(&path).await?.to_vec();
+            let label = path.clone();
+            let tree = tokio::task::spawn_blocking(move || {
+                transform::unity::addressables::build_tree(&bytes, &label)
+            })
+            .await
+            .map_err(|e| ApiError::internal(format!("structured-tree task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+            Ok((ImmutableCache, Json(tree)))
+        }
         Some(Transformer::Dll) => {
             let cfg = state.config.load();
             let bytes = match sniffed_bytes {
@@ -208,6 +220,25 @@ pub async fn manifest_file_structured_node(
             ImmutableCache,
             Json(NodeContent {
                 mime: "text/x-csharp".to_string(),
+                text,
+            }),
+        ));
+    }
+
+    #[cfg(feature = "unity")]
+    if let Some(key) = transform::unity::addressables::parse_key_node_id(&q.node_id) {
+        let bytes = snapshot.read_full(&q.path).await?.to_vec();
+        let key = key.to_string();
+        let text = tokio::task::spawn_blocking(move || {
+            transform::unity::addressables::dump_key_json(&bytes, &key)
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("structured-node task panicked: {e}")))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+        return Ok((
+            ImmutableCache,
+            Json(NodeContent {
+                mime: "application/json".to_string(),
                 text,
             }),
         ));

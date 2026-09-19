@@ -208,18 +208,4 @@ pub(crate) fn diff_sections<R: EnvResolver, P: TypeTreeProvider>(
 
 pub(super) use super::{go_label, pluralize};
 
-pub(super) fn prune_unchanged(mut children: Vec<Node>) -> Vec<Node> {
-    children.retain(|c| c.status != Some(NodeStatus::Unchanged) || !c.children.is_empty());
-    children
-}
-
-pub(super) fn aggregate_status(children: &[Node]) -> NodeStatus {
-    if children
-        .iter()
-        .any(|c| c.status != Some(NodeStatus::Unchanged))
-    {
-        NodeStatus::Changed
-    } else {
-        NodeStatus::Unchanged
-    }
-}
+use crate::structured::{aggregate_status, prune_unchanged};

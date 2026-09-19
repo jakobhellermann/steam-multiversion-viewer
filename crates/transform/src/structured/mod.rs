@@ -236,3 +236,23 @@ pub fn human_bytes(n: u64) -> String {
         format!("{v:.1} {}", UNITS[i])
     }
 }
+
+/// Diff trees: drop children that came back `unchanged` with nothing
+/// changed beneath them.
+pub fn prune_unchanged(mut children: Vec<Node>) -> Vec<Node> {
+    children.retain(|c| c.status != Some(NodeStatus::Unchanged) || !c.children.is_empty());
+    children
+}
+
+/// Status for a row given its children: `changed` when any child
+/// carries an explicit non-unchanged status.
+pub fn aggregate_status(children: &[Node]) -> NodeStatus {
+    if children
+        .iter()
+        .any(|c| c.status.is_some_and(|s| s != NodeStatus::Unchanged))
+    {
+        NodeStatus::Changed
+    } else {
+        NodeStatus::Unchanged
+    }
+}

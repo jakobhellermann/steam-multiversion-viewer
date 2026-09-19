@@ -61,7 +61,11 @@ pub async fn manifest_file_structured_diff_node(
     let supported = match kind {
         Some(Transformer::Dll) => true,
         #[cfg(feature = "unity")]
-        Some(Transformer::UnitySerialized | Transformer::UnityBundle) => true,
+        Some(
+            Transformer::UnitySerialized
+            | Transformer::UnityBundle
+            | Transformer::AddressablesCatalog,
+        ) => true,
         _ => false,
     };
     if !supported {
@@ -73,6 +77,11 @@ pub async fn manifest_file_structured_diff_node(
 
     if matches!(kind, Some(Transformer::Dll)) {
         return dll_node_body(&state, appid, depot_id, manifest_id, &q).await;
+    }
+
+    #[cfg(feature = "unity")]
+    if matches!(kind, Some(Transformer::AddressablesCatalog)) {
+        return addressables_node_body(&state, appid, depot_id, manifest_id, &q).await;
     }
 
     #[cfg(feature = "unity")]
@@ -162,6 +171,113 @@ async fn dll_node_body(
     );
     let body = node_body_response(base_text, target_text, &base_label, &target_label).ok_or_else(
         || ApiError::bad_request("structured-diff/node could not resolve either side"),
+    )?;
+    Ok((crate::http::ImmutableCache, body))
+}
+
+/// Per-node body for the addressables catalog: [`split_diff_id`]-shaped
+/// ids wrapping `key:<…>` / `bundle:<…>`; each side dumps the node's
+/// JSON, both together go through the unified diff.
+#[cfg(feature = "unity")]
+async fn addressables_node_body(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    q: &StructuredDiffNodeQuery,
+) -> Result<(crate::http::ImmutableCache, Response)> {
+    enum DumpTarget {
+        Key(String),
+    }
+    fn parse_target(id: &str) -> Option<DumpTarget> {
+        transform::unity::addressables::parse_key_node_id(id)
+            .map(|key| DumpTarget::Key(key.to_owned()))
+    }
+
+    let (base_inner, target_inner) = split_diff_id(&q.node_id);
+    let base_target = base_inner.and_then(parse_target);
+    let target_target = target_inner.and_then(parse_target);
+    if base_target.is_none() && target_target.is_none() {
+        return Err(ApiError::bad_request(format!(
+            "addressables structured-diff/node: id has no body: {}",
+            q.node_id
+        )));
+    }
+
+    let (base_snap, target_snap) = tokio::try_join!(
+        open_node_snapshot(
+            state,
+            appid,
+            depot_id,
+            manifest_id,
+            &q.branch,
+            base_target.is_some()
+        ),
+        open_node_snapshot(
+            state,
+            appid,
+            q.target_depot_id,
+            q.target_manifest_id,
+            &q.target_branch,
+            target_target.is_some(),
+        ),
+    )?;
+    let base_ct = base_snap
+        .as_ref()
+        .map(|s| s.manifest().creation_time)
+        .unwrap_or(0);
+    let target_ct = target_snap
+        .as_ref()
+        .map(|s| s.manifest().creation_time)
+        .unwrap_or(0);
+
+    let base_bytes = match (&base_snap, &base_target) {
+        (Some(snap), Some(_)) => Some(snap.read_full(&q.path).await?.to_vec()),
+        _ => None,
+    };
+    let target_bytes = match (&target_snap, &target_target) {
+        (Some(snap), Some(_)) => Some(snap.read_full(&q.path).await?.to_vec()),
+        _ => None,
+    };
+
+    let (base_text, target_text) = tokio::task::spawn_blocking(move || {
+        let dump = |bytes: Option<Vec<u8>>, target: Option<DumpTarget>| {
+            bytes.zip(target).map(|(bytes, target)| {
+                let text = match target {
+                    DumpTarget::Key(key) => {
+                        transform::unity::addressables::dump_key_json(&bytes, &key)?
+                    }
+                };
+                anyhow::Ok(Dumped {
+                    mime: "application/json",
+                    text,
+                })
+            })
+        };
+        (
+            dump(base_bytes, base_target),
+            dump(target_bytes, target_target),
+        )
+    })
+    .await
+    .map_err(|e| ApiError::internal(format!("structured-diff/node task panicked: {e}")))?;
+
+    let base_text = base_text
+        .transpose()
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let target_text = target_text
+        .transpose()
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let base_label = diff_label(depot_id, manifest_id, base_ct);
+    let target_label = diff_label(q.target_depot_id, q.target_manifest_id, target_ct);
+    let body = node_body_response(base_text, target_text, &base_label, &target_label).ok_or_else(
+        || {
+            ApiError::bad_request(format!(
+                "addressables structured-diff/node could not resolve any side: {}",
+                q.node_id
+            ))
+        },
     )?;
     Ok((crate::http::ImmutableCache, body))
 }

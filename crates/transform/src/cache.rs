@@ -48,6 +48,11 @@ pub enum Transformer {
     /// `/file/transformed`-style single-blob output for this one;
     /// callers route through `/file/structured` instead.
     Dll,
+    /// Unity Addressables content catalog
+    /// (`StreamingAssets/aa/catalog.bin`) — bundle + key tree via
+    /// [`crate::unity::addressables`].
+    #[cfg(feature = "unity")]
+    AddressablesCatalog,
 }
 
 impl Transformer {
@@ -59,6 +64,8 @@ impl Transformer {
             #[cfg(feature = "unity")]
             Self::UnityBundle => "text/plain",
             Self::Dll => "text/x-csharp",
+            #[cfg(feature = "unity")]
+            Self::AddressablesCatalog => "application/json",
         }
     }
 
@@ -71,6 +78,8 @@ impl Transformer {
             #[cfg(feature = "unity")]
             Self::UnityBundle => "unity bundle",
             Self::Dll => ".NET assembly",
+            #[cfg(feature = "unity")]
+            Self::AddressablesCatalog => "addressables catalog",
         }
     }
 }

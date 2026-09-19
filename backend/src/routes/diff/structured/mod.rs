@@ -187,6 +187,10 @@ pub async fn build_structured_diff(
             .await?
         }
         Some(Transformer::Dll) => build_dll_diff(state, &base, &target, &request.path).await?,
+        #[cfg(feature = "unity")]
+        Some(Transformer::AddressablesCatalog) => {
+            build_addressables_diff(&base, &target, &request.path).await?
+        }
         _ => return Ok(None),
     };
 
@@ -238,6 +242,26 @@ pub(super) async fn build_unity_bundle_diff(
         )
     })
     .instrument(tracing::info_span!("diff_build", kind = "unity_bundle"))
+    .await
+    .map_err(|e| ApiError::internal(format!("structured-diff task panicked: {e}")))?
+    .map_err(|e| ApiError::internal(e.to_string()))
+}
+
+/// Build the structured diff for the addressables catalog; it is
+/// self-contained — the sides' bytes suffice.
+#[cfg(feature = "unity")]
+pub(super) async fn build_addressables_diff(
+    base: &Arc<Snapshot>,
+    target: &Arc<Snapshot>,
+    path: &str,
+) -> Result<StructuredTree> {
+    let base_bytes = base.read_full(path).await?.to_vec();
+    let target_bytes = target.read_full(path).await?.to_vec();
+    let path = path.to_owned();
+    tokio::task::spawn_blocking(move || {
+        transform::unity::addressables::build_diff(&base_bytes, &target_bytes, &path)
+    })
+    .instrument(tracing::info_span!("diff_build", kind = "addressables"))
     .await
     .map_err(|e| ApiError::internal(format!("structured-diff task panicked: {e}")))?
     .map_err(|e| ApiError::internal(e.to_string()))
@@ -439,7 +463,7 @@ pub(super) async fn deep_structured_diff(
 ) -> Result<StructuredTree> {
     use transform::Transformer;
 
-    tokio::try_join!(
+    let (base_snap, target_snap) = tokio::try_join!(
         prepare_structured_side(state, appid, depot_id, manifest_id, path, branch),
         prepare_structured_side(
             state,
@@ -463,6 +487,9 @@ pub(super) async fn deep_structured_diff(
         Some(Transformer::UnityBundle) => {
             build_unity_bundle_diff(base_env, base_data_dir, target_env, target_data_dir, path)
                 .await
+        }
+        Some(Transformer::AddressablesCatalog) => {
+            build_addressables_diff(&base_snap, &target_snap, path).await
         }
         _ => unreachable!("deep diff only calls this for is_deep_comparable paths"),
     }

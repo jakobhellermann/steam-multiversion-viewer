@@ -14,12 +14,12 @@ use rabex_env::rabex::files::unityfile::FileEntry;
 use rabex_env::resolver::EnvResolver;
 use tracing::info_span;
 
-use crate::structured::{Node, NodeStatus, StructuredTree};
+use crate::structured::{
+    Node, NodeStatus, StructuredTree, aggregate_status, human_bytes, prune_unchanged,
+};
 use crate::unity::relative_to_data_dir;
 use crate::unity::serializedfile::diff::diff_sections;
 use crate::unity::serializedfile::tree::build_root_node;
-
-use crate::structured::human_bytes;
 
 use super::{
     ARCHIVE_ID_PREFIX, archive_prefix, blob_node, insert_archive_entry, open_bundle_from_bytes,
@@ -296,25 +296,5 @@ fn mark_status_recursive(node: &mut Node, status: NodeStatus) {
     node.status = Some(status);
     for child in &mut node.children {
         mark_status_recursive(child, status);
-    }
-}
-
-/// Drop entries that came back as Unchanged with no informative
-/// children. Mirrors `serializedfile::diff::prune_unchanged` so the
-/// bundle root has the same "spine to change only" shape as the
-/// per-file diff.
-fn prune_unchanged(mut children: Vec<Node>) -> Vec<Node> {
-    children.retain(|c| c.status != Some(NodeStatus::Unchanged) || !c.children.is_empty());
-    children
-}
-
-fn aggregate_status(children: &[Node]) -> NodeStatus {
-    if children
-        .iter()
-        .any(|c| c.status != Some(NodeStatus::Unchanged) && c.status.is_some())
-    {
-        NodeStatus::Changed
-    } else {
-        NodeStatus::Unchanged
     }
 }

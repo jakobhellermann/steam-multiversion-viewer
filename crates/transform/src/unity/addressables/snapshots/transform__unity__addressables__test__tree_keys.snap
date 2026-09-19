@@ -1,0 +1,64 @@
+---
+source: crates/transform/src/unity/addressables/test.rs
+expression: tree
+---
+root:
+  id: "file:catalog.bin"
+  label: catalog.bin
+  badge: 5 keys
+  children:
+    - id: "key:AreaBone"
+      label: AreaBone
+      badge: 2 locations
+      facets:
+        provider: BundledAssetProvider
+        type: SceneInstance
+      has_content: true
+      children: []
+    - id: "key-group:Scenes"
+      label: Scenes
+      badge: "2"
+      default_collapsed: true
+      children:
+        - id: "key:Scenes/Bone_03"
+          label: Scenes/Bone_03
+          badge: SceneInstance
+          facets:
+            provider: BundledAssetProvider
+            type: SceneInstance
+          has_content: true
+          children: []
+        - id: "key-group:Scenes/Hornet"
+          label: Scenes/Hornet
+          badge: "1"
+          default_collapsed: true
+          children:
+            - id: "key:Scenes/Hornet/Bone_03"
+              label: Scenes/Hornet/Bone_03
+              badge: SceneInstance
+              facets:
+                provider: BundledAssetProvider
+                type: SceneInstance
+              has_content: true
+              children: []
+    - id: "key:atlases_assets_925f32bd8c05421a3ccb60c371036f72.bundle"
+      label: atlases_assets_925f32bd8c05421a3ccb60c371036f72.bundle
+      badge: atlases_assets · 4.0 KiB
+      facets:
+        provider: AssetBundleProvider
+        type: IAssetBundleResource
+      has_content: true
+      children: []
+    - id: "key-group:scenes_scenes_scenes"
+      label: scenes_scenes_scenes
+      badge: "1"
+      default_collapsed: true
+      children:
+        - id: "key:scenes_scenes_scenes/bone_03_2be02a4c3c388aa804c5e27c1c61b803.bundle"
+          label: scenes_scenes_scenes/bone_03_2be02a4c3c388aa804c5e27c1c61b803.bundle
+          badge: scenes_scenes_scenes/bone_03 · 592.7 KiB
+          facets:
+            provider: AssetBundleProvider
+            type: IAssetBundleResource
+          has_content: true
+          children: []

@@ -15,6 +15,7 @@ use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::MonoBehaviour;
 
+pub mod addressables;
 pub mod bundle;
 pub mod game_specific;
 pub mod game_version;
@@ -97,6 +98,14 @@ pub fn dump_unity_serialized<R: EnvResolver, P: TypeTreeProvider>(
     out.push('\n');
     serializedfile::format::format_hierarchy(&mut out, &file)?;
     Ok(out)
+}
+
+/// True for the addressables content catalog
+/// (`<data>/StreamingAssets/aa/catalog.bin`), by full path. Only the
+/// binary catalog is detected — `catalog.json` would need the json
+/// parser from rabex-env, which isn't public.
+pub fn is_addressables_catalog(path: &str) -> bool {
+    path.contains("StreamingAssets/aa/") && path.ends_with("/catalog.bin")
 }
 
 /// True for unity serialized-file conventions that don't carry a

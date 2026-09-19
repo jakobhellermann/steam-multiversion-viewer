@@ -1,0 +1,52 @@
+---
+source: crates/transform/src/unity/addressables/test.rs
+expression: tree
+---
+root:
+  id: "file:catalog.bin"
+  label: catalog.bin
+  badge: 4→4 keys
+  status: changed
+  children:
+    - id: "key-group:Scenes"
+      label: Scenes
+      badge: "3"
+      default_collapsed: true
+      status: changed
+      children:
+        - id: "key:Scenes/Moved"
+          label: Scenes/Moved
+          badge: SceneInstance
+          facets:
+            provider: BundledAssetProvider
+            type: SceneInstance
+          status: changed
+          has_content: true
+          children: []
+        - id: "base:key:Scenes/OnlyBase"
+          label: Scenes/OnlyBase
+          badge: SceneInstance
+          facets:
+            provider: BundledAssetProvider
+            type: SceneInstance
+          status: added
+          has_content: true
+          children: []
+        - id: "target:key:Scenes/OnlyTarget"
+          label: Scenes/OnlyTarget
+          badge: SceneInstance
+          facets:
+            provider: BundledAssetProvider
+            type: SceneInstance
+          status: removed
+          has_content: true
+          children: []
+    - id: "mod:key:a_00000000000000000000000000000001.bundle,key:a_00000000000000000000000000000009.bundle"
+      label: a_00000000000000000000000000000001.bundle
+      badge: a · rebuilt
+      facets:
+        provider: AssetBundleProvider
+        type: IAssetBundleResource
+      status: changed
+      has_content: true
+      children: []

@@ -1,0 +1,25 @@
+---
+source: crates/transform/src/unity/addressables/test.rs
+expression: tree
+---
+root:
+  id: "file:catalog.bin"
+  label: catalog.bin
+  badge: 2→2 keys
+  status: changed
+  children:
+    - id: "key-group:scenes_scenes_scenes"
+      label: scenes_scenes_scenes
+      badge: "1"
+      default_collapsed: true
+      status: changed
+      children:
+        - id: "mod:key:scenes_scenes_scenes/bone_03_2be02a4c3c388aa804c5e27c1c61b803.bundle,key:scenes_scenes_scenes/bone_03_99999999999999999999999999999999.bundle"
+          label: scenes_scenes_scenes/bone_03_2be02a4c3c388aa804c5e27c1c61b803.bundle
+          badge: scenes_scenes_scenes/bone_03 · 100 B → 200 B
+          facets:
+            provider: AssetBundleProvider
+            type: IAssetBundleResource
+          status: changed
+          has_content: true
+          children: []

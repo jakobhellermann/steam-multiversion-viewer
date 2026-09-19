@@ -413,6 +413,12 @@ pub async fn manifest_file_transformed(
                 "Unity bundles are served through /file/structured, not /file/transformed",
             ));
         }
+        #[cfg(feature = "unity")]
+        transform::Transformer::AddressablesCatalog => {
+            return Err(ApiError::unsupported_media_type(
+                "Addressables catalogs are served through /file/structured, not /file/transformed",
+            ));
+        }
     };
 
     Ok((ImmutableCache, [(header::CONTENT_TYPE, content_type)], text).into_response())

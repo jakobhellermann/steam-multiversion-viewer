@@ -46,5 +46,11 @@ pub fn capabilities(kind: &Transformer) -> FormatCaps {
             text_dump: false,
             deep_comparable: false,
         },
+        #[cfg(feature = "unity")]
+        Transformer::AddressablesCatalog => FormatCaps {
+            rich_view: Some(RichView::Structured),
+            text_dump: false,
+            deep_comparable: true,
+        },
     }
 }

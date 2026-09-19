@@ -17,6 +17,10 @@ pub fn transformer_for(path: &str, bytes: Option<&[u8]>) -> Option<Transformer> 
     if let Some(t) = ext.as_deref().and_then(extension_transformer) {
         return Some(t);
     }
+    #[cfg(feature = "unity")]
+    if crate::unity::is_addressables_catalog(path) {
+        return Some(Transformer::AddressablesCatalog);
+    }
     let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
     if let Some(t) = filename_transformer(file_name) {
         return Some(t);
