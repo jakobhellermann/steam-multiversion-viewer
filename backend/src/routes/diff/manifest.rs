@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-//! Manifest-level path diffs: which paths changed or were added between manifests.
+//! Manifest-level path diffs: which paths changed, were added, or exist only in the compare targets.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -34,11 +34,12 @@ pub struct ManifestDiffRequest {
 #[schema(example = json!({
     "entries": [
         {"path": "Data/Engine.dll",      "status": "changed"},
-        {"path": "Data/NewModule.dll",   "status": "added"}
+        {"path": "Data/NewModule.dll",   "status": "added"},
+        {"path": "Data/OldModule.dll",   "status": "removed", "size": 456789}
     ]
 }))]
 pub struct ManifestDiffResponse {
-    /// Paths in `base` that are `Changed` vs some `other` or `Added` (absent from every `other`); paths only in some `other` aren't reported since the tree is rooted at `base`.
+    /// Every path that differs: `Changed`/`Added` for paths in `base`, `Removed` for paths in every `other` but in no `base`.
     pub entries: Vec<ManifestDiffEntry>,
 }
 
@@ -46,6 +47,9 @@ pub struct ManifestDiffResponse {
 pub struct ManifestDiffEntry {
     pub path: String,
     pub status: ManifestDiffStatus,
+    /// Set on `Removed` rows: the file's size in the first `other` carrying the path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
 }
 
 #[derive(Serialize, ToSchema, Clone, Copy, PartialEq, Eq)]
@@ -55,11 +59,13 @@ pub enum ManifestDiffStatus {
     Added,
     /// In `base` and differs from some `other`; wins over `Added` when both apply.
     Changed,
+    /// In *every* `other`, in no `base` — the mirror of `Added`; carries the `other`-side size.
+    Removed,
 }
 
 /// Manifest path-level diff
 ///
-/// `Changed` (differs from some `other`) or `Added` (absent from every `other`); identity is the content sha, or the symlink target ([`content_id`]).
+/// `Changed` (differs from some `other`), `Added` (absent from every `other`), or `Removed` (in every `other`, in no `base`); identity is the content sha, or the symlink target ([`content_id`]).
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/manifests/diff",
@@ -103,20 +109,31 @@ pub async fn manifest_diff(
     // `Changed` wins over `Added`: added-vs-A-but-changed-vs-B is still demonstrably different somewhere.
     let mut absent_in_all: HashSet<&str> = base_by_path.keys().copied().collect();
     let mut changed: HashSet<String> = HashSet::new();
+    // Paths seen in every `other` so far, with the size from the first one carrying them.
+    let mut in_every_other: Option<HashMap<String, u64>> = None;
     while let Some((_, result)) = others.next().await {
         let snap = result?;
         let other = snap.manifest();
+        let mut paths: HashMap<String, u64> = HashMap::with_capacity(other.files.len());
         for f in &other.files {
             if f.is_dir() {
                 continue;
             }
             absent_in_all.remove(f.path.as_str());
+            paths.insert(f.path.clone(), f.size);
             if let Some(base_f) = base_by_path.get(f.path.as_str())
                 && content_id(base_f) != content_id(f)
             {
                 changed.insert(f.path.clone());
             }
         }
+        in_every_other = Some(match in_every_other {
+            None => paths,
+            Some(mut kept) => {
+                kept.retain(|p, _| paths.contains_key(p));
+                kept
+            }
+        });
     }
 
     let mut entries: Vec<ManifestDiffEntry> =
@@ -125,6 +142,7 @@ pub async fn manifest_diff(
         entries.push(ManifestDiffEntry {
             path: path.clone(),
             status: ManifestDiffStatus::Changed,
+            size: None,
         });
     }
     for path in &absent_in_all {
@@ -135,6 +153,17 @@ pub async fn manifest_diff(
         entries.push(ManifestDiffEntry {
             path: (*path).to_owned(),
             status: ManifestDiffStatus::Added,
+            size: None,
+        });
+    }
+    for (path, size) in in_every_other.into_iter().flatten() {
+        if base_by_path.contains_key(path.as_str()) {
+            continue;
+        }
+        entries.push(ManifestDiffEntry {
+            path,
+            status: ManifestDiffStatus::Removed,
+            size: Some(size),
         });
     }
     entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -281,7 +310,7 @@ pub struct ManifestRefShort {
 
 /// Find manifests with changes in a path subset
 ///
-/// Like `/manifests/diff` but answers yes/no per target instead of returning the path list.
+/// Like `/manifests/diff` but answers yes/no per target instead of returning the path list. A target also counts when it has query-matching paths no `base` has (the `Removed` rows there).
 #[utoipa::path(
     post,
     path = "/api/apps/{appid}/manifests/diff-targets",
@@ -313,10 +342,12 @@ pub async fn manifest_diff_targets(
         .collect();
     let base = base_snap.manifest();
     let mut base_subset: HashMap<&str, &DepotFile> = HashMap::with_capacity(base.files.len());
+    let mut base_paths: HashSet<&str> = HashSet::with_capacity(base.files.len());
     for f in &base.files {
         if f.is_dir() {
             continue;
         }
+        base_paths.insert(f.path.as_str());
         if !tokens.is_empty() {
             let path_lc = f.path.to_lowercase();
             if !tokens.iter().all(|t| path_lc.contains(t)) {
@@ -376,6 +407,22 @@ pub async fn manifest_diff_targets(
                 }
             }
         }
+        // Target-only paths count as a diff: the tree renders them as `Removed` rows.
+        if !has_diff {
+            for path in other_by_path.keys() {
+                if base_paths.contains(*path) {
+                    continue;
+                }
+                if !tokens.is_empty() {
+                    let path_lc = path.to_lowercase();
+                    if !tokens.iter().all(|t| path_lc.contains(t)) {
+                        continue;
+                    }
+                }
+                has_diff = true;
+                break;
+            }
+        }
         if has_diff {
             matching_targets.push(ManifestRefShort {
                 depot_id: r.depot_id,
@@ -401,6 +448,7 @@ pub struct DeepDiffQuery {
 /// Deep manifest diff
 ///
 /// Like [`manifest_diff`], but a changed Unity file only counts when its structured diff is non-empty (normalization noise like PPtr renumbering and HingeJoint2D m_ConnectedAnchor float noise is dropped); DLLs stay fingerprint-level since decompiling is expensive.
+/// `Added`/`Removed` rows pass through as-is — no base-side content to structural-diff.
 /// Downloads both sides of every Unity candidate, so this is far pricier than `manifest_diff`.
 #[utoipa::path(
     get,
@@ -450,6 +498,22 @@ pub async fn manifest_diff_deep(
             Some(_) => {}
         }
     }
+    let base_paths: HashSet<&str> = base
+        .files
+        .iter()
+        .filter(|f| !f.is_dir())
+        .map(|f| f.path.as_str())
+        .collect();
+    let removed: Vec<ManifestDiffEntry> = target
+        .files
+        .iter()
+        .filter(|f| !f.is_dir() && !base_paths.contains(f.path.as_str()))
+        .map(|f| ManifestDiffEntry {
+            path: f.path.clone(),
+            status: ManifestDiffStatus::Removed,
+            size: Some(f.size),
+        })
+        .collect();
 
     // Private env pair for the sweep, evicted at checkpoints; the shared per-manifest cache never evicts.
     #[cfg(feature = "unity")]
@@ -475,6 +539,7 @@ pub async fn manifest_diff_deep(
         entries.push(ManifestDiffEntry {
             path,
             status: ManifestDiffStatus::Added,
+            size: None,
         });
     }
     tracing::info!(total_changed, "deep diff: starting sweep");
@@ -539,6 +604,7 @@ pub async fn manifest_diff_deep(
                 entries.push(ManifestDiffEntry {
                     path,
                     status: ManifestDiffStatus::Changed,
+                    size: None,
                 });
             }
         }
@@ -567,6 +633,7 @@ pub async fn manifest_diff_deep(
             "deep diff: checkpoint"
         );
     }
+    entries.extend(removed);
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     tracing::info!(
         total_changed,

@@ -29,6 +29,15 @@ import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
 import { ErrorBox } from "../components/ErrorBox";
 import { ExportButton } from "../components/ExportButton";
 import { formatBytes, formatDate } from "../lib/format";
+import {
+  buildTree,
+  fileExtension,
+  flattenTree,
+  mergeRemovedFiles,
+  NO_EXT,
+  type FlatRow,
+  type TreeNode,
+} from "../lib/manifestTree";
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { pinScroll } from "../lib/pinScroll";
@@ -396,157 +405,6 @@ function ManifestHeader({
   );
 }
 
-/// One node in the tree built from the flat manifest file list. `file` is
-/// set on leaves (files); for directories it stays null. `children` is
-/// keyed by name segment (sorted on flatten, not here).
-type TreeNode = {
-  name: string;
-  path: string;
-  children: Map<string, TreeNode>;
-  file: ManifestFile | null;
-  // Aggregate size of all files under this node — including the file
-  // itself for leaves. Computed once during build.
-  size: number;
-  // Number of file leaves under this node (1 if this node is itself a file).
-  fileCount: number;
-};
-
-// Sentinel for "file has no extension". Has to be non-empty (and not a
-// plausible real extension) so URL serialization round-trips it — the
-// previous "" got dropped by `split(",").filter(Boolean)` and the UI
-// chip became unselectable as a result.
-const NO_EXT = "__none__";
-
-function fileExtension(path: string): string {
-  // Only look at the last segment so a "." in a dir name doesn't count.
-  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  const name = slash >= 0 ? path.slice(slash + 1) : path;
-  // Unity serialized scenes (`level0`, `level42`, …) have no extension
-  // by convention but conceptually share a type. Bucket them as `level`
-  // so the extension filter treats them as a group.
-  if (/^level\d+$/.test(name)) return "level";
-  // Strip trailing version suffixes (libfoo.so.1, libfoo.so.1.2) before
-  // picking the extension so versioned shared libs bucket as "so".
-  const stripped = name.replace(/(?:\.\d+)+$/, "");
-  const dot = stripped.lastIndexOf(".");
-  if (dot <= 0) return NO_EXT;
-  return stripped.slice(dot + 1);
-}
-
-function buildTree(files: ManifestFile[]): TreeNode {
-  const root: TreeNode = {
-    name: "",
-    path: "",
-    children: new Map(),
-    file: null,
-    size: 0,
-    fileCount: 0,
-  };
-  for (const f of files) {
-    const parts = f.path.split("/");
-    let node = root;
-    for (let i = 0; i < parts.length; i++) {
-      const name = parts[i];
-      const isLeaf = i === parts.length - 1;
-      let child = node.children.get(name);
-      if (!child) {
-        child = {
-          name,
-          path: parts.slice(0, i + 1).join("/"),
-          children: new Map(),
-          file: null,
-          size: 0,
-          fileCount: 0,
-        };
-        node.children.set(name, child);
-      }
-      if (isLeaf) child.file = f;
-      node = child;
-    }
-  }
-  // Aggregate size + fileCount bottom-up.
-  const visit = (n: TreeNode) => {
-    if (n.file) {
-      n.size = n.file.size;
-      n.fileCount = 1;
-      return;
-    }
-    for (const c of n.children.values()) {
-      visit(c);
-      n.size += c.size;
-      n.fileCount += c.fileCount;
-    }
-  };
-  visit(root);
-  return root;
-}
-
-type FlatRow = {
-  node: TreeNode;
-  depth: number;
-  expanded: boolean;
-  hasChildren: boolean;
-};
-
-/// Walks the tree producing visible rows. Two modes:
-/// - No search (`matches == null`): dirs are expanded iff they're in
-///   `expanded`. Default collapsed.
-/// - Search (`matches != null`): only nodes leading to a match are returned,
-///   dirs along match paths are expanded by default, but `collapsed` (an
-///   explicit user collapse during search) opts out per-path.
-function flattenTree(
-  root: TreeNode,
-  expanded: Set<string>,
-  collapsed: Set<string>,
-  matches: Set<string> | null,
-): FlatRow[] {
-  const out: FlatRow[] = [];
-  // Auto-expand chains: a dir with exactly one child-dir as its only
-  // entry opens that child along with itself. The `collapsed` set lets
-  // the user opt out of auto-expansion for a specific path.
-  const walk = (node: TreeNode, depth: number, autoExpand: boolean) => {
-    const isRoot = depth < 0;
-    const hasChildren = node.children.size > 0;
-    const sorted = [...node.children.values()].sort((a, b) => {
-      const ad = a.file == null;
-      const bd = b.file == null;
-      if (ad !== bd) return ad ? -1 : 1;
-      // Numeric-aware so `level24` sorts before `level231` instead of
-      // lexicographically after it.
-      return a.name.localeCompare(b.name, undefined, { numeric: true });
-    });
-
-    if (!isRoot) {
-      if (matches && !nodeContainsMatch(node, matches)) return;
-      const userCollapsed = collapsed.has(node.path);
-      const isExpanded = matches
-        ? !userCollapsed
-        : userCollapsed
-          ? false
-          : autoExpand || expanded.has(node.path);
-      out.push({ node, depth, expanded: isExpanded, hasChildren });
-      if (!hasChildren) return;
-      if (!isExpanded) return;
-    }
-
-    const onlyChildAutoOpens = sorted.length === 1 && sorted[0].file == null;
-    for (const c of sorted) walk(c, depth + 1, onlyChildAutoOpens);
-  };
-  walk(root, -1, false);
-  return out;
-}
-
-/// True iff `node` is a match itself or has any descendant in `matches`.
-/// Walking each subtree is cheap because `matches` is the filtered file
-/// set; we walk paths that are already known to land somewhere useful.
-function nodeContainsMatch(node: TreeNode, matches: Set<string>): boolean {
-  if (node.file && matches.has(node.path)) return true;
-  for (const c of node.children.values()) {
-    if (nodeContainsMatch(c, matches)) return true;
-  }
-  return false;
-}
-
 /// Pin scroll across a tree mutation that may shrink the page.
 ///
 /// Browsers clamp scrollY to (scrollHeight - innerHeight) the moment a
@@ -734,20 +592,28 @@ function FilesPanel({
     staleTime: Infinity,
     gcTime: 10 * 60 * 1000,
   });
-  // Per-path diff status from the backend. `null` when no compare
+  // Per-path diff status of the base rows. `null` when no compare
   // target is active (or the query hasn't landed yet) — callers treat
   // that as "no diff filter". `has(path)` mirrors the old Set API,
   // and `get(path)` gives the colour (added/changed) for the row. Deep
   // results replace the fingerprint ones once available; until then the
   // fingerprint list shows so there's an immediate result.
+  const diffSource = deepCompare && deepQuery.data ? deepQuery.data : diffQuery.data;
   const diffStatus = useMemo<Map<string, ManifestDiffStatus> | null>(() => {
     if (diffTargets.size === 0) return null;
-    const source = deepCompare && deepQuery.data ? deepQuery.data : diffQuery.data;
-    if (!source) return null;
+    if (!diffSource) return null;
     const m = new Map<string, ManifestDiffStatus>();
-    for (const e of source) m.set(e.path, e.status);
+    for (const e of diffSource) {
+      if (e.status !== "removed") m.set(e.path, e.status);
+    }
     return m;
-  }, [diffTargets, diffQuery.data, deepQuery.data, deepCompare]);
+  }, [diffTargets, diffSource]);
+  // Target-only diff rows for the ghost leaves below; shares `diffSource`
+  // with `diffStatus` so both swap to deep results together.
+  const removedFiles = useMemo(() => {
+    if (diffTargets.size === 0) return [];
+    return diffSource ? diffSource.filter((e) => e.status === "removed") : [];
+  }, [diffTargets, diffSource]);
   // `initialData` (not `?? new Set()`) so the cache entry's reference is
   // stable across renders — otherwise the `flattenTree` useMemo below
   // would re-run on every render because its `expanded`/`collapsed`
@@ -768,7 +634,11 @@ function FilesPanel({
   }).data;
   const deferred = useDeferredValue(query);
 
-  const tree = useMemo(() => buildTree(allFiles), [allFiles]);
+  const tree = useMemo(() => {
+    const tree = buildTree(allFiles);
+    if (removedFiles.length > 0) mergeRemovedFiles(tree, removedFiles);
+    return tree;
+  }, [allFiles, removedFiles]);
 
   // Extensions are counted over the files that survive the *other*
   // filters (path search + diff filter) but *not* the extension filter
@@ -787,8 +657,16 @@ function FilesPanel({
       const ext = fileExtension(f.path);
       counts.set(ext, (counts.get(ext) ?? 0) + 1);
     }
+    for (const e of removedFiles) {
+      if (tokens.length > 0) {
+        const path = e.path.toLowerCase();
+        if (!tokens.every((t) => path.includes(t))) continue;
+      }
+      const ext = fileExtension(e.path);
+      counts.set(ext, (counts.get(ext) ?? 0) + 1);
+    }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [allFiles, diffStatus, deferred]);
+  }, [allFiles, diffStatus, removedFiles, deferred]);
 
   const matches = useMemo<Set<string> | null>(() => {
     const tokens = deferred.toLowerCase().split(/\s+/).filter(Boolean);
@@ -803,8 +681,16 @@ function FilesPanel({
       if (hasDiffFilter && !diffStatus!.has(f.path)) continue;
       m.add(f.path);
     }
+    // Removed rows are diff rows by construction, so only the path and
+    // extension filters apply to them.
+    for (const e of removedFiles) {
+      const path = e.path.toLowerCase();
+      if (tokens.length > 0 && !tokens.every((t) => path.includes(t))) continue;
+      if (hasExtFilter && !extFilter.has(fileExtension(e.path))) continue;
+      m.add(e.path);
+    }
     return m;
-  }, [allFiles, deferred, extFilter, diffStatus]);
+  }, [allFiles, deferred, extFilter, diffStatus, removedFiles]);
 
   const rows = useMemo(
     () => flattenTree(tree, expanded, collapsed, matches),
@@ -1001,6 +887,7 @@ function FilesPanel({
         // the file-view (with `compare_to` kept), where the user
         // picks which one to diff against from the inline list.
         singleDiffTarget={diffRefs.length === 1 ? diffRefs[0] : undefined}
+        ghostTarget={diffRefs.length > 0 ? diffRefs[0] : undefined}
         diffStatus={diffStatus}
         onToggle={toggleDir}
       />
@@ -1016,6 +903,7 @@ function TreeList({
   branch,
   compareTo,
   singleDiffTarget,
+  ghostTarget,
   diffStatus,
   onToggle,
 }: {
@@ -1026,6 +914,7 @@ function TreeList({
   branch: string;
   compareTo: string | undefined;
   singleDiffTarget: ManifestRef | undefined;
+  ghostTarget: ManifestRef | undefined;
   diffStatus: Map<string, ManifestDiffStatus> | null;
   onToggle: (path: string, currentlyExpanded: boolean, anchor: HTMLElement | null) => void;
 }) {
@@ -1091,6 +980,7 @@ function TreeList({
                 branch={branch}
                 compareTo={compareTo}
                 singleDiffTarget={singleDiffTarget}
+                ghostTarget={ghostTarget}
                 fileDiffStatus={row.node.file ? (diffStatus?.get(row.node.path) ?? null) : null}
                 onToggle={onToggle}
               />
@@ -1116,6 +1006,7 @@ const TreeRow = memo(function TreeRow({
   branch,
   compareTo,
   singleDiffTarget,
+  ghostTarget,
   fileDiffStatus,
   onToggle,
 }: {
@@ -1128,6 +1019,7 @@ const TreeRow = memo(function TreeRow({
   branch: string;
   compareTo: string | undefined;
   singleDiffTarget: ManifestRef | undefined;
+  ghostTarget: ManifestRef | undefined;
   /// Per-row diff status. `null` outside compare mode and for plain
   /// `changed` files keeps the default sky link colour; `"added"`
   /// recolours the row so the user can tell at a glance that the
@@ -1140,11 +1032,20 @@ const TreeRow = memo(function TreeRow({
   // (files have no chevron; we reserve the same slot so names align).
   const indentPx = 12 + depth * 16;
   // Sky is the default file-link colour; emerald flags "added in base"
-  // so the user can scan added vs. changed entries at a glance. We pin
-  // the colour on the <Link> rather than wrapping the row so the link
-  // text — including the size column — stays consistently coloured.
-  const linkColorClass = fileDiffStatus === "added" ? "text-emerald-400" : "text-sky-400";
-  const sizeColorClass = fileDiffStatus === "added" ? "text-emerald-400/70" : "text-slate-400";
+  // so the user can scan added vs. changed entries at a glance. Rose
+  // marks a target-only row — the file is missing from this manifest.
+  // We pin the colour on the <Link> rather than wrapping the row so the
+  // link text — including the size column — stays consistently coloured.
+  const linkColorClass = node.removed
+    ? "text-rose-400"
+    : fileDiffStatus === "added"
+      ? "text-emerald-400"
+      : "text-sky-400";
+  const sizeColorClass = node.removed
+    ? "text-rose-400/70"
+    : fileDiffStatus === "added"
+      ? "text-emerald-400/70"
+      : "text-slate-400";
 
   if (isDir) {
     return (
@@ -1171,20 +1072,8 @@ const TreeRow = memo(function TreeRow({
   // File row — clickable link. Add the chevron-slot width to indent so
   // file names line up with sibling dir names (which have a chevron).
   const file = node.file!;
-  const fileLink = singleDiffTarget ? (
-    <Link
-      to="/apps/$appid/depots/$depotId/manifests/$manifestId/diff"
-      params={{ appid, depotId, manifestId }}
-      search={{
-        branch: branch === "public" ? undefined : branch,
-        path: file.path,
-        target_depot_id: singleDiffTarget.depot_id,
-        target_manifest_id: singleDiffTarget.manifest_id,
-        target_branch: singleDiffTarget.branch === "public" ? undefined : singleDiffTarget.branch,
-      }}
-      className={`flex items-baseline gap-1 py-1.5 pr-3 ${linkColorClass}`}
-      style={{ paddingLeft: indentPx + 16 }}
-    >
+  const rowBody = (
+    <>
       <span className="text-sm break-all">{node.name}</span>
       {file.linktarget && (
         <span className="font-mono text-xs text-slate-500"> → {file.linktarget}</span>
@@ -1193,29 +1082,60 @@ const TreeRow = memo(function TreeRow({
       <span className={`w-20 text-right text-xs whitespace-nowrap tabular-nums ${sizeColorClass}`}>
         <Bytes value={file.size} />
       </span>
-    </Link>
-  ) : (
-    <Link
-      to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
-      params={{ appid, depotId, manifestId }}
-      search={{
-        branch: branch === "public" ? undefined : branch,
-        path: file.path,
-        compare_to: compareTo,
-      }}
-      className={`flex items-baseline gap-1 py-1.5 pr-3 ${linkColorClass}`}
-      style={{ paddingLeft: indentPx + 16 }}
-    >
-      <span className="text-sm break-all">{node.name}</span>
-      {file.linktarget && (
-        <span className="font-mono text-xs text-slate-500"> → {file.linktarget}</span>
-      )}
-      <span className="ml-auto w-14" aria-hidden="true" />
-      <span className={`w-20 text-right text-xs whitespace-nowrap tabular-nums ${sizeColorClass}`}>
-        <Bytes value={file.size} />
-      </span>
-    </Link>
+    </>
   );
+  const rowClass = `flex items-baseline gap-1 py-1.5 pr-3 ${linkColorClass}`;
+  const rowStyle = { paddingLeft: indentPx + 16 };
+  const fileLink =
+    node.removed && ghostTarget ? (
+      <Link
+        to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
+        params={{
+          appid,
+          depotId: String(ghostTarget.depot_id),
+          manifestId: ghostTarget.manifest_id,
+        }}
+        search={{
+          branch: ghostTarget.branch === "public" ? undefined : ghostTarget.branch,
+          path: file.path,
+        }}
+        title="Only in the compare target — opens there"
+        className={rowClass}
+        style={rowStyle}
+      >
+        {rowBody}
+      </Link>
+    ) : singleDiffTarget ? (
+      <Link
+        to="/apps/$appid/depots/$depotId/manifests/$manifestId/diff"
+        params={{ appid, depotId, manifestId }}
+        search={{
+          branch: branch === "public" ? undefined : branch,
+          path: file.path,
+          target_depot_id: singleDiffTarget.depot_id,
+          target_manifest_id: singleDiffTarget.manifest_id,
+          target_branch: singleDiffTarget.branch === "public" ? undefined : singleDiffTarget.branch,
+        }}
+        className={rowClass}
+        style={rowStyle}
+      >
+        {rowBody}
+      </Link>
+    ) : (
+      <Link
+        to="/apps/$appid/depots/$depotId/manifests/$manifestId/file"
+        params={{ appid, depotId, manifestId }}
+        search={{
+          branch: branch === "public" ? undefined : branch,
+          path: file.path,
+          compare_to: compareTo,
+        }}
+        className={rowClass}
+        style={rowStyle}
+      >
+        {rowBody}
+      </Link>
+    );
   return <div className="border-b border-slate-800 hover:bg-slate-800/40">{fileLink}</div>;
 });
 

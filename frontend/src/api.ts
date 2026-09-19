@@ -205,11 +205,13 @@ export async function fetchFileDiff(
   return r.text();
 }
 
-export type ManifestDiffStatus = "added" | "changed";
+export type ManifestDiffStatus = "added" | "changed" | "removed";
 
 export type ManifestDiffEntry = {
   path: string;
   status: ManifestDiffStatus;
+  /// Only set on `removed` rows: the file's size in the compare target.
+  size?: number;
 };
 
 export async function fetchManifestDiff(
