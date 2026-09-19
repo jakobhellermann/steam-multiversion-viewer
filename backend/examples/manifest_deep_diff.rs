@@ -7,6 +7,10 @@
 //! VFS instead of the download manager, so run it once warm (chunks
 //! already on disk) to measure the pure diff work.
 //!
+//! `FILES` (whitespace-separated path substrings) switches to
+//! inspection mode: skip the sweep, diff every matching
+//! deep-comparable path, print its structured tree.
+//!
 //! `cargo run --release --example manifest_deep_diff`
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,6 +68,10 @@ async fn main() -> Result<()> {
     let base_manifest: u64 = env_or("BASE_MANIFEST", BASE_MANIFEST);
     let target_manifest: u64 = env_or("TARGET_MANIFEST", TARGET_MANIFEST);
     let branch = std::env::var("BRANCH").unwrap_or_else(|_| BRANCH.to_string());
+    let files: Vec<String> = std::env::var("FILES")
+        .map(|f| f.split_whitespace().map(str::to_owned).collect())
+        .unwrap_or_default();
+    let keep_trees = !files.is_empty();
 
     let auth = Arc::new(
         LazyCachedAuth::prepare(
@@ -95,25 +103,41 @@ async fn main() -> Result<()> {
     }
     let mut changed = 0usize;
     let mut candidates: Vec<String> = Vec::new();
-    for f in &base.manifest().files {
-        if f.is_dir() {
-            continue;
+    if keep_trees {
+        for f in &base.manifest().files {
+            if f.is_dir() || !files.iter().any(|t| f.path.contains(t.as_str())) {
+                continue;
+            }
+            match target_by_path.get(f.path.as_str()) {
+                Some(_) if is_deep_comparable(&f.path) => candidates.push(f.path.clone()),
+                Some(_) => println!("  ? not deep-comparable: {}", f.path),
+                None => println!("  ? not in target manifest: {}", f.path),
+            }
         }
-        let Some(tf) = target_by_path.get(f.path.as_str()) else {
-            continue;
-        };
-        if content_id(f) == content_id(tf) {
-            continue;
+        if candidates.is_empty() {
+            println!("no paths matching {files:?}");
         }
-        changed += 1;
-        if is_deep_comparable(&f.path) {
-            candidates.push(f.path.clone());
+    } else {
+        for f in &base.manifest().files {
+            if f.is_dir() {
+                continue;
+            }
+            let Some(tf) = target_by_path.get(f.path.as_str()) else {
+                continue;
+            };
+            if content_id(f) == content_id(tf) {
+                continue;
+            }
+            changed += 1;
+            if is_deep_comparable(&f.path) {
+                candidates.push(f.path.clone());
+            }
         }
+        println!(
+            "changed files: {changed}, of which deep-comparable (unity): {}",
+            candidates.len()
+        );
     }
-    println!(
-        "changed files: {changed}, of which deep-comparable (unity): {}",
-        candidates.len()
-    );
 
     // Env once per side (matches the route's cached scratch env).
     let base_gf = SteamDepotGameFiles::new(base.clone())?;
@@ -128,6 +152,44 @@ async fn main() -> Result<()> {
         target_gf,
         TypeTreeCache::new(TpkTypeTreeBlob::embedded()),
     ));
+
+    if keep_trees {
+        for path in candidates {
+            let started = Instant::now();
+            let base_env = base_env.clone();
+            let target_env = target_env.clone();
+            let base_data_dir = base_data_dir.clone();
+            let target_data_dir = target_data_dir.clone();
+            let (path, result) = tokio::task::spawn_blocking(move || {
+                let result = diff_one(
+                    &base_env,
+                    &base_data_dir,
+                    &target_env,
+                    &target_data_dir,
+                    &path,
+                );
+                (path, result)
+            })
+            .await
+            .expect("blocking task panicked");
+            match result {
+                Ok(tree) => {
+                    println!(
+                        "\n=== {path}  ({:?}, {})",
+                        started.elapsed(),
+                        if tree.has_no_changes() {
+                            "no changes"
+                        } else {
+                            "has changes"
+                        }
+                    );
+                    print_tree(&tree.root, 0);
+                }
+                Err(err) => eprintln!("  ! {path}: {err}"),
+            }
+        }
+        return Ok(());
+    }
 
     let concurrency: usize = std::env::var("CONCURRENCY")
         .ok()
@@ -200,6 +262,26 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_tree(node: &transform::structured::Node, depth: usize) {
+    use transform::structured::NodeStatus;
+
+    let status = match node.status {
+        Some(NodeStatus::Changed) => " (changed)",
+        Some(NodeStatus::Added) => " (added)",
+        Some(NodeStatus::Removed) => " (removed)",
+        _ => "",
+    };
+    let badge = node
+        .badge
+        .as_deref()
+        .map(|b| format!("  [{b}]"))
+        .unwrap_or_default();
+    println!("{}{}{status}{badge}", "  ".repeat(depth), node.label);
+    for child in &node.children {
+        print_tree(child, depth + 1);
+    }
 }
 
 fn diff_one(
