@@ -29,7 +29,10 @@ function readRows(): Array<[string, string]> {
     });
 }
 
-function mockDepotHistory() {
+/// App info with one depot whose manifests are the given
+/// `[branch, manifest_id]` pairs, no extras, unity game info for every
+/// manifest.
+function mockApp(manifests: Array<[string, string]>) {
   server.use(
     http.get(`/api/apps/${APPID}`, () =>
       HttpResponse.json({
@@ -50,11 +53,12 @@ function mockDepotHistory() {
             osarch: null,
             language: null,
             from_app_id: null,
-            manifests: [
-              { branch: "public", manifest_id: "200", size: 0, download_size: 0 },
-              { branch: "public", manifest_id: "150", size: 0, download_size: 0 },
-              { branch: "public", manifest_id: "100", size: 0, download_size: 0 },
-            ],
+            manifests: manifests.map(([branch, manifest_id]) => ({
+              branch,
+              manifest_id,
+              size: 0,
+              download_size: 0,
+            })),
           },
         ],
       }),
@@ -70,7 +74,11 @@ function mockDepotHistory() {
 
 describe("depot history route", () => {
   it("renders one row per version with transition counts, linking changed rows to the compare view", async () => {
-    mockDepotHistory();
+    mockApp([
+      ["public", "200"],
+      ["public", "150"],
+      ["public", "100"],
+    ]);
     let requestBody: unknown;
     server.use(
       http.post(`/api/apps/${APPID}/manifests/history`, async ({ request }) => {
@@ -114,7 +122,8 @@ describe("depot history route", () => {
     await screen.findByText("TestApp");
     await screen.findByText("+2");
 
-    // The tracked set from app info is the walk input, newest first.
+    // The tracked set from app info is the walk input, newest first,
+    // and carries only the wire fields (no client-only `branches`).
     expect(requestBody).toEqual({
       manifests: [
         { depot_id: DEPOT, manifest_id: "200", branch: "public" },
@@ -131,5 +140,58 @@ describe("depot history route", () => {
     ]);
     // Game version column resolves per version.
     expect(screen.getAllByText("v9.9.9")).toHaveLength(3);
+  });
+
+  it("keeps a version that both branch heads point at under the public-only default filter", async () => {
+    mockApp([
+      ["public", "200"],
+      ["public-beta", "200"],
+      ["public", "100"],
+    ]);
+    let requestBody: unknown;
+    server.use(
+      http.post(`/api/apps/${APPID}/manifests/history`, async ({ request }) => {
+        requestBody = await request.json();
+        return HttpResponse.json([
+          {
+            depot_id: DEPOT,
+            manifest_id: "200",
+            branch: "public",
+            creation_time: 3000,
+            previous: { depot_id: DEPOT, manifest_id: "100", branch: "public" },
+            added: 1,
+            removed: 0,
+            changed: 0,
+          },
+          {
+            depot_id: DEPOT,
+            manifest_id: "100",
+            branch: "public",
+            creation_time: 1000,
+            added: 0,
+            removed: 0,
+            changed: 0,
+          },
+        ]);
+      }),
+    );
+
+    renderRoute({ initialEntries: [`/apps/${APPID}/depots/${DEPOT}/history`] });
+
+    await screen.findByText("+1");
+
+    // Gid 200 is the public AND the beta head; the default filter hides
+    // beta, but the version still participates through its public
+    // branch — and rides the wire through it.
+    expect(requestBody).toEqual({
+      manifests: [
+        { depot_id: DEPOT, manifest_id: "200", branch: "public" },
+        { depot_id: DEPOT, manifest_id: "100", branch: "public" },
+      ],
+    });
+    expect(readRows()).toEqual([
+      ["+1", `/apps/${APPID}/depots/${DEPOT}/manifests/200?compare_to=100`],
+      ["initial", `/apps/${APPID}/depots/${DEPOT}/manifests/100`],
+    ]);
   });
 });

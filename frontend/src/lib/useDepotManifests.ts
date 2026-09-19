@@ -10,37 +10,58 @@ import {
   type ManifestRef,
 } from "../api";
 
-/// All tracked manifests of one depot: the app-info entries plus the
-/// user-tracked extras, deduped by manifest id — first occurrence keeps
-/// its position, later ones only update the branch. `seed` adds a
-/// manifest that neither list contains yet (e.g. a deep-linked one).
+/// One tracked manifest of a depot. A gid can sit on several branches
+/// at once (public and beta heads pointing at the same build):
+/// `branches` lists them all; `branch` is the single one used on the
+/// wire — `public` when reachable through it, else the first seen.
+export type DepotManifest = ManifestRef & { branches: string[] };
+
+/// The wire form of a [`DepotManifest`]: the manifest ref without the
+/// client-only `branches`.
+export function manifestRefOf(manifest: DepotManifest): ManifestRef {
+  return {
+    depot_id: manifest.depot_id,
+    manifest_id: manifest.manifest_id,
+    branch: manifest.branch,
+  };
+}
+
+/// All tracked manifests of one depot — the app-info heads plus the
+/// user-tracked extras, one entry per gid, every branch the gid is
+/// reachable through attached. `seed` adds a gid neither list
+/// contains (e.g. a deep-linked one).
 export function depotManifestRefs(
   appInfo: AppInfo | undefined,
   extras: ExtraManifestEntry[] | undefined,
   depotId: number,
   seed?: { manifest_id: string; branch: string },
-): ManifestRef[] {
-  const refs = new Map<string, ManifestRef>();
+): DepotManifest[] {
+  const byId = new Map<string, DepotManifest>();
+  const add = (manifestId: string, branch: string) => {
+    let manifest = byId.get(manifestId);
+    if (!manifest) {
+      manifest = { depot_id: depotId, manifest_id: manifestId, branch, branches: [] };
+      byId.set(manifestId, manifest);
+    }
+    if (!manifest.branches.includes(branch)) {
+      manifest.branches.push(branch);
+    }
+  };
   if (seed) {
-    refs.set(seed.manifest_id, { depot_id: depotId, ...seed });
+    add(seed.manifest_id, seed.branch);
   }
   const depot = appInfo?.depots.find((entry) => entry.depot_id === depotId);
   for (const manifest of depot?.manifests ?? []) {
-    refs.set(manifest.manifest_id, {
-      depot_id: depotId,
-      manifest_id: manifest.manifest_id,
-      branch: manifest.branch,
-    });
+    add(manifest.manifest_id, manifest.branch);
   }
-  for (const manifest of extras ?? []) {
-    if (manifest.depot_id !== depotId) continue;
-    refs.set(manifest.manifest_id, {
-      depot_id: depotId,
-      manifest_id: manifest.manifest_id,
-      branch: manifest.branch ?? "public",
-    });
+  for (const extra of extras ?? []) {
+    if (extra.depot_id !== depotId) continue;
+    add(extra.manifest_id, extra.branch ?? "public");
   }
-  return [...refs.values()];
+  return [...byId.values()].map((manifest) => ({
+    ...manifest,
+    branch: manifest.branches.includes("public") ? "public" : manifest.branch,
+  }));
 }
 
 /// Queries behind [`depotManifestRefs`]: the app's info and tracked

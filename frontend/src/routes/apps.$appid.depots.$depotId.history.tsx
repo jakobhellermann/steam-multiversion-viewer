@@ -8,7 +8,7 @@ import { BranchFilter } from "../components/BranchFilter";
 import { ErrorBox } from "../components/ErrorBox";
 import { formatDate } from "../lib/format";
 import { useBranchFilter } from "../lib/useBranchFilter";
-import { useDepotManifests } from "../lib/useDepotManifests";
+import { manifestRefOf, useDepotManifests } from "../lib/useDepotManifests";
 
 export const Route = createFileRoute("/apps/$appid/depots/$depotId/history")({
   component: DepotHistoryPage,
@@ -24,14 +24,19 @@ function DepotHistoryPage() {
   // The branch filter decides which tracked versions take part in the
   // walk (it filters the request, not just the rows): without it, a
   // beta between two public builds would chain the transitions
-  // public → beta → public and report phantom changes.
+  // public → beta → public and report phantom changes. A version
+  // participates while ANY of its branches is visible — a build the
+  // public and beta heads point at together is a public version.
   const branches = useMemo(
-    () => [...new Set(manifests.map((manifest) => manifest.branch))].sort(),
+    () => [...new Set(manifests.flatMap((manifest) => manifest.branches))].sort(),
     [manifests],
   );
   const branchFilter = useBranchFilter(appid, branches);
   const filtered = useMemo(
-    () => manifests.filter((manifest) => !branchFilter.hidden.has(manifest.branch)),
+    () =>
+      manifests.filter((manifest) =>
+        manifest.branches.some((branch) => !branchFilter.hidden.has(branch)),
+      ),
     [branchFilter.hidden, manifests],
   );
 
@@ -41,7 +46,7 @@ function DepotHistoryPage() {
       appid,
       filtered.map((manifest) => `${manifest.depot_id}/${manifest.manifest_id}`).join(","),
     ],
-    queryFn: () => fetchManifestHistory(appid, filtered),
+    queryFn: () => fetchManifestHistory(appid, filtered.map(manifestRefOf)),
     enabled: ready && filtered.length > 0,
     staleTime: Infinity,
   });
@@ -202,11 +207,31 @@ function hasChanges(entry: ManifestHistoryEntry): boolean {
 function Transition({ entry }: { entry: ManifestHistoryEntry }) {
   if (!entry.previous) return <span className="text-slate-500">initial</span>;
   if (!hasChanges(entry)) return <span className="text-slate-500">unchanged</span>;
+  const parts: ReactNode[] = [];
+  if (entry.changed > 0) {
+    parts.push(
+      <span key="changed" className="text-amber-300">
+        {entry.changed}
+      </span>,
+    );
+  }
+  if (entry.added > 0) {
+    parts.push(
+      <span key="added" className="text-emerald-300">
+        +{entry.added}
+      </span>,
+    );
+  }
+  if (entry.removed > 0) {
+    parts.push(
+      <span key="removed" className="text-rose-300">
+        −{entry.removed}
+      </span>,
+    );
+  }
   return (
     <span className="tabular-nums">
-      {entry.added > 0 && <span className="text-emerald-300">+{entry.added} </span>}
-      {entry.removed > 0 && <span className="text-rose-300">−{entry.removed} </span>}
-      {entry.changed > 0 && <span className="text-amber-300">~{entry.changed}</span>}
+      {parts.flatMap((part, index) => (index === 0 ? [part] : [" ", part]))}
     </span>
   );
 }

@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { describe, expect, test } from "vitest";
 import type { AppInfo, DepotEntry, ExtraManifestEntry } from "../api";
-import { depotManifestRefs } from "./useDepotManifests";
+import { depotManifestRefs, manifestRefOf } from "./useDepotManifests";
 
 function depot(depotId: number, manifests: Array<[string, string]>): DepotEntry {
   return {
@@ -40,46 +40,72 @@ function extra(depotId: number, manifestId: string, branch: string | null): Extr
 }
 
 describe("depotManifestRefs", () => {
-  test("merges app-info and extras of the depot, extras winning the branch", () => {
+  test("collects every branch a gid is reachable through; public wins the wire branch", () => {
     const refs = depotManifestRefs(
       appInfo([
         depot(7, [
           ["public", "A"],
+          ["public-beta", "A"],
           ["public", "B"],
         ]),
       ]),
-      [extra(7, "A", "beta"), extra(8, "C", null), extra(7, "C2", null)],
+      [extra(7, "A", "beta"), extra(8, "D", null)],
       7,
     );
     expect(refs).toEqual([
-      { depot_id: 7, manifest_id: "A", branch: "beta" },
-      { depot_id: 7, manifest_id: "B", branch: "public" },
-      { depot_id: 7, manifest_id: "C2", branch: "public" },
+      {
+        depot_id: 7,
+        manifest_id: "A",
+        branch: "public",
+        branches: ["public", "public-beta", "beta"],
+      },
+      { depot_id: 7, manifest_id: "B", branch: "public", branches: ["public"] },
     ]);
   });
 
-  test("seed survives when no list contains it", () => {
+  test("a beta-only gid keeps its branch", () => {
+    const refs = depotManifestRefs(
+      appInfo([depot(7, [["public", "A"]])]),
+      [extra(7, "C", "beta")],
+      7,
+    );
+    expect(refs).toEqual([
+      { depot_id: 7, manifest_id: "A", branch: "public", branches: ["public"] },
+      { depot_id: 7, manifest_id: "C", branch: "beta", branches: ["beta"] },
+    ]);
+  });
+
+  test("a seed gid unseen by both lists joins with its branch", () => {
     const refs = depotManifestRefs(appInfo([depot(7, [["public", "A"]])]), [], 7, {
       manifest_id: "Z",
       branch: "beta",
     });
     expect(refs).toEqual([
-      { depot_id: 7, manifest_id: "Z", branch: "beta" },
-      { depot_id: 7, manifest_id: "A", branch: "public" },
+      { depot_id: 7, manifest_id: "Z", branch: "beta", branches: ["beta"] },
+      { depot_id: 7, manifest_id: "A", branch: "public", branches: ["public"] },
     ]);
   });
 
-  test("seed known to app-info keeps the list entry's branch", () => {
-    const refs = depotManifestRefs(appInfo([depot(7, [["beta", "A"]])]), [], 7, {
+  test("a seed branch merges into a gid the lists also know", () => {
+    const refs = depotManifestRefs(appInfo([depot(7, [["public", "A"]])]), [], 7, {
       manifest_id: "A",
-      branch: "public",
+      branch: "beta",
     });
-    expect(refs).toEqual([{ depot_id: 7, manifest_id: "A", branch: "beta" }]);
+    expect(refs).toEqual([
+      { depot_id: 7, manifest_id: "A", branch: "public", branches: ["beta", "public"] },
+    ]);
   });
+});
 
-  test("no app-info and no extras still yields the seed", () => {
+describe("manifestRefOf", () => {
+  test("drops the client-only branches", () => {
     expect(
-      depotManifestRefs(undefined, undefined, 7, { manifest_id: "Z", branch: "public" }),
-    ).toEqual([{ depot_id: 7, manifest_id: "Z", branch: "public" }]);
+      manifestRefOf({
+        depot_id: 7,
+        manifest_id: "A",
+        branch: "public",
+        branches: ["public", "beta"],
+      }),
+    ).toEqual({ depot_id: 7, manifest_id: "A", branch: "public" });
   });
 });

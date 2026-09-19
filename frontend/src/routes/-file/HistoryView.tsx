@@ -16,6 +16,7 @@ import {
 import { ErrorBox } from "../../components/ErrorBox";
 import { BranchFilter } from "../../components/BranchFilter";
 import { formatDate } from "../../lib/format";
+import { manifestRefOf, type DepotManifest } from "../../lib/useDepotManifests";
 import { useBranchFilter } from "../../lib/useBranchFilter";
 
 /// Per-status text color. Follows the diff conventions (added = new side
@@ -46,7 +47,7 @@ export function HistoryView({
   appid: number;
   appidParam: string;
   current: ManifestRef;
-  previous: ManifestRef[];
+  previous: DepotManifest[];
   path: string;
   nodeId?: string;
   statuses: ManifestStatusEntry[] | undefined;
@@ -57,18 +58,24 @@ export function HistoryView({
   inputsReady: boolean;
 }) {
   const [onlyChanged, setOnlyChanged] = useState(false);
+  // `previous` carries every branch a version is reachable through;
+  // a version participates in the walk while ANY of them is visible.
   const branches = useMemo(
-    () => [...new Set(previous.map((manifest) => manifest.branch))].sort(),
+    () => [...new Set(previous.flatMap((manifest) => manifest.branches))].sort(),
     [previous],
   );
   const branchFilter = useBranchFilter(appid, branches);
   const filteredPrevious = useMemo(
-    () => previous.filter((manifest) => !branchFilter.hidden.has(manifest.branch)),
+    () =>
+      previous.filter((manifest) =>
+        manifest.branches.some((branch) => !branchFilter.hidden.has(branch)),
+      ),
     [branchFilter.hidden, previous],
   );
   const historyQuery = useQuery({
     queryKey: ["file-history", appid, current, filteredPrevious, path, nodeId],
-    queryFn: () => fetchFileHistory(appid, current, filteredPrevious, path, nodeId),
+    queryFn: () =>
+      fetchFileHistory(appid, current, filteredPrevious.map(manifestRefOf), path, nodeId),
     enabled: path.length > 0 && inputsReady,
     staleTime: Infinity,
   });
