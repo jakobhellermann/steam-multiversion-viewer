@@ -426,11 +426,9 @@ function Transition({
       {deep.phase === "failed" && (
         <>
           {" "}
-          <CircleAlert
-            size={11}
-            className="inline-block text-rose-400 align-[-2px]"
-            title="deep compare failed for this transition"
-          />
+          <CircleAlert size={11} className="inline-block text-rose-400 align-[-2px]">
+            <title>deep compare failed for this transition</title>
+          </CircleAlert>
         </>
       )}
     </span>
