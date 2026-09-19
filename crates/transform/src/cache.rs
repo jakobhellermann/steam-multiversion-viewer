@@ -61,6 +61,18 @@ impl Transformer {
             Self::Dll => "text/x-csharp",
         }
     }
+
+    /// Human-readable name for route-layer error messages.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Cli(t) => t.cmd,
+            #[cfg(feature = "unity")]
+            Self::UnitySerialized => "unity serialized file",
+            #[cfg(feature = "unity")]
+            Self::UnityBundle => "unity bundle",
+            Self::Dll => ".NET assembly",
+        }
+    }
 }
 
 #[derive(Debug)]

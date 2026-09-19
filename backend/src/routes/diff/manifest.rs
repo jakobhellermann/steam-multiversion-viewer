@@ -497,7 +497,7 @@ pub async fn manifest_diff_deep(
                     let envs = envs
                         .as_ref()
                         .expect("is_deep_comparable implies unity_envs was built");
-                    return match super::structured::deep_unity_diff(
+                    return match super::structured::deep_structured_diff(
                         state,
                         appid,
                         depot_id,
@@ -615,21 +615,9 @@ fn open_manifests_concurrently<'a>(
     fu
 }
 
-/// Which file types the deep filter structural-diffs: Unity serialized files and bundles (DLLs stay fingerprint-level; decompiling is expensive).
-pub fn is_deep_comparable(path: &str) -> bool {
-    #[cfg(feature = "unity")]
-    {
-        matches!(
-            transform::tools::transformer_for(path, None),
-            Some(transform::Transformer::UnitySerialized | transform::Transformer::UnityBundle)
-        )
-    }
-    #[cfg(not(feature = "unity"))]
-    {
-        let _ = path;
-        false
-    }
-}
+/// Which file types the deep filter structural-diffs — see
+/// [`super::structured::is_deep_comparable`] for the definition.
+pub use super::structured::is_deep_comparable;
 
 #[cfg(test)]
 mod tests {

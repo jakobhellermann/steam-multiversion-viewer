@@ -320,13 +320,15 @@ pub(super) fn unity_env(
     branch: &str,
     snapshot: Arc<Snapshot>,
 ) -> Result<(Arc<Environment>, String), ApiError> {
-    let scratch = state
-        .manifest_cache
-        .scratch(appid, depot_id, manifest_id, branch);
-    let unity = scratch
-        .unity(snapshot)
-        .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
-    Ok((unity.env.clone(), unity.data_dir()))
+    let (scratch, data_dir) =
+        crate::routes::unity::scratch_side(state, appid, depot_id, manifest_id, branch, snapshot)?;
+    // Callers only need the env; the scratch handle stays owned here.
+    let Some(unity) = scratch.unity_already_initialized() else {
+        return Err(ApiError::unsupported_media_type(
+            "manifest is not a unity game",
+        ));
+    };
+    Ok((Arc::clone(&unity.env), data_dir))
 }
 
 /// Read a file's bytes + manifest-recorded sha1; the sha keys the decompile cache, so it must match the actual bytes.
@@ -411,9 +413,19 @@ pub(super) fn evict_cache(envs: &mut UnityEnvPair) {
     }
 }
 
+/// Which file types the deep filter structural-diffs: whatever the
+/// caps table marks deep-comparable. Lives next to
+/// [`deep_structured_diff`] because the two must stay in sync — its
+/// fallthrough panics for kinds that got marked here without a
+/// dispatch arm.
+pub fn is_deep_comparable(path: &str) -> bool {
+    transform::tools::transformer_for(path, None)
+        .is_some_and(|t| crate::routes::formats::capabilities(&t).deep_comparable)
+}
+
 #[cfg(feature = "unity")]
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn deep_unity_diff(
+pub(super) async fn deep_structured_diff(
     state: &AppState,
     appid: AppId,
     depot_id: DepotId,

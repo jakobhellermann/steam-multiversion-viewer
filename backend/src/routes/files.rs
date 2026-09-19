@@ -230,13 +230,8 @@ pub async fn manifest_file(
 }
 
 fn rich_view_for(path: &str, bytes: Option<&[u8]>) -> Option<RichView> {
-    use transform::Transformer;
-    match transform::tools::transformer_for(path, bytes)? {
-        Transformer::Cli(_) => Some(RichView::Transformed),
-        #[cfg(feature = "unity")]
-        Transformer::UnitySerialized | Transformer::UnityBundle => Some(RichView::Structured),
-        Transformer::Dll => Some(RichView::Structured),
-    }
+    let t = transform::tools::transformer_for(path, bytes)?;
+    crate::routes::formats::capabilities(&t).rich_view
 }
 
 pub(super) fn hex_encode(bytes: [u8; 20]) -> String {

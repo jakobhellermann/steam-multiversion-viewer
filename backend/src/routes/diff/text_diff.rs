@@ -17,8 +17,6 @@ use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::diff_label;
-#[cfg(feature = "unity")]
-use super::structured::unity_env;
 use crate::routes::Result;
 use crate::routes::files::FileViewQuery;
 use crate::routes::library::ManifestRef;
@@ -118,20 +116,14 @@ async fn resolve_diff_text(
     let (file_path, file_sha, chunks_for_dl) = file_download_info(&snapshot, path)?;
     let transformer = transform::tools::transformer_for(&file_path, None);
 
-    // These formats have no single text dump; bail before downloading anything.
-    match transformer {
-        Some(transform::Transformer::Dll) => {
-            return Err(ApiError::unsupported_media_type(
-                ".NET assemblies have no text-diff representation yet",
-            ));
-        }
-        #[cfg(feature = "unity")]
-        Some(transform::Transformer::UnityBundle) => {
-            return Err(ApiError::unsupported_media_type(
-                "Unity bundles have no text-diff representation yet",
-            ));
-        }
-        _ => {}
+    // Formats without a single text dump bail before downloading anything.
+    if let Some(ref t) = transformer
+        && !crate::routes::formats::capabilities(t).text_dump
+    {
+        return Err(ApiError::unsupported_media_type(format!(
+            "{}s have no text-diff representation yet",
+            t.label()
+        )));
     }
 
     let cfg = state.config.load();
@@ -167,9 +159,7 @@ async fn resolve_diff_text(
             )
             .await?
         }
-        Some(transform::Transformer::Dll) => unreachable!("Dll bailed above"),
-        #[cfg(feature = "unity")]
-        Some(transform::Transformer::UnityBundle) => unreachable!("UnityBundle bailed above"),
+        _ => unreachable!("text-less formats bailed above"),
     };
     Ok(DiffSide {
         text,
@@ -212,13 +202,19 @@ async fn text_via_unity_serialized(
     snapshot: Arc<Snapshot>,
     file_path: String,
 ) -> Result<String> {
-    let (env, data_dir) = unity_env(state, appid, depot_id, manifest_id, branch, snapshot)?;
-    tokio::task::spawn_blocking(move || {
-        transform::unity::dump_unity_serialized(&env, &data_dir, &file_path)
-    })
+    crate::routes::unity::spawn_unity_blocking(
+        state,
+        appid,
+        depot_id,
+        manifest_id,
+        branch,
+        snapshot,
+        "unity dump",
+        move |unity, data_dir| {
+            transform::unity::dump_unity_serialized(&unity.env, data_dir, &file_path)
+        },
+    )
     .await
-    .map_err(|e| ApiError::internal(format!("unity dump task panicked: {e}")))?
-    .map_err(|e| ApiError::internal(e.to_string()))
 }
 
 /// A file's path, content sha, and chunk (sha, compressed-size) list for download.

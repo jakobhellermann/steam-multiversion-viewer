@@ -11,12 +11,15 @@ pub mod downloads;
 pub mod export;
 pub mod extra_manifests;
 pub mod files;
+pub mod formats;
 pub mod game_info;
 pub mod history;
 pub mod library;
 pub mod mount;
 pub mod store;
 pub mod structured;
+#[cfg(feature = "unity")]
+pub mod unity;
 
 pub type Result<T, E = ApiError> = std::result::Result<T, E>;
 

@@ -522,25 +522,11 @@ async fn open_node_snapshot(
     )))
 }
 
-/// Resolve the per-manifest unity `Environment` + data_dir; 415s if the manifest isn't a unity game.
+/// Resolve the per-manifest unity `Environment` + data_dir — see
+/// [`crate::routes::unity::scratch_side`]; 415s if the manifest isn't a
+/// unity game.
 #[cfg(feature = "unity")]
-fn unity_side_with_scratch(
-    state: &AppState,
-    appid: AppId,
-    depot_id: DepotId,
-    manifest_id: ManifestId,
-    branch: &str,
-    snapshot: Arc<Snapshot>,
-) -> Result<(Arc<crate::state::manifest_cache::ManifestScratch>, String), ApiError> {
-    let scratch = state
-        .manifest_cache
-        .scratch(appid, depot_id, manifest_id, branch);
-    let unity = scratch
-        .unity(snapshot)
-        .ok_or_else(|| ApiError::unsupported_media_type("manifest is not a unity game"))?;
-    let data_dir = unity.data_dir();
-    Ok((scratch, data_dir))
-}
+use crate::routes::unity::scratch_side as unity_side_with_scratch;
 
 #[cfg(test)]
 mod tests {

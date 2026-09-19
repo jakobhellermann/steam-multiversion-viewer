@@ -33,10 +33,7 @@ function AboutSection() {
     <section className="border-t border-slate-800 pt-6">
       <h2 className="text-lg font-semibold">About</h2>
       <p className="mt-1 text-sm">
-        <a
-          href="/api/third-party-notices"
-          className="text-sky-400 hover:text-sky-300 underline"
-        >
+        <a href="/api/third-party-notices" className="text-sky-400 underline hover:text-sky-300">
           Third Party Licenses
         </a>
       </p>
