@@ -187,10 +187,10 @@ function DiffPage() {
   // Carry the focused diff node onto the single-file page a header link
   // opens. The selection lives in `location.hash` (written by the tree
   // via `replaceState`, so it never re-renders us) — read it live at
-  // click time and project it onto the link's side: a matched `obj:N`
-  // answers to either, `mod:obj:B,obj:T` hands back that side's id. No
-  // counterpart (a one-sided row, or nothing selected) → fall through
-  // to the Link's plain navigation without a hash.
+  // click time and project it onto the link's side over the shared
+  // `base:`/`target:`/`mod:`/bare grammar. No counterpart (a one-sided
+  // row, or nothing selected) → fall through to the Link's plain
+  // navigation without a hash.
   const selectedHash = (side: "base" | "target"): string | undefined => {
     const raw = decodeURIComponent(window.location.hash.replace(/^#/, ""));
     return raw ? projectRefToSide(raw, side) : undefined;

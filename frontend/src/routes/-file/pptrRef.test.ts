@@ -43,9 +43,17 @@ describe("projectRefToSide", () => {
     expect(projectRefToSide("target:obj:4367", "base")).toBeUndefined();
   });
 
-  test("non-object rows have no projection", () => {
-    expect(projectRefToSide("section:hierarchy", "base")).toBeUndefined();
-    expect(projectRefToSide("file:level4", "target")).toBeUndefined();
+  test("bare rows project to both sides — any selection carries", () => {
+    expect(projectRefToSide("section:hierarchy", "base")).toBe("section:hierarchy");
+    expect(projectRefToSide("file:level4", "target")).toBe("file:level4");
+  });
+
+  test("addressables key ids project like any other format", () => {
+    const mod = "mod:key:textures_a_4c50.bundle,key:textures_a_934d.bundle";
+    expect(projectRefToSide(mod, "base")).toBe("key:textures_a_4c50.bundle");
+    expect(projectRefToSide(mod, "target")).toBe("key:textures_a_934d.bundle");
+    expect(projectRefToSide("base:key:Scenes/OnlyBase", "base")).toBe("key:Scenes/OnlyBase");
+    expect(projectRefToSide("key:Scenes/Peak_07", "target")).toBe("key:Scenes/Peak_07");
   });
 });
 
@@ -66,6 +74,5 @@ describe("qualifyRefForSide", () => {
   test("no counterpart on the requested side → undefined (no wrong hash)", () => {
     expect(qualifyRefForSide("base:obj:2193", "target")).toBeUndefined();
     expect(qualifyRefForSide("target:obj:4367", "base")).toBeUndefined();
-    expect(qualifyRefForSide("section:hierarchy", "target")).toBeUndefined();
   });
 });

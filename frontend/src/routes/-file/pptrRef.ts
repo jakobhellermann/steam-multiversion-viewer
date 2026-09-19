@@ -1,21 +1,15 @@
 // TODO(ai-review): review for style and correctness
 //
-// Pure helpers for translating between diff node ids and pptr refs.
-// Extracted from `StructuredView` so the diff route can project a
-// selection onto one side without importing the whole component module.
+// Pure helpers around diff node ids. Two layers:
+// - the side grammar every diff builder shares: `base:<inner>` /
+//   `target:<inner>` / `mod:<base>,<target>` / bare `<inner>`
+//   (matched, same id on both sides), optionally under an
+//   `archive:<entry>/` prefix — [`splitDiffId`] and the projections
+//   built on it are generic over all formats;
+// - the unity object refinement (`obj:<n>`) that pptr refs use —
+//   [`pptrNodeKeys`]/[`parsePptrRef`] stay strict to it.
 
 /// A structured-tree node id (also the shape carried in the URL hash).
-/// Documentation only — structurally a `string`; the grammar is a
-/// runtime contract the regexes below enforce, not a compile-time one.
-///
-/// Object-shaped rows (what these helpers act on):
-///   - `obj:<n>`                 matched on both sides, same path id
-///   - `base:obj:<n>`            object only on the base side (added)
-///   - `target:obj:<n>`          object only on the target side (removed)
-///   - `mod:obj:<b>,obj:<t>`     matched pair whose path id renumbered
-/// Any of the above may be prefixed with `archive:<entry>/` inside a
-/// bundle. Non-object rows (`file:<path>`, `section:<name>`,
-/// `class:<id>`, …) carry no pptr and yield nothing.
 export type NodeId = string;
 
 /// Split a node id / ref into its bundle `archive:<entry>/` prefix (or
@@ -72,14 +66,42 @@ export function parsePptrRef(
   return null;
 }
 
+/// Split a diff node id into its per-side inner ids over the side
+/// grammar every diff builder shares, mirroring the backend's
+/// `split_diff_id`: `base:`/`target:` keep their side, a `mod:` pair
+/// splits at the first comma (inner ids must not contain one), and a
+/// bare id is matched — it answers to both sides. The bundle
+/// `archive:<entry>/` prefix passes through onto the inner ids.
+export function splitDiffId(id: NodeId): {
+  prefix: NodeId;
+  base?: NodeId;
+  target?: NodeId;
+} {
+  const [prefix, inner] = splitArchivePrefix(id);
+  if (inner.startsWith("base:")) return { prefix, base: inner.slice(5) };
+  if (inner.startsWith("target:")) return { prefix, target: inner.slice(7) };
+  if (inner.startsWith("mod:")) {
+    const rest = inner.slice(4);
+    const comma = rest.indexOf(",");
+    if (comma >= 0) {
+      return {
+        prefix,
+        base: rest.slice(0, comma),
+        target: rest.slice(comma + 1),
+      };
+    }
+  }
+  return { prefix, base: inner, target: inner };
+}
+
 /// Project a diff node id onto one side, yielding the node id that
-/// side's single-file structured view carries for the same object — or
-/// `undefined` when the object has no counterpart on that side (a
-/// one-sided added/removed row, or a non-object node). A bare/matched
-/// `obj:N` answers to either side; `mod:obj:<base>,obj:<target>` hands
-/// back the requested side's path id.
+/// side's single-file structured view carries for the same node —
+/// `undefined` when the node has no counterpart on that side (a
+/// one-sided added/removed row).
 export function projectRefToSide(nodeId: NodeId, side: "base" | "target"): NodeId | undefined {
-  return pptrNodeKeys(nodeId).find((k) => k.side === side)?.key;
+  const { prefix, ...sides } = splitDiffId(nodeId);
+  const inner = sides[side];
+  return inner === undefined ? undefined : prefix + inner;
 }
 
 /// Like [`projectRefToSide`], but keeps the `base:`/`target:` tag so the
@@ -91,8 +113,7 @@ export function projectRefToSide(nodeId: NodeId, side: "base" | "target"): NodeI
 /// (the replaced-side case — caller should carry no hash rather than a
 /// wrong one).
 export function qualifyRefForSide(nodeId: NodeId, side: "base" | "target"): NodeId | undefined {
-  const key = pptrNodeKeys(nodeId).find((k) => k.side === side)?.key;
-  if (key === undefined) return undefined;
-  const [prefix, inner] = splitArchivePrefix(key);
-  return `${prefix}${side}:${inner}`;
+  const { prefix, ...sides } = splitDiffId(nodeId);
+  const inner = sides[side];
+  return inner === undefined ? undefined : `${prefix}${side}:${inner}`;
 }
