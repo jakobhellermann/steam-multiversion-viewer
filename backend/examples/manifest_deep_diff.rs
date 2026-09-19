@@ -17,7 +17,6 @@ use futures_util::StreamExt;
 use rabex_env::Environment;
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
-use rabex_env::resolver::EnvResolver;
 use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
@@ -220,27 +219,13 @@ fn diff_one(
                 path,
             )?)
         }
-        Some(Transformer::UnityBundle) => {
-            let base_rel = path
-                .strip_prefix(&format!("{base_data_dir}/"))
-                .unwrap_or(path);
-            let target_rel = path
-                .strip_prefix(&format!("{target_data_dir}/"))
-                .unwrap_or(path);
-            let base_bytes = base_env
-                .game_files
-                .read_path(std::path::Path::new(base_rel))?;
-            let target_bytes = target_env
-                .game_files
-                .read_path(std::path::Path::new(target_rel))?;
-            Ok(transform::unity::bundle::build_diff(
-                base_env,
-                base_bytes,
-                target_env,
-                target_bytes,
-                path,
-            )?)
-        }
+        Some(Transformer::UnityBundle) => Ok(transform::unity::bundle::build_diff(
+            base_env,
+            base_data_dir,
+            target_env,
+            target_data_dir,
+            path,
+        )?),
         _ => anyhow::bail!("not unity-deep-comparable: {path}"),
     }
 }

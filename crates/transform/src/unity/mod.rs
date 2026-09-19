@@ -21,6 +21,13 @@ pub mod game_version;
 pub mod secure_player_prefs;
 pub mod serializedfile;
 
+/// `path` without a leading `{data_dir}/` — env resolvers take game-relative paths.
+pub(crate) fn relative_to_data_dir<'a>(data_dir: &str, path: &'a str) -> &'a str {
+    path.strip_prefix(data_dir)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .unwrap_or(path)
+}
+
 #[derive(serde::Deserialize, Default)]
 #[allow(non_snake_case)]
 pub(crate) struct NameOnly {
@@ -77,7 +84,7 @@ pub fn dump_unity_serialized<R: EnvResolver, P: TypeTreeProvider>(
     data_dir: &str,
     path: &str,
 ) -> Result<String, anyhow::Error> {
-    let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
+    let relative = relative_to_data_dir(data_dir, path);
     let file = env.load_serialized(relative)?;
 
     let mut out = String::new();

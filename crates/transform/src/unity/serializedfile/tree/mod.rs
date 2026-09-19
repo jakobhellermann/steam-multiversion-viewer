@@ -14,9 +14,9 @@ use rabex_env::rabex::objects::pptr::PathId;
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 
-use crate::structured::{Node, StructuredTree};
-
 pub(super) use super::{go_label, pluralize};
+use crate::structured::{Node, StructuredTree};
+use crate::unity::relative_to_data_dir;
 
 /// Resolves an object node id to its path id.
 pub fn parse_object_node_id(id: &str) -> Option<PathId> {
@@ -29,7 +29,7 @@ pub fn build_tree<R: EnvResolver, P: TypeTreeProvider>(
     data_dir: &str,
     path: &str,
 ) -> Result<StructuredTree> {
-    let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
+    let relative = relative_to_data_dir(data_dir, path);
     let file = env.load_serialized(relative)?;
     let root = build_root_node(&file, path)?;
     Ok(StructuredTree { root })

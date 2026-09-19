@@ -234,7 +234,6 @@ async fn bundle_node_body(
 
     // PPtr markers are side-agnostic; per-line side comes from the unified-diff `+`/`-` gutter.
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
-        use rabex_env::resolver::EnvResolver;
         let dump_side =
             |side: Option<(Arc<crate::state::manifest_cache::ManifestScratch>, String)>,
              target: Option<(String, rabex_env::rabex::objects::pptr::PathId)>|
@@ -244,10 +243,6 @@ async fn bundle_node_body(
                         .unity_already_initialized()
                         .expect("unity scratch was initialised on the async side");
                     let env = &unity.env;
-                    let relative = bundle_path
-                        .strip_prefix(&format!("{data_dir}/"))
-                        .unwrap_or(&bundle_path);
-                    let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
                     let opts = transform::unity::serializedfile::dump_value::DumpOptions {
                         spp_key: unity.secure_player_prefs_key(),
                         playmaker_game: Some(unity),
@@ -256,7 +251,7 @@ async fn bundle_node_body(
                         transform::unity::serializedfile::dump_value::dump_bundle_object_json(
                             env,
                             &data_dir,
-                            bundle_bytes,
+                            &bundle_path,
                             &entry,
                             pid,
                             opts,

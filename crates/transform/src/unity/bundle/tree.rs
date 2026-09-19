@@ -15,27 +15,26 @@ use rabex_env::resolver::EnvResolver;
 use tracing::info_span;
 
 use crate::structured::{Node, StructuredTree};
+use crate::unity::relative_to_data_dir;
 use crate::unity::serializedfile::tree::build_root_node;
 
 use super::{
-    ARCHIVE_ID_PREFIX, archive_prefix, blob_node, extraction_config, insert_archive_entry,
+    ARCHIVE_ID_PREFIX, archive_prefix, blob_node, insert_archive_entry, open_bundle_from_bytes,
 };
 
-/// Construct the structured tree for the bundle at `path` (manifest-
-/// relative) using a prebuilt `env`. `bundle_bytes` must be supplied
-/// by the caller (typically `env.game_files.read_path(...)`) so the
-/// I/O stays at the route layer. Synchronous; callers from async
-/// context must wrap in `tokio::task::spawn_blocking`.
+/// Construct the structured tree for the bundle at `path` (depot-
+/// absolute; resolved against `data_dir`). Synchronous; callers from
+/// async context must wrap in `tokio::task::spawn_blocking`.
 #[tracing::instrument(skip_all, fields(path))]
 pub fn build_tree<R: EnvResolver, P: TypeTreeProvider>(
     env: &Environment<R, P>,
-    bundle_bytes: rabex_env::env::Data,
+    data_dir: &str,
     path: &str,
 ) -> Result<StructuredTree> {
-    let bundle = {
-        let _span = info_span!("parse_bundle_header").entered();
-        BundleFileReader::from_reader(Cursor::new(bundle_bytes.as_ref()), &extraction_config(env))?
-    };
+    let bytes = env
+        .game_files
+        .read_path(std::path::Path::new(relative_to_data_dir(data_dir, path)))?;
+    let bundle = open_bundle_from_bytes(env, bytes)?;
 
     build_tree_from_bundle(env, &bundle, path)
 }

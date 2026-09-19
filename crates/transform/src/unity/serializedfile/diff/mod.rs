@@ -11,6 +11,7 @@ use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
 
 use crate::structured::{Node, NodeId, NodeStatus, StructuredTree};
+use crate::unity::relative_to_data_dir;
 pub(super) use equality::{matched_status, object_bytes};
 
 mod class_stats;
@@ -91,14 +92,8 @@ pub fn build_diff<R: EnvResolver, P: TypeTreeProvider>(
     target_data_dir: &str,
     path: &str,
 ) -> Result<StructuredTree> {
-    let base_relative = path
-        .strip_prefix(&format!("{base_data_dir}/"))
-        .unwrap_or(path);
-    let target_relative = path
-        .strip_prefix(&format!("{target_data_dir}/"))
-        .unwrap_or(path);
-    let base_file = base_env.load_serialized(base_relative)?;
-    let target_file = target_env.load_serialized(target_relative)?;
+    let base_file = base_env.load_serialized(relative_to_data_dir(base_data_dir, path))?;
+    let target_file = target_env.load_serialized(relative_to_data_dir(target_data_dir, path))?;
 
     let (children, status) = diff_sections(&base_file, &target_file)?;
     let root = Node {

@@ -15,43 +15,46 @@ use rabex_env::resolver::EnvResolver;
 use tracing::info_span;
 
 use crate::structured::{Node, NodeStatus, StructuredTree};
+use crate::unity::relative_to_data_dir;
 use crate::unity::serializedfile::diff::diff_sections;
 use crate::unity::serializedfile::tree::build_root_node;
 
 use crate::structured::human_bytes;
 
 use super::{
-    ARCHIVE_ID_PREFIX, archive_prefix, blob_node, extraction_config, insert_archive_entry,
+    ARCHIVE_ID_PREFIX, archive_prefix, blob_node, insert_archive_entry, open_bundle_from_bytes,
 };
 
 /// Build the structured diff for a bundle path between two prebuilt
-/// envs. Per-entry: SF↔SF runs through [`diff_sections`], blob↔blob
-/// is a size compare, mismatched-or-missing entries become fully
-/// Added/Removed subtrees. Synchronous; callers from async context
-/// must wrap in `tokio::task::spawn_blocking`.
+/// envs (`path` depot-absolute, resolved against each side's
+/// `data_dir`). Per-entry: SF↔SF runs through [`diff_sections`],
+/// blob↔blob is a size compare, mismatched-or-missing entries become
+/// fully Added/Removed subtrees. Synchronous; callers from async
+/// context must wrap in `tokio::task::spawn_blocking`.
 #[tracing::instrument(skip_all, fields(path))]
 pub fn build_diff<R: EnvResolver, P: rabex_env::rabex::typetree::TypeTreeProvider>(
     base_env: &Environment<R, P>,
-    base_bundle_bytes: rabex_env::env::Data,
+    base_data_dir: &str,
     target_env: &Environment<R, P>,
-    target_bundle_bytes: rabex_env::env::Data,
+    target_data_dir: &str,
     path: &str,
 ) -> Result<StructuredTree> {
-    let base_bundle = open_bundle_from_bytes(base_env, base_bundle_bytes)?;
-    let target_bundle = open_bundle_from_bytes(target_env, target_bundle_bytes)?;
+    let base_bytes = base_env
+        .game_files
+        .read_path(std::path::Path::new(relative_to_data_dir(
+            base_data_dir,
+            path,
+        )))?;
+    let target_bytes =
+        target_env
+            .game_files
+            .read_path(std::path::Path::new(relative_to_data_dir(
+                target_data_dir,
+                path,
+            )))?;
+    let base_bundle = open_bundle_from_bytes(base_env, base_bytes)?;
+    let target_bundle = open_bundle_from_bytes(target_env, target_bytes)?;
     build_diff_from_bundles(base_env, &base_bundle, target_env, &target_bundle, path)
-}
-
-fn open_bundle_from_bytes<R: EnvResolver, P: rabex_env::rabex::typetree::TypeTreeProvider>(
-    env: &Environment<R, P>,
-    bundle_bytes: rabex_env::env::Data,
-) -> Result<BundleFileReader<Cursor<rabex_env::env::Data>>> {
-    let config = extraction_config(env);
-    let _span = info_span!("parse_bundle_header").entered();
-    Ok(BundleFileReader::from_reader(
-        Cursor::new(bundle_bytes),
-        &config,
-    )?)
 }
 
 /// Diff two already-parsed bundles. Same role as

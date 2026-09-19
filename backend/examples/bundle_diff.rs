@@ -28,7 +28,6 @@ use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
-use rabex_env::resolver::EnvResolver;
 use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
@@ -119,27 +118,19 @@ async fn main() -> Result<()> {
     let tree = tokio::task::spawn_blocking(move || -> Result<_> {
         let base_game_files = SteamDepotGameFiles::new(Arc::new(base_snap))?;
         let base_data_dir = base_game_files.data_dir().display().to_string();
-        let base_relative = PATH
-            .strip_prefix(&format!("{base_data_dir}/"))
-            .unwrap_or(PATH);
-        let base_bytes = base_game_files.read_path(std::path::Path::new(base_relative))?;
         let base_tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
         let base_env = Environment::new(base_game_files, base_tpk);
 
         let target_game_files = SteamDepotGameFiles::new(Arc::new(target_snap))?;
         let target_data_dir = target_game_files.data_dir().display().to_string();
-        let target_relative = PATH
-            .strip_prefix(&format!("{target_data_dir}/"))
-            .unwrap_or(PATH);
-        let target_bytes = target_game_files.read_path(std::path::Path::new(target_relative))?;
         let target_tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
         let target_env = Environment::new(target_game_files, target_tpk);
 
         Ok(bundle::build_diff(
             &base_env,
-            base_bytes,
+            &base_data_dir,
             &target_env,
-            target_bytes,
+            &target_data_dir,
             PATH,
         )?)
     })

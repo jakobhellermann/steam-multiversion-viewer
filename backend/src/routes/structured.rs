@@ -15,8 +15,6 @@ use serde::Deserialize;
 use crate::http::{ApiError, ImmutableCache};
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
-#[cfg(feature = "unity")]
-use rabex_env::resolver::EnvResolver;
 use transform::Transformer;
 use transform::structured::{NodeContent, StructuredTree};
 
@@ -116,9 +114,7 @@ pub async fn manifest_file_structured(
             let env = unity.env.clone();
             let data_dir = unity.data_dir();
             let tree = tokio::task::spawn_blocking(move || {
-                let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(&path);
-                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
-                transform::unity::bundle::build_tree(&env, bundle_bytes, &path)
+                transform::unity::bundle::build_tree(&env, &data_dir, &path)
             })
             .await
             .map_err(|e| ApiError::internal(format!("structured-tree task panicked: {e}")))?
@@ -251,15 +247,12 @@ pub async fn manifest_file_structured_node(
                 .unity_already_initialized()
                 .expect("unity scratch was initialised on the async side");
             let env = &unity.env;
-            let relative = bundle_path
-                .strip_prefix(&format!("{data_dir}/"))
-                .unwrap_or(&bundle_path);
-            let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
             use transform::unity::serializedfile::dump_value;
             match program {
                 Some((platform, blob_index)) => dump_value::dump_bundle_shader_program(
                     env,
-                    bundle_bytes,
+                    &data_dir,
+                    &bundle_path,
                     &archive_entry,
                     path_id,
                     platform,
@@ -273,7 +266,7 @@ pub async fn manifest_file_structured_node(
                     dump_value::dump_bundle_object_json(
                         env,
                         &data_dir,
-                        bundle_bytes,
+                        &bundle_path,
                         &archive_entry,
                         path_id,
                         opts,
@@ -404,13 +397,10 @@ pub async fn manifest_file_structured_node_image(
                     .unity_already_initialized()
                     .expect("unity scratch was initialised on the async side");
                 let env = &unity.env;
-                let relative = bundle_path
-                    .strip_prefix(&format!("{data_dir}/"))
-                    .unwrap_or(&bundle_path);
-                let bundle_bytes = env.game_files.read_path(std::path::Path::new(relative))?;
                 transform::unity::serializedfile::texture::render_bundle_texture_png(
                     env,
-                    bundle_bytes,
+                    &data_dir,
+                    &bundle_path,
                     &archive_entry,
                     path_id,
                 )

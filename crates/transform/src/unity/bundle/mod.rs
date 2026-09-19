@@ -32,6 +32,8 @@ use rabex_env::env::Data;
 use rabex_env::handle::SerializedFileHandle;
 use rabex_env::rabex::files::SerializedFile;
 use rabex_env::rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
+use rabex_env::rabex::typetree::TypeTreeProvider;
+use rabex_env::resolver::EnvResolver;
 
 use crate::structured::Node;
 
@@ -52,6 +54,21 @@ pub(super) const ARCHIVE_ID_PREFIX: &str = "archive:";
 /// per-file subtree's ids.
 pub(super) fn archive_prefix(entry: &str) -> String {
     format!("{ARCHIVE_ID_PREFIX}{entry}/")
+}
+
+/// Parse bundle bytes into a `BundleFileReader`, with the env's unity
+/// version as fallback.
+pub(super) fn open_bundle_from_bytes<R: EnvResolver, P: TypeTreeProvider>(
+    env: &Environment<R, P>,
+    bundle_bytes: Data,
+) -> Result<BundleFileReader<Cursor<Data>>> {
+    use tracing::info_span;
+
+    let _span = info_span!("parse_bundle_header").entered();
+    Ok(BundleFileReader::from_reader(
+        Cursor::new(bundle_bytes),
+        &extraction_config(env),
+    )?)
 }
 
 /// Split an `archive:<entry>/<inner>` id back into its components, or
@@ -79,10 +96,7 @@ pub(super) fn blob_node(entry_path: &str, size: i64) -> Node {
 /// carries none (addressables); packed player data bundles do carry one
 /// and have no globalgamemanagers file, so a failing env must not abort
 /// the open.
-pub(super) fn extraction_config<
-    R: rabex_env::resolver::EnvResolver,
-    P: rabex_env::rabex::typetree::TypeTreeProvider,
->(
+pub(super) fn extraction_config<R: EnvResolver, P: TypeTreeProvider>(
     env: &Environment<R, P>,
 ) -> ExtractionConfig {
     match env.unity_version() {
@@ -100,8 +114,8 @@ pub(super) fn insert_archive_entry<'env, R, P, T>(
     entry_path: &str,
 ) -> Result<SerializedFileHandle<'env, R, P>>
 where
-    R: rabex_env::resolver::EnvResolver,
-    P: rabex_env::rabex::typetree::TypeTreeProvider,
+    R: EnvResolver,
+    P: TypeTreeProvider,
     T: AsRef<[u8]>,
 {
     let bytes = bundle

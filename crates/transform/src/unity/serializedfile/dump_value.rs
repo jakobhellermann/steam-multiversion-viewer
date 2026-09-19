@@ -23,6 +23,8 @@ use rabex_env::rabex::objects::ClassId;
 use rabex_env::rabex::objects::pptr::{PPtr, PathId};
 use rabex_env::rabex::typetree::TypeTreeProvider;
 use rabex_env::resolver::EnvResolver;
+
+use crate::unity::relative_to_data_dir;
 use rabex_env::unity::types::GameObject;
 use serde_value::Value;
 
@@ -89,7 +91,7 @@ pub fn dump_object_json<R: EnvResolver, P: TypeTreeProvider>(
     path_id: PathId,
     opts: DumpOptions<'_>,
 ) -> Result<(&'static str, String)> {
-    let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
+    let relative = relative_to_data_dir(data_dir, path);
     let file = env.load_serialized(relative)?;
     dump_object_json_from_handle(&file, data_dir, "", path_id, opts)
 }
@@ -105,7 +107,7 @@ pub fn dump_shader_program<R: EnvResolver, P: TypeTreeProvider>(
     platform: u32,
     blob_index: u32,
 ) -> Result<(&'static str, String)> {
-    let relative = path.strip_prefix(&format!("{data_dir}/")).unwrap_or(path);
+    let relative = relative_to_data_dir(data_dir, path);
     let file = env.load_serialized(relative)?;
     let value = file.object_at::<Value>(path_id)?.read()?;
     let version = env.unity_version()?.version_tuple();
@@ -239,20 +241,19 @@ fn link_monoscript_classname(data_dir: &str, value: &mut Value) {
     map.insert(svalue_str("m_ClassName"), svalue_str(marker));
 }
 
-/// Bundle equivalent of [`dump_object_json`]: parse `bundle_bytes`,
-/// extract `archive_entry`, then dump `path_id` from it. Callers
-/// must read the bundle bytes themselves (typically via
-/// `env.game_files.read_path`) so the I/O stays visible at the route
-/// layer where it can be scheduled inside `spawn_blocking`.
+/// Bundle equivalent of [`dump_object_json`]: read the bundle at
+/// `bundle_path` (depot-absolute, resolved against `data_dir`),
+/// extract `archive_entry`, then dump `path_id` from it.
 #[tracing::instrument(skip_all, fields(archive_entry, path_id))]
 pub fn dump_bundle_object_json<R: EnvResolver, P: TypeTreeProvider>(
     env: &Environment<R, P>,
     data_dir: &str,
-    bundle_bytes: rabex_env::env::Data,
+    bundle_path: &str,
     archive_entry: &str,
     path_id: PathId,
     opts: DumpOptions<'_>,
 ) -> Result<(&'static str, String)> {
+    let bundle_bytes = read_bundle_bytes(env, data_dir, bundle_path)?;
     let (file, class_id, value) = read_bundle_object(env, &bundle_bytes, archive_entry, path_id)?;
     if class_id == ClassId::TextAsset
         && let Some(plain) = try_decrypt_textasset(&value, opts.spp_key)
@@ -323,16 +324,32 @@ fn read_bundle_object<'env, R: EnvResolver, P: TypeTreeProvider>(
 /// Lazy node content for one shader sub-program inside a bundle.
 pub fn dump_bundle_shader_program<R: EnvResolver, P: TypeTreeProvider>(
     env: &Environment<R, P>,
-    bundle_bytes: rabex_env::env::Data,
+    data_dir: &str,
+    bundle_path: &str,
     archive_entry: &str,
     path_id: PathId,
     platform: u32,
     blob_index: u32,
 ) -> Result<(&'static str, String)> {
     let version = env.unity_version()?.version_tuple();
+    let bundle_bytes = read_bundle_bytes(env, data_dir, bundle_path)?;
     let (_file, _class_id, value) = read_bundle_object(env, &bundle_bytes, archive_entry, path_id)?;
     super::shader::decode_one_program(&value, platform, blob_index, version)
         .ok_or_else(|| anyhow::anyhow!("could not decode shader program {blob_index}"))
+}
+
+/// Read the bundle at `bundle_path` (depot-absolute) through the env.
+fn read_bundle_bytes<R: EnvResolver, P: TypeTreeProvider>(
+    env: &Environment<R, P>,
+    data_dir: &str,
+    bundle_path: &str,
+) -> Result<rabex_env::env::Data> {
+    Ok(env
+        .game_files
+        .read_path(std::path::Path::new(relative_to_data_dir(
+            data_dir,
+            bundle_path,
+        )))?)
 }
 
 /// Single-pass rewrite of a deserialised object tree:

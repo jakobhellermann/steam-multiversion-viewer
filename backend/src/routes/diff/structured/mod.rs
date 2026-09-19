@@ -227,26 +227,13 @@ pub(super) async fn build_unity_bundle_diff(
     target_data_dir: String,
     path: &str,
 ) -> Result<StructuredTree> {
-    use rabex_env::resolver::EnvResolver;
     let path = path.to_owned();
     tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let base_relative = path
-            .strip_prefix(&format!("{base_data_dir}/"))
-            .unwrap_or(&path);
-        let target_relative = path
-            .strip_prefix(&format!("{target_data_dir}/"))
-            .unwrap_or(&path);
-        let base_bytes = base_env
-            .game_files
-            .read_path(std::path::Path::new(base_relative))?;
-        let target_bytes = target_env
-            .game_files
-            .read_path(std::path::Path::new(target_relative))?;
         transform::unity::bundle::build_diff(
             &base_env,
-            base_bytes,
+            &base_data_dir,
             &target_env,
-            target_bytes,
+            &target_data_dir,
             &path,
         )
     })

@@ -6,7 +6,6 @@ use anyhow::Result;
 use rabex_env::Environment;
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
-use rabex_env::resolver::EnvResolver;
 use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
 use steam_depot_vfs::session::LazyCachedAuth;
@@ -51,13 +50,9 @@ async fn main() -> Result<()> {
         let manifest_store = Arc::new(manifest_store);
         let game_files = SteamDepotGameFiles::new(manifest_store)?;
         let data_dir = game_files.data_dir().display().to_string();
-        let relative = BUNDLE_PATH
-            .strip_prefix(&format!("{data_dir}/"))
-            .unwrap_or(BUNDLE_PATH);
-        let bundle_bytes = game_files.read_path(std::path::Path::new(relative))?;
         let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
         let env = Environment::new(game_files, tpk);
-        Ok(bundle::build_tree(&env, bundle_bytes, BUNDLE_PATH)?)
+        Ok(bundle::build_tree(&env, &data_dir, BUNDLE_PATH)?)
     })
     .await??;
     println!(
