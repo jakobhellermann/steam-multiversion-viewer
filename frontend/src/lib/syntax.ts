@@ -13,6 +13,7 @@ const GRAMMARS = {
   xml: () => import("@shikijs/langs/xml"),
   json: () => import("@shikijs/langs/json"),
   lua: () => import("@shikijs/langs/lua"),
+  ini: () => import("@shikijs/langs/ini"),
   csharp: () => import("@shikijs/langs/csharp"),
   diff: () => import("@shikijs/langs/diff"),
   glsl: () => import("@shikijs/langs/glsl"),
@@ -60,6 +61,7 @@ const EXT_TO_LANG: Record<string, Lang> = {
   json: "json",
   jsonc: "json",
   lua: "lua",
+  ini: "ini",
   cs: "csharp",
 };
 
