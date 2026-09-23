@@ -103,16 +103,10 @@ pub enum FileContentKind {
 /// hundreds of chunks.
 const PREVIEW_CAP_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Content-based text/binary heuristic: a NUL byte in the first sniff
-/// window is a hard "binary" signal. Otherwise the bytes must parse as
-/// UTF-8 to count as text.
+// Looks like plaintext if the first 8k bytes don't contain a nul byte.
 fn looks_like_text(bytes: &[u8]) -> bool {
     const SNIFF: usize = 8192;
-    let head = &bytes[..bytes.len().min(SNIFF)];
-    if head.contains(&0) {
-        return false;
-    }
-    std::str::from_utf8(bytes).is_ok()
+    !bytes[..bytes.len().min(SNIFF)].contains(&0)
 }
 
 /// File metadata and inline preview
@@ -193,10 +187,10 @@ pub async fn manifest_file(
                     .await;
                 let bytes = snapshot.read_full(&file_path).await?;
                 let content = if looks_like_text(&bytes) {
-                    match String::from_utf8(bytes.to_vec()) {
-                        Ok(s) => (FileContentKind::Text, Some(s)),
-                        Err(_) => (FileContentKind::Binary, None),
-                    }
+                    (
+                        FileContentKind::Text,
+                        Some(String::from_utf8_lossy(&bytes).into_owned()),
+                    )
                 } else {
                     (FileContentKind::Binary, None)
                 };
