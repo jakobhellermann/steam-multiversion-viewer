@@ -289,9 +289,21 @@ async fn build_dll_diff(
     .instrument(tracing::info_span!("diff_build", kind = "dll"))
     .await
     .map_err(ApiError::from_transform)?;
-    // Kick off background full decompile (idempotent, keyed by sha) so later per-type lookups hit cache.
-    transform::dll::warm_full_decompile(&store_root, from_sha, from_bytes);
-    transform::dll::warm_full_decompile(&store_root, to_sha, to_bytes);
+    let warm = crate::state::dll_refs::warm_with_refs;
+    warm(
+        store_root.clone(),
+        Arc::clone(base),
+        paths.base.clone(),
+        to_sha,
+        to_bytes,
+    );
+    warm(
+        store_root,
+        Arc::clone(target),
+        paths.target.clone(),
+        from_sha,
+        from_bytes,
+    );
     Ok(tree)
 }
 

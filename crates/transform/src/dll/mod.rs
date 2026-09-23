@@ -24,7 +24,7 @@ use std::hash::{Hash, Hasher};
 use std::process::Stdio;
 use std::sync::Mutex;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::cache::tool_command;
 use crate::{TempInput, TransformError, tempfile_for};
@@ -54,10 +54,14 @@ fn sha_short(sha: &[u8; 20]) -> String {
 
 /// Per-process set of DLL shas with a `-p` warmer in flight. Prevents
 /// firing the (multi-second, multi-CPU) bulk pass twice for the same
-/// file when, say, two browser tabs hit the same DLL at once.
-static WARMUPS_IN_FLIGHT: Mutex<Option<HashSet<[u8; 20]>>> = Mutex::new(None);
+/// file when, say, two browser tabs hit the same DLL at once. Keyed
+/// by (sha, refs resolved) — a bulk pass with references and one
+/// without write different cache namespaces and must not coalesce.
+type WarmupKey = ([u8; 20], bool);
+type WarmupsSet = HashSet<WarmupKey>;
+static WARMUPS_IN_FLIGHT: Mutex<Option<WarmupsSet>> = Mutex::new(None);
 
-fn warmups_lock() -> std::sync::MutexGuard<'static, Option<HashSet<[u8; 20]>>> {
+fn warmups_lock() -> std::sync::MutexGuard<'static, Option<WarmupsSet>> {
     WARMUPS_IN_FLIGHT.lock().expect("warmups poisoned")
 }
 
@@ -197,10 +201,11 @@ pub async fn decompile_type(
     store_root: &Utf8Path,
     dll_sha: &[u8; 20],
     dll_bytes: &[u8],
+    refs: Option<&Utf8Path>,
     type_name: &str,
 ) -> Result<String, TransformError> {
     let resolved = resolve_outer(store_root, dll_sha, dll_bytes, type_name).await?;
-    let artifact = type_artifact_name(&resolved);
+    let artifact = type_artifact_name(&resolved, refs.is_some());
     if let Some(cached) = crate::read_cached_artifact(store_root, dll_sha, &artifact)? {
         return Ok(cached);
     }
@@ -216,7 +221,14 @@ pub async fn decompile_type(
     } else {
         tracing::info!(sha = %sha_short(dll_sha), %type_name, resolved = %resolved, "dll transform: decompile single type (ilspy -t)");
     }
-    let text = run_ilspy(dll_bytes, &["-t", &resolved]).await?;
+    let mut args: Vec<&str> = Vec::with_capacity(4);
+    if let Some(dir) = refs {
+        args.push("-r");
+        args.push(dir.as_str());
+    }
+    args.push("-t");
+    args.push(&resolved);
+    let text = run_ilspy(dll_bytes, &args).await?;
     crate::write_cached_artifact(store_root, dll_sha, &artifact, &text)?;
     Ok(text)
 }
@@ -258,10 +270,12 @@ fn outer_of(type_name: &str, is_entity: impl Fn(&str) -> bool) -> String {
 /// namespace), but anything that's awkward on disk (`<`, `>`, `/`,
 /// `\`, control chars, …) becomes `_`. The leading `types/` directory
 /// is just for cache-clarity — `du -hs transforms/<sha>/types` shows
-/// the per-type decompile footprint at a glance.
-fn type_artifact_name(type_name: &str) -> String {
-    let mut out = String::with_capacity(type_name.len() + 6);
-    out.push_str("types/");
+/// the per-type decompile footprint at a glance. With refs resolved,
+/// artifacts move under `rtypes/` so they can never collide with the
+/// ref-less variant of the same type.
+fn type_artifact_name(type_name: &str, refs: bool) -> String {
+    let mut out = String::with_capacity(type_name.len() + 7);
+    out.push_str(if refs { "rtypes/" } else { "types/" });
     for c in type_name.chars() {
         let ok = c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+' | '`');
         out.push(if ok { c } else { '_' });
@@ -291,14 +305,20 @@ async fn run_ilspy(bytes: &[u8], args: &[&str]) -> Result<String, TransformError
 /// Fire-and-forget by design: a tokio task is spawned and the
 /// function returns immediately. Errors are logged via `tracing` and
 /// don't propagate.
-pub fn warm_full_decompile(store_root: &Utf8Path, dll_sha: [u8; 20], dll_bytes: Vec<u8>) {
+pub fn warm_full_decompile(
+    store_root: &Utf8Path,
+    dll_sha: [u8; 20],
+    dll_bytes: Vec<u8>,
+    refs: Option<Utf8PathBuf>,
+) {
     if !is_managed_pe(&dll_bytes) {
         return;
     }
+    let key = (dll_sha, refs.is_some());
     {
         let mut guard = warmups_lock();
         let set = guard.get_or_insert_with(HashSet::new);
-        if !set.insert(dll_sha) {
+        if !set.insert(key) {
             tracing::info!(sha = %sha_short(&dll_sha), "dll warmer: already in flight, skipping");
             return;
         }
@@ -306,8 +326,8 @@ pub fn warm_full_decompile(store_root: &Utf8Path, dll_sha: [u8; 20], dll_bytes: 
     let store_root = store_root.to_path_buf();
     tracing::info!(sha = %sha_short(&dll_sha), "dll warmer: start full decompile (ilspy -p)");
     tokio::spawn(async move {
-        let result = run_warmer(&store_root, &dll_sha, &dll_bytes).await;
-        warmups_lock().as_mut().map(|s| s.remove(&dll_sha));
+        let result = run_warmer(&store_root, &dll_sha, &dll_bytes, refs.as_deref()).await;
+        warmups_lock().as_mut().map(|s| s.remove(&key));
         match result {
             Ok(n) => {
                 tracing::info!(sha = %sha_short(&dll_sha), types_cached = n, "dll warmer done")
@@ -326,20 +346,25 @@ pub async fn run_full_decompile(
     store_root: &Utf8Path,
     dll_sha: &[u8; 20],
     dll_bytes: &[u8],
+    refs: Option<&Utf8Path>,
 ) -> Result<usize, TransformError> {
-    run_warmer(store_root, dll_sha, dll_bytes).await
+    run_warmer(store_root, dll_sha, dll_bytes, refs).await
 }
 
 async fn run_warmer(
     store_root: &Utf8Path,
     dll_sha: &[u8; 20],
     dll_bytes: &[u8],
+    refs: Option<&Utf8Path>,
 ) -> Result<usize, TransformError> {
     let tmp_dll = tempfile_for(dll_bytes)?;
     let outdir = warmer_outdir()?;
-    let status = tool_command(ILSPYCMD)
-        .arg("-p")
-        .arg("--nested-directories")
+    let mut cmd = tool_command(ILSPYCMD);
+    cmd.arg("-p").arg("--nested-directories");
+    if let Some(dir) = refs {
+        cmd.arg("-r").arg(dir.as_std_path());
+    }
+    let status = cmd
         .arg("-o")
         .arg(outdir.path())
         .arg(tmp_dll.path())
@@ -362,8 +387,9 @@ async fn run_warmer(
     }
     // Walk the output tree: each `<namespace-path>/<TypeName>.cs`
     // becomes one cached artifact under
-    // `transforms/<sha>/types/<namespace>.<TypeName>`. Anything that
-    // doesn't end in `.cs` (e.g. the generated `.csproj`) is skipped.
+    // `transforms/<sha>/{r,}types/<namespace>.<TypeName>`.
+    // Anything that doesn't end in `.cs` (e.g. the generated
+    // `.csproj`) is skipped.
     let mut count = 0usize;
     let mut stack: Vec<(std::path::PathBuf, String)> =
         vec![(outdir.path().to_path_buf(), String::new())];
@@ -412,7 +438,7 @@ async fn run_warmer(
             // Skip if `-t` already filled this slot — saves the
             // compress/write roundtrip when both passes happened to
             // touch the same type.
-            let artifact = type_artifact_name(&fqn);
+            let artifact = type_artifact_name(&fqn, refs.is_some());
             if crate::read_cached_artifact(store_root, dll_sha, &artifact)
                 .ok()
                 .flatten()
@@ -528,14 +554,14 @@ mod tests {
 
     #[test]
     fn artifact_name_sanitises() {
-        assert_eq!(type_artifact_name("Foo.Bar"), "types/Foo.Bar");
+        assert_eq!(type_artifact_name("Foo.Bar", false), "types/Foo.Bar");
         assert_eq!(
-            type_artifact_name("<>f__AnonymousType0"),
+            type_artifact_name("<>f__AnonymousType0", false),
             "types/__f__AnonymousType0",
         );
         assert_eq!(
-            type_artifact_name("Ns.Inner+Nested"),
-            "types/Ns.Inner+Nested"
+            type_artifact_name("Ns.Inner+Nested", true),
+            "rtypes/Ns.Inner+Nested"
         );
     }
 

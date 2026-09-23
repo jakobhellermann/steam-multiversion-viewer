@@ -139,10 +139,13 @@ pub async fn manifest_file_structured(
             let tree = transform::dll::tree::build_tree(&cfg.store_root, &file_sha, &bytes, &path)
                 .await
                 .map_err(ApiError::from_transform)?;
-            // Kick off the bulk `-p` decompile in the background so
-            // follow-up type clicks become cache hits. Dedups per-sha
-            // inside the warmer.
-            transform::dll::warm_full_decompile(&cfg.store_root, file_sha, bytes.to_vec());
+            crate::state::dll_refs::warm_with_refs(
+                cfg.store_root.clone(),
+                Arc::clone(&snapshot),
+                path.clone(),
+                file_sha,
+                bytes.to_vec(),
+            );
             Ok((ImmutableCache, Json(tree)))
         }
         _ => Err(ApiError::unsupported_media_type(format!(
@@ -214,9 +217,21 @@ pub async fn manifest_file_structured_node(
         let cfg = state.config.load();
         let bytes = snapshot.read_full(&q.path).await?;
         let decompile = async {
-            transform::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
+            // First click on an unopened manifest pays the sibling download
+            // (~40 MiB, CDN); the resolve improvement is what makes decompiled
+            // types readable, so we wait rather than serve stub-riddled text.
+            let refs = crate::state::dll_refs::ensure_dll_refs(&cfg.store_root, &snapshot, &q.path)
                 .await
-                .map_err(|e| ApiError::internal(e.to_string()))
+                .map_err(|e| ApiError::internal(e.to_string()))?;
+            transform::dll::decompile_type(
+                &cfg.store_root,
+                &file_sha,
+                &bytes,
+                refs.as_deref(),
+                type_name,
+            )
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))
         };
         let (text, targets) = tokio::try_join!(
             decompile,

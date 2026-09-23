@@ -10,7 +10,7 @@
 //! shares one directory. Tool definitions live in `tools.rs`.
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use camino::Utf8Path;
@@ -129,16 +129,20 @@ pub const ARTIFACT_MAIN: &str = "main";
 /// `<store_root>/transforms/<sha-hex>/<artifact>.txt.zst`. `artifact`
 /// may contain `/` to nest further (e.g. `types/Foo.Bar`).
 pub fn cache_artifact_path(store_root: &Utf8Path, sha: &[u8; 20], artifact: &str) -> PathBuf {
+    store_root
+        .as_std_path()
+        .join("transforms")
+        .join(sha_hex(sha))
+        .join(format!("{artifact}.txt.zst"))
+}
+
+pub fn sha_hex(sha: &[u8; 20]) -> String {
     let mut hex = String::with_capacity(40);
     for b in sha {
         use std::fmt::Write as _;
         write!(&mut hex, "{b:02x}").expect("write to String");
     }
-    store_root
-        .as_std_path()
-        .join("transforms")
-        .join(hex)
-        .join(format!("{artifact}.txt.zst"))
+    hex
 }
 
 /// Try to read a cached artifact. Returns `None` when not yet computed;
@@ -167,20 +171,28 @@ pub fn write_cached_artifact(
     artifact: &str,
     text: &str,
 ) -> Result<(), std::io::Error> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-
     let path = cache_artifact_path(store_root, sha, artifact);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     // zstd level 3 — fast both ways, ~5× compression on typical text
     // tool output. Decompression is single-digit ms for normal sizes.
     let compressed = zstd::encode_all(text.as_bytes(), 3)?;
+    write_atomic(&path, &compressed)
+}
+
+/// Write `bytes` to `path` via a uniquely named tmp file + rename, so
+/// concurrent writers of the same path never interleave and readers
+/// never see a partial file.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let tmp = path.with_extension(format!("zst.tmp.{}.{seq}", std::process::id()));
-    std::fs::write(&tmp, &compressed)?;
-    if let Err(e) = std::fs::rename(&tmp, &path) {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(".tmp.{}.{seq}", std::process::id()));
+    std::fs::write(&tmp, bytes)?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }

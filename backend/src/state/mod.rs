@@ -1,4 +1,5 @@
 pub mod disk_cache;
+pub mod dll_refs;
 pub mod downloads;
 pub mod export;
 pub mod extra_manifests;

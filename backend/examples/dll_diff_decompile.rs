@@ -26,6 +26,7 @@ use anyhow::{Context, Result};
 use dll_diff::Status;
 use steam_depot_vfs::DepotStore;
 use steam_multiversion_viewer::config::Config;
+use steam_multiversion_viewer::state::dll_refs::ensure_dll_refs;
 use steam_multiversion_viewer::steam::SteamClient;
 use steam_multiversion_viewer::steam::auth::{resume, saved_session};
 use tokio::sync::Semaphore;
@@ -95,9 +96,18 @@ async fn main() -> Result<()> {
     // ilspycmd -p pass per DLL produces ~all types in ~30-60s vs.
     // 2000+ individual `ilspycmd -t` invocations later.
     let warm_started = Instant::now();
+    let (from_refs, to_refs) = tokio::try_join!(
+        ensure_dll_refs(&config.store_root, &from_manifest, DLL_PATH),
+        ensure_dll_refs(&config.store_root, &to_manifest, DLL_PATH),
+    )?;
     let (from_warm, to_warm) = tokio::try_join!(
-        dll::run_full_decompile(&config.store_root, &from_sha, &from_bytes),
-        dll::run_full_decompile(&config.store_root, &to_sha, &to_bytes),
+        dll::run_full_decompile(
+            &config.store_root,
+            &from_sha,
+            &from_bytes,
+            from_refs.as_deref()
+        ),
+        dll::run_full_decompile(&config.store_root, &to_sha, &to_bytes, to_refs.as_deref()),
     )?;
     println!(
         "warm-up: {:?} (from cached {} types, to cached {} types)",
@@ -155,6 +165,8 @@ async fn main() -> Result<()> {
     let store_root = config.store_root.clone();
     let from_bytes = Arc::new(from_bytes);
     let to_bytes = Arc::new(to_bytes);
+    let from_refs = Arc::new(from_refs);
+    let to_refs = Arc::new(to_refs);
     let sem = Arc::new(Semaphore::new(PARALLEL_DECOMPILES));
 
     let work_started = Instant::now();
@@ -165,16 +177,24 @@ async fn main() -> Result<()> {
         let store_root = store_root.clone();
         let from_bytes = from_bytes.clone();
         let to_bytes = to_bytes.clone();
+        let from_refs = from_refs.clone();
+        let to_refs = to_refs.clone();
         let out_dir = out_dir.clone();
         let permit = sem.clone().acquire_owned().await?;
         tasks.spawn(async move {
             let _permit = permit;
             decompile_and_write(
                 &store_root,
-                &from_sha,
-                &from_bytes,
-                &to_sha,
-                &to_bytes,
+                Side {
+                    sha: &from_sha,
+                    bytes: &from_bytes,
+                    refs: from_refs.as_deref(),
+                },
+                Side {
+                    sha: &to_sha,
+                    bytes: &to_bytes,
+                    refs: to_refs.as_deref(),
+                },
                 &fqn,
                 &out_dir,
             )
@@ -224,18 +244,24 @@ async fn read_dll(
     Ok((bytes, sha))
 }
 
+/// One side's decompile inputs — sha, bytes, and the materialised
+/// sibling refs to resolve against.
+struct Side<'a> {
+    sha: &'a [u8; 20],
+    bytes: &'a [u8],
+    refs: Option<&'a camino::Utf8Path>,
+}
+
 async fn decompile_and_write(
     store_root: &camino::Utf8Path,
-    from_sha: &[u8; 20],
-    from_bytes: &[u8],
-    to_sha: &[u8; 20],
-    to_bytes: &[u8],
+    from: Side<'_>,
+    to: Side<'_>,
     fqn: &str,
     out_dir: &Path,
 ) -> Result<()> {
     let (from_text, to_text) = tokio::try_join!(
-        dll::decompile_type(store_root, from_sha, from_bytes, fqn),
-        dll::decompile_type(store_root, to_sha, to_bytes, fqn),
+        dll::decompile_type(store_root, from.sha, from.bytes, from.refs, fqn),
+        dll::decompile_type(store_root, to.sha, to.bytes, to.refs, fqn),
     )?;
     if from_text == to_text {
         // dll-diff said Changed but ilspy renders the same C# — a

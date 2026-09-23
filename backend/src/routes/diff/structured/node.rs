@@ -540,6 +540,7 @@ struct DllSide {
     bytes: Bytes,
     sha: [u8; 20],
     creation_time: u32,
+    refs: Option<camino::Utf8PathBuf>,
 }
 
 /// Decompile `type_name` on one side, linking the types it names within that side's manifest.
@@ -550,9 +551,15 @@ async fn dll_side_dump(
     type_name: &str,
 ) -> Result<Dumped> {
     let decompile = async {
-        transform::dll::decompile_type(store_root, &side.sha, &side.bytes, type_name)
-            .await
-            .map_err(ApiError::from_transform)
+        transform::dll::decompile_type(
+            store_root,
+            &side.sha,
+            &side.bytes,
+            side.refs.as_deref(),
+            type_name,
+        )
+        .await
+        .map_err(ApiError::from_transform)
     };
     let (text, targets) = tokio::try_join!(
         decompile,
@@ -575,6 +582,7 @@ struct Dumped {
 }
 
 impl Dumped {
+    #[cfg(any(feature = "unity", test))]
     fn plain(mime: &'static str, text: String) -> Self {
         Dumped {
             mime,
@@ -700,11 +708,16 @@ async fn open_dll_side(
     };
     let creation_time = snap.manifest().creation_time;
     let (bytes, sha) = dll_side_bytes(&snap, path).await?;
+    let cfg = state.config.load();
+    let refs = crate::state::dll_refs::ensure_dll_refs(&cfg.store_root, &snap, path)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Some(DllSide {
         snap,
         bytes: Bytes::from(bytes),
         sha,
         creation_time,
+        refs,
     }))
 }
 
