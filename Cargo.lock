@@ -4678,6 +4678,7 @@ dependencies = [
  "directories",
  "dll-diff",
  "futures-util",
+ "gtk",
  "insta",
  "mime_guess",
  "muda",

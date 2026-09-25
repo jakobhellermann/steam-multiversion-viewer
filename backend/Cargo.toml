@@ -83,6 +83,7 @@ name = "unity_serialized_diff_value"
 required-features = ["unity"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
 steam-depot-mount = { git = "https://github.com/jakobhellermann/steam-depot-vfs", features = ["fuse"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

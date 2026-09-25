@@ -116,6 +116,17 @@ fn webview_data_dir() -> std::path::PathBuf {
 pub fn run(url: &str, state: AppState, handle: tokio::runtime::Handle) -> ! {
     let event_loop: EventLoop<UserEvent> = EventLoopBuilder::with_user_event().build();
 
+    // WebKitGTK (GTK3) derives its page scale from fontDPI, which reads the
+    // gdk screen resolution; -1 ("unset", Wayland has no XSettings) makes the
+    // page render microscopically small. Pin it to 96 so the scale stays 1.
+    #[cfg(target_os = "linux")]
+    if let Some(display) = gtk::gdk::Display::default() {
+        let screen = display.default_screen();
+        if screen.resolution() < 0.0 {
+            screen.set_resolution(96.0);
+        }
+    }
+
     // The backdrop effect is baked into the window at creation (transparency
     // can't be toggled afterward), so read the persisted choice up front.
     #[cfg(target_os = "windows")]
