@@ -84,22 +84,24 @@ fn decode_texture<R: EnvResolver, P: TypeTreeProvider>(
     read_ress: impl FnOnce(&str) -> Result<Vec<u8>>,
 ) -> Result<Vec<u8>> {
     let tex = file.object_at::<Texture2D>(path_id)?.read()?;
+
+    let bytes;
     let pixels = if !tex.image_data.is_empty() {
-        tex.image_data.clone()
+        tex.image_data.as_slice()
     } else {
         let stream = &tex.m_StreamData;
         ensure!(
             !stream.path.is_empty(),
             TextureUnsupported(format!("texture {} has no pixel data", tex.m_Name))
         );
-        let bytes = read_ress(&stream.path)?;
+        bytes = read_ress(&stream.path)?;
         let (offset, size) = (stream.offset as usize, stream.size as usize);
         ensure!(
             offset + size <= bytes.len(),
             "stream slice {offset}+{size} out of bounds ({} bytes)",
             bytes.len()
         );
-        bytes[offset..offset + size].to_vec()
+        &bytes[offset..offset + size]
     };
     ensure!(
         rabex_texture::TextureFormat::from_id(tex.m_TextureFormat).is_some(),
