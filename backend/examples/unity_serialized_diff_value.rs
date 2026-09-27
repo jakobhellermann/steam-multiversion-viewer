@@ -8,8 +8,9 @@ use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
-use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
+use steam_multiversion_viewer::steam::SteamClient;
+use steam_multiversion_viewer::steam::auth::{resume, saved_session};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use transform::unity::serializedfile::dump_value;
@@ -35,13 +36,9 @@ async fn main() -> Result<()> {
         .with(tracing_timetree::layer().with_min(Duration::from_micros(500)))
         .init();
 
-    let auth = LazyCachedAuth::prepare(
-        LazyCachedAuth::default_refresh_token_cache(),
-        std::env::var("STEAM_USERNAME").expect("missing STEAM_USERNAME"),
-        std::env::var("STEAM_PASSWORD").expect("missing STEAM_PASSWORD"),
-    )
-    .await?;
-    let auth = Arc::new(auth);
+    let session = saved_session().expect("no saved session — start the app and log in once");
+    let (account, connection) = resume(session).await?;
+    let auth = Arc::new(SteamClient::new(account, connection));
 
     let config = Config::load_or_default()?;
     let store = DepotStore::new(config.store_root.as_std_path().to_path_buf());

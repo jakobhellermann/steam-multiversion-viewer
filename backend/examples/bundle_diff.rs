@@ -9,7 +9,7 @@
 //! request after a restart, force the relevant caches to miss:
 //!
 //! - **CDN discover / connection**: kill the process; this cache is
-//!   per-process only (`LazyCachedAuth::inner: OnceCell`).
+//!   per-process only.
 //! - **Depot key**: same — per-process cache (`LazyDepotKey`).
 //! - **`globalgamemanagers` chunk**: delete the chunk file. The path
 //!   is `<store_root>/chunks/<sha>` and you can find the sha by
@@ -30,8 +30,9 @@ use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
-use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
+use steam_multiversion_viewer::steam::SteamClient;
+use steam_multiversion_viewer::steam::auth::{resume, saved_session};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use transform::structured::{Node, NodeStatus};
@@ -61,13 +62,9 @@ async fn main() -> Result<()> {
         .init();
 
     let started_auth = Instant::now();
-    let auth = LazyCachedAuth::prepare(
-        LazyCachedAuth::default_refresh_token_cache(),
-        std::env::var("STEAM_USERNAME").expect("missing STEAM_USERNAME"),
-        std::env::var("STEAM_PASSWORD").expect("missing STEAM_PASSWORD"),
-    )
-    .await?;
-    let auth = Arc::new(auth);
+    let session = saved_session().expect("no saved session — start the app and log in once");
+    let (account, connection) = resume(session).await?;
+    let auth = Arc::new(SteamClient::new(account, connection));
     println!(
         "\n[phase] auth.prepare (login + CDN discover): {:?}",
         started_auth.elapsed()

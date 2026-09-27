@@ -21,11 +21,13 @@ use futures_util::StreamExt;
 use rabex_env::Environment;
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
+use rabex_env::resolver::EnvResolver;
 use rabex_env_steam_depot_vfs::SteamDepotGameFiles;
 use steam_depot_vfs::DepotStore;
-use steam_depot_vfs::session::LazyCachedAuth;
 use steam_multiversion_viewer::config::Config;
 use steam_multiversion_viewer::routes::diff::manifest::{content_id, is_deep_comparable};
+use steam_multiversion_viewer::steam::SteamClient;
+use steam_multiversion_viewer::steam::auth::{resume, saved_session};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use transform::Transformer;
@@ -40,8 +42,6 @@ const DEPOT_ID: u32 = 1030303;
 const BASE_MANIFEST: u64 = 7921642076658611197;
 const TARGET_MANIFEST: u64 = 7780372375671997910;
 const BRANCH: &str = "public";
-
-type Env = Environment<SteamDepotGameFiles, TypeTreeCache<TpkTypeTreeBlob>>;
 
 /// `$name` env var, parsed, or `default` if unset.
 fn env_or<T: std::str::FromStr>(name: &str, default: T) -> T {
@@ -73,14 +73,9 @@ async fn main() -> Result<()> {
         .unwrap_or_default();
     let keep_trees = !files.is_empty();
 
-    let auth = Arc::new(
-        LazyCachedAuth::prepare(
-            LazyCachedAuth::default_refresh_token_cache(),
-            std::env::var("STEAM_USERNAME").expect("missing STEAM_USERNAME"),
-            std::env::var("STEAM_PASSWORD").expect("missing STEAM_PASSWORD"),
-        )
-        .await?,
-    );
+    let session = saved_session().expect("no saved session — start the app and log in once");
+    let (account, connection) = resume(session).await?;
+    let auth = Arc::new(SteamClient::new(account, connection));
 
     let config = Config::load_or_default()?;
     let store = DepotStore::new(config.store_root.as_std_path().to_path_buf());
@@ -289,10 +284,10 @@ fn print_tree(node: &transform::structured::Node, depth: usize) {
     }
 }
 
-fn diff_one(
-    base_env: &Env,
+fn diff_one<R: EnvResolver>(
+    base_env: &Environment<R>,
     base_data_dir: &str,
-    target_env: &Env,
+    target_env: &Environment<R>,
     target_data_dir: &str,
     path: &str,
 ) -> Result<StructuredTree> {
