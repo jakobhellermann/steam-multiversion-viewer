@@ -121,7 +121,12 @@
           commonArgs
           // {
             inherit cargoArtifacts;
-            nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ pkgs.copyDesktopItems ];
+            nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
+              pkgs.copyDesktopItems
+              pkgs.wrapGAppsHook3
+            ];
+            # TLS backend for webkitgtk's https loads
+            buildInputs = commonArgs.buildInputs ++ [ pkgs.glib-networking ];
             pname = "steam-multiversion-viewer";
             cargoExtraArgs = "-p steam-multiversion-viewer";
 
