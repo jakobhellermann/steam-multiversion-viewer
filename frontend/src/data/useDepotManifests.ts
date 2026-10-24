@@ -2,7 +2,7 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { type AppInfo, type ExtraManifestEntry, type ManifestRef } from "../api";
+import { type AppInfo, type ExtraManifestEntry, type ManifestRef } from "./api";
 import { useAppInfo, useExtraManifests } from "./appManifests";
 
 /// One tracked manifest of a depot. A gid can sit on several branches

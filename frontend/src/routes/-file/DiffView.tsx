@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchFileDiff } from "../../api";
+import { fetchFileDiff } from "../../data/api";
 import { HighlightedPre } from "./FilePreview";
 import type { FileLocator } from "./types";
 

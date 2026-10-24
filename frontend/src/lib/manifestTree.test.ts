@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { describe, expect, it } from "vitest";
-import type { ManifestFile } from "../api";
+import type { ManifestFile } from "../data/api";
 import {
   buildTree,
   fileExtension,

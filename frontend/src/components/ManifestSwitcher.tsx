@@ -8,7 +8,7 @@ import {
   type ExtraManifestEntry,
   type GameInfo,
   type ManifestStatusEntry,
-} from "../api";
+} from "../data/api";
 import { formatDate } from "../lib/format";
 import { useBranchFilter } from "../lib/useBranchFilter";
 

@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { describe, expect, test } from "vitest";
-import type { AppInfo, DepotEntry, ExtraManifestEntry } from "../api";
+import type { AppInfo, DepotEntry, ExtraManifestEntry } from "./api";
 import { depotManifestRefs, manifestRefOf } from "./useDepotManifests";
 
 function depot(depotId: number, manifests: Array<[string, string]>): DepotEntry {

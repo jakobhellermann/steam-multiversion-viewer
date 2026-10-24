@@ -2,7 +2,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { fetchConfig, patchConfig, type Config, type VibrancyEffect } from "../api";
+import { fetchConfig, patchConfig, type Config, type VibrancyEffect } from "../data/api";
 import { applyVibrancy, vibrancyActive, vibrancySupported } from "../vibrancy";
 
 export const Route = createFileRoute("/settings")({ component: SettingsPage });

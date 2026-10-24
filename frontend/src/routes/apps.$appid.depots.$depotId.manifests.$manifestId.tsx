@@ -21,7 +21,7 @@ import {
   type ManifestInfo,
   type ManifestRef,
   type ManifestStatusEntry,
-} from "../api";
+} from "../data/api";
 import { Bytes } from "../components/Bytes";
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
 import { ErrorBox } from "../components/ErrorBox";
@@ -39,8 +39,8 @@ import {
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { pinScroll } from "../lib/pinScroll";
-import { useAppManifestStatuses, useManifestStatus } from "../lib/appManifests";
-import { queryKeys } from "../lib/queryKeys";
+import { useAppManifestStatuses, useManifestStatus } from "../data/appManifests";
+import { queryKeys } from "../data/queryKeys";
 
 type Search = {
   /// `undefined` means "default" (which is `public`). Keeping default

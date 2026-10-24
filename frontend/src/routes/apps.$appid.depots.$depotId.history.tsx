@@ -11,12 +11,12 @@ import {
   manifestDiffDeepKey,
   type ManifestDiffEntry,
   type ManifestHistoryEntry,
-} from "../api";
+} from "../data/api";
 import { BranchFilter } from "../components/BranchFilter";
 import { ErrorBox } from "../components/ErrorBox";
 import { formatDate } from "../lib/format";
 import { useBranchFilter } from "../lib/useBranchFilter";
-import { manifestRefOf, useDepotManifests } from "../lib/useDepotManifests";
+import { manifestRefOf, useDepotManifests } from "../data/useDepotManifests";
 
 type Search = {
   /// Deep-compare toggle. In the URL so it survives reloads and links.

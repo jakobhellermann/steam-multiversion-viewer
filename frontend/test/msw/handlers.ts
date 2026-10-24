@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { http, HttpResponse } from "msw";
-import type { OwnedGame } from "#/api";
+import type { OwnedGame } from "#/data/api";
 
 export const libraryFixture: OwnedGame[] = [
   { appid: 220, name: "Half-Life 2", playtime_minutes: 720 },

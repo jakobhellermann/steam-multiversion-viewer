@@ -2,7 +2,7 @@
 import { render } from "@testing-library/react";
 import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createQueryClient } from "#/queryClient";
+import { createQueryClient } from "#/data/queryClient";
 import { routeTree } from "#/routeTree.gen";
 import { parseSearch, stringifySearch } from "#/searchParams";
 

@@ -12,11 +12,11 @@ import {
   type ManifestRef,
   type ManifestStatusEntry,
   type StructuredNode,
-} from "../../api";
+} from "../../data/api";
 import { ErrorBox } from "../../components/ErrorBox";
 import { BranchFilter } from "../../components/BranchFilter";
 import { formatDate } from "../../lib/format";
-import { manifestRefOf, type DepotManifest } from "../../lib/useDepotManifests";
+import { manifestRefOf, type DepotManifest } from "../../data/useDepotManifests";
 import { useBranchFilter } from "../../lib/useBranchFilter";
 
 /// Per-status text color. Follows the diff conventions (added = new side

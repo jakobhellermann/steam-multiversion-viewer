@@ -1,9 +1,9 @@
 import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fetchLibrary } from "./api";
-import { applyPreload } from "./lib/preload";
-import { createQueryClient } from "./queryClient";
+import { fetchLibrary } from "./data/api";
+import { applyPreload } from "./data/preload";
+import { createQueryClient } from "./data/queryClient";
 import { routeTree } from "./routeTree.gen";
 import { parseSearch, stringifySearch } from "./searchParams";
 

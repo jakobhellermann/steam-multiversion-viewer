@@ -7,7 +7,7 @@ import {
   type TreeNavState,
   type VisibleRow,
 } from "./StructuredView";
-import type { StructuredNode } from "../../api";
+import type { StructuredNode } from "../../data/api";
 
 // Minimal node — only the fields the nav logic reads.
 function node(id: string, children: StructuredNode[] = []): StructuredNode {

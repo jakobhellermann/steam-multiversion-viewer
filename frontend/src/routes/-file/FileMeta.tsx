@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-import type { FileView } from "../../api";
+import type { FileView } from "../../data/api";
 import { Bytes } from "../../components/Bytes";
 
 /// Header line below the path: size, optional symlink-target, and (for

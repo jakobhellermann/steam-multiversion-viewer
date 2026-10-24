@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { exportFolderName, joinExportPath } from "./exportName";
-import type { GameInfo } from "../api";
+import type { GameInfo } from "../data/api";
 
 const unity = (bundle_version?: string): GameInfo => ({
   engine: { engine: "unity", data: { version: "2020.2.2f1", bundle_version } },

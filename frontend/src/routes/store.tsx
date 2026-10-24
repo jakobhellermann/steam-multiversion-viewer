@@ -12,7 +12,7 @@ import {
   type StoreApp,
   type StoreManifest,
   type StoreManifestRef,
-} from "../api";
+} from "../data/api";
 import { Bytes } from "../components/Bytes";
 import { ErrorBox } from "../components/ErrorBox";
 import { formatBytes, formatDate } from "../lib/format";

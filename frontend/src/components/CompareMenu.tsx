@@ -10,7 +10,7 @@ import {
   type GameInfo,
   type ManifestRef,
   type ManifestStatusEntry,
-} from "../api";
+} from "../data/api";
 import { BranchFilterList } from "./BranchFilterList";
 import {
   buildDepotGroups,

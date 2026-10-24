@@ -11,7 +11,7 @@ import {
   type ExtraManifestEntry,
   type ManifestRef,
   type ManifestStatusEntry,
-} from "../api";
+} from "./api";
 import { queryKeys } from "./queryKeys";
 
 export function useAppInfo(appid: AppId): UseQueryResult<AppInfo> {

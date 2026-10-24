@@ -8,7 +8,7 @@ import {
   fetchFileViewOptional,
   fileRawUrl,
   type ManifestRef,
-} from "../api";
+} from "../data/api";
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { ErrorBox } from "../components/ErrorBox";
@@ -16,7 +16,7 @@ import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { formatBytes, formatDate } from "../lib/format";
 import { FileMeta } from "./-file/FileMeta";
 import { FilePreview } from "./-file/FilePreview";
-import { findStatus, useAppManifestStatuses, useManifestStatus } from "../lib/appManifests";
+import { findStatus, useAppManifestStatuses, useManifestStatus } from "../data/appManifests";
 
 type Search = {
   /// Omitted in URL when the default; readers must apply `?? "public"`.

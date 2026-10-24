@@ -15,7 +15,7 @@ import {
   structuredNodeImageUrl,
   type NodeStatus,
   type StructuredNode,
-} from "../../api";
+} from "../../data/api";
 import { Loader2 } from "lucide-react";
 
 import { mediaKindForMime } from "../../lib/mediaKind";

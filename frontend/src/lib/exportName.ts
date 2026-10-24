@@ -1,4 +1,4 @@
-import type { GameInfo } from "../api";
+import type { GameInfo } from "../data/api";
 
 /// "<game name>-<version>", falling back to the manifest id when no game
 /// version was detected.

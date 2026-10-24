@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { fetchMountStatus, type ProjfsEnableOutcome, startMount, stopMount } from "../api";
+import { fetchMountStatus, type ProjfsEnableOutcome, startMount, stopMount } from "../data/api";
 
 /// Header icon-button that toggles the depot mount. Sky-blue when the
 /// mount is up, slate when idle; hover-title shows the current

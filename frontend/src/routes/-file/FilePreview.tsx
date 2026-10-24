@@ -2,7 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { memo, useMemo } from "react";
 
-import { fetchTransformedFile, type FileView } from "../../api";
+import { fetchTransformedFile, type FileView } from "../../data/api";
 import { formatBytes } from "../../lib/format";
 import { mediaKindForPath } from "../../lib/mediaKind";
 import { highlight, langForMime, langForPath } from "../../lib/syntax";

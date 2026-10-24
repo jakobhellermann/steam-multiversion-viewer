@@ -8,7 +8,7 @@ import {
   type AppId,
   type ExportStatus,
   type GameInfo,
-} from "../api";
+} from "../data/api";
 import { exportFolderName, joinExportPath } from "../lib/exportName";
 import { formatBytes } from "../lib/format";
 

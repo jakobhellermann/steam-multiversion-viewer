@@ -1,7 +1,7 @@
 // Windows backdrop wiring: Rust owns the window transparency + DWM effect; the
 // frontend applies the darkening tint and requests the effect over ipc.
 
-import type { Config } from "./api";
+import type { Config } from "./data/api";
 
 declare global {
   interface Window {

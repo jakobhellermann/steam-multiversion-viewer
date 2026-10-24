@@ -8,7 +8,7 @@ import {
   fetchStructuredDiffNode,
   structuredNodeImageUrl,
   type StructuredNode,
-} from "../../api";
+} from "../../data/api";
 import { mediaKindForMime } from "../../lib/mediaKind";
 import { type Lang, langForMime } from "../../lib/syntax";
 import { useDelayedFlag } from "../../lib/useDelayedFlag";

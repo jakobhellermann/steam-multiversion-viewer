@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 // Mirrored by `backend/src/preload.rs` for server-side preloads; `queryKeys.contract.json` pins both.
-import type { AppId, ManifestRef } from "../api";
+import type { AppId, ManifestRef } from "./api";
 
 export const queryKeys = {
   app: (appid: AppId) => ["app", appid] as const,

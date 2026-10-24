@@ -8,15 +8,15 @@ import {
   type DepotManifest,
   type ExtraManifestEntry,
   type ManifestStatusEntry,
-} from "../api";
+} from "../data/api";
 import { BranchFilter } from "../components/BranchFilter";
 import { Bytes } from "../components/Bytes";
 import { ErrorBox } from "../components/ErrorBox";
 import { parseSteamDbPaste, steamDbSignInGated, type ParsedExtra } from "../lib/parseSteamDbPaste";
 import { pinScroll } from "../lib/pinScroll";
 import { useBranchFilter } from "../lib/useBranchFilter";
-import { useAppManifestStatuses } from "../lib/appManifests";
-import { queryKeys } from "../lib/queryKeys";
+import { useAppManifestStatuses } from "../data/appManifests";
+import { queryKeys } from "../data/queryKeys";
 
 export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
 

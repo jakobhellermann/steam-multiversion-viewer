@@ -3,7 +3,7 @@
 //! manifest (official + tracked) into one entry per gid, grouped by depot,
 //! and filter that list by the active branch selection. Kept out of the
 //! component so it can be unit-tested.
-import type { AppInfo, ExtraManifestEntry, ManifestStatusEntry } from "../api";
+import type { AppInfo, ExtraManifestEntry, ManifestStatusEntry } from "../data/api";
 
 export type CompareCandidate = {
   key: string;

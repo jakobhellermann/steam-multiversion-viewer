@@ -9,7 +9,7 @@ import {
   type FileView,
   type GameInfo,
   type ManifestRef,
-} from "../api";
+} from "../data/api";
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { ErrorBox } from "../components/ErrorBox";
 import { formatDate } from "../lib/format";
@@ -18,7 +18,7 @@ import { FilePreview } from "./-file/FilePreview";
 import { StructuredDiffView } from "./-file/StructuredDiffView";
 import { projectRefToSide, qualifyRefForSide } from "./-file/pptrRef";
 import type { FileLocator } from "./-file/types";
-import { useAppManifestStatuses, useManifestStatus } from "../lib/appManifests";
+import { useAppManifestStatuses, useManifestStatus } from "../data/appManifests";
 
 type Search = {
   /// Branch of the base manifest. Omitted in URL when `"public"`.

@@ -2,9 +2,9 @@
 import { Link, createFileRoute, linkOptions, useNavigate } from "@tanstack/react-router";
 
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
-import { useAppManifestStatuses, useManifestStatus } from "../lib/appManifests";
+import { useAppManifestStatuses, useManifestStatus } from "../data/appManifests";
 import { formatDate } from "../lib/format";
-import { useDepotManifests } from "../lib/useDepotManifests";
+import { useDepotManifests } from "../data/useDepotManifests";
 import { HistoryView } from "./-file/HistoryView";
 
 type Search = {

@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import type { ManifestDiffEntry } from "../api";
+import type { ManifestDiffEntry } from "../data/api";
 import { server } from "../../test/msw/server";
 import { renderRoute } from "../../test/renderRoute";
 

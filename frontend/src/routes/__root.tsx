@@ -12,7 +12,7 @@ import { useEffect, useRef } from "react";
 
 import { DownloadsDrawer } from "../components/DownloadsDrawer";
 import { MountToggle } from "../components/MountToggle";
-import { fetchAuthStatus, fetchConfig, logout, type AuthStatus } from "../api";
+import { fetchAuthStatus, fetchConfig, logout, type AuthStatus } from "../data/api";
 import { applyVibrancy, vibrancySupported } from "../vibrancy";
 import "../styles.css";
 

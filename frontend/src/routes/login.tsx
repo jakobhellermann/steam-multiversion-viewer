@@ -2,7 +2,7 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { fetchAuthStatus, login, submitLoginCode, type AuthStatus } from "../api";
+import { fetchAuthStatus, login, submitLoginCode, type AuthStatus } from "../data/api";
 import { ErrorBox } from "../components/ErrorBox";
 
 type Search = {

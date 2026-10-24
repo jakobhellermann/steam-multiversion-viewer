@@ -1,6 +1,6 @@
 // TODO(ai-review): review for style and correctness
 import { useEffect, useRef, useState } from "react";
-import { cancelDownloads, type DownloadStats } from "../api";
+import { cancelDownloads, type DownloadStats } from "../data/api";
 import { consumeShowImmediately } from "../lib/downloadsUiSignal";
 import { formatBytes } from "../lib/format";
 

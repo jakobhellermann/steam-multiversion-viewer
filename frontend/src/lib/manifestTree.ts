@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-import type { ManifestDiffEntry, ManifestFile } from "../api";
+import type { ManifestDiffEntry, ManifestFile } from "../data/api";
 
 /// One node in the tree built from the flat manifest file list. `file` is
 /// set on leaves (files); for directories it stays null. `children` is

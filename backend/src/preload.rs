@@ -23,7 +23,7 @@ pub struct Entry {
     pub data: Value,
 }
 
-/// Query keys, mirrored by `frontend/src/lib/queryKeys.ts`.
+/// Query keys, mirrored by `frontend/src/data/queryKeys.ts`.
 mod keys {
     use serde_json::{Value, json};
 
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn keys_match_frontend_contract() {
         let contract: Value = serde_json::from_str(include_str!(
-            "../../frontend/src/lib/queryKeys.contract.json"
+            "../../frontend/src/data/queryKeys.contract.json"
         ))
         .unwrap();
         let (app, depot, manifest, branch) = (
