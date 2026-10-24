@@ -1,12 +1,13 @@
 // TODO(ai-review): review for style and correctness
-import { createFileRoute, Link, linkOptions, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, linkOptions, redirect, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   downloadManifest,
   fetchFileView,
   fetchFileViewOptional,
   fileRawUrl,
+  type FileView,
   type ManifestRef,
 } from "../data/api";
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
@@ -55,6 +56,29 @@ export const Route = createFileRoute("/apps/$appid/depots/$depotId/manifests/$ma
     }
     return out;
   },
+  // A path from another platform's depot resolves to this one's file (see the backend's
+  // platform_paths); show its own path. Cached views redirect before rendering, cold ones
+  // once loaded (below).
+  beforeLoad: ({ context: { queryClient }, params, search, location }) => {
+    const branch = search.branch ?? "public";
+    const appid = Number(params.appid);
+    const depotId = Number(params.depotId);
+    const view = queryClient.getQueryData<FileView>(
+      queryKeys.fileView(appid, depotId, params.manifestId, branch, search.path),
+    );
+    if (view && view.path !== search.path) {
+      queryClient.setQueryData(
+        queryKeys.fileView(appid, depotId, params.manifestId, branch, view.path),
+        view,
+      );
+      throw redirect({
+        to: ".",
+        search: { ...search, path: view.path },
+        hash: location.hash,
+        replace: true,
+      });
+    }
+  },
   component: FileViewPage,
 });
 
@@ -77,6 +101,16 @@ function FileViewPage() {
     // re-run when navigated back to.
     refetchOnMount: (query) => (isFreshPreload(query) ? false : "always"),
   });
+  const resolvedPath = view.data?.path;
+  useEffect(() => {
+    if (resolvedPath != null && resolvedPath !== path) {
+      void navigate({
+        search: (prev) => ({ ...prev, path: resolvedPath }),
+        hash: true,
+        replace: true,
+      });
+    }
+  }, [resolvedPath, path, navigate]);
 
   // Statuses give the compare menu creation times for its chronological sort.
   const {
