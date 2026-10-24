@@ -111,7 +111,7 @@ export function DownloadsDrawer() {
   }, [activeNow]);
 
   useEffect(() => {
-    const es = new EventSource("/api/downloads/events");
+    const es = new EventSource("/api/events");
     const onStats = (e: MessageEvent) => {
       const s = JSON.parse(e.data) as DownloadStats;
       setStats(s);

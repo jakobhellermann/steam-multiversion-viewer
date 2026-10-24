@@ -1,26 +1,21 @@
 // TODO(ai-review): review for style and correctness
 //! Routes for driving and observing the background chunk-download
 //! manager. Split out from `routes/mod.rs` because the cluster has its
-//! own concerns (SSE stream, cancel semantics) that don't share much
+//! own concerns (cancel semantics) that don't share much
 //! with the read-only manifest/file routes.
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::response::Sse;
-use axum::response::sse::{Event, KeepAlive};
-use futures_util::{Stream, StreamExt};
 use serde::Deserialize;
 use steam_depot_vfs::ChunkHash;
-use tokio_stream::wrappers::BroadcastStream;
 use utoipa::ToSchema;
 
 use crate::http::ApiError;
 use crate::state::AppState;
-use crate::state::downloads::{DownloadEvent, DownloadStats, EnqueueSummary};
+use crate::state::downloads::{DownloadStats, EnqueueSummary};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::{Result, default_branch};
@@ -124,30 +119,4 @@ pub async fn downloads_snapshot(State(state): State<AppState>) -> Json<DownloadS
 pub async fn downloads_cancel(State(state): State<AppState>) -> Json<DownloadStats> {
     state.downloads.cancel();
     Json(state.downloads.current())
-}
-
-/// Server-Sent Events stream of download events. Frontend listens for
-/// two named events: `stats` (aggregate progress for the drawer) and
-/// `chunks` (per-file `chunks_present` updates for the manifest pages).
-/// Emits the current stats snapshot as the first event on (re)connect.
-pub async fn downloads_events(
-    State(state): State<AppState>,
-) -> Sse<impl Stream<Item = std::result::Result<Event, axum::Error>>> {
-    let initial = DownloadEvent::Stats(state.downloads.current());
-    let rx = state.downloads.subscribe();
-    let live = BroadcastStream::new(rx).filter_map(|res| async move { res.ok() });
-    let stream = futures_util::stream::once(async move { initial })
-        .chain(live)
-        .map(|evt| {
-            let (name, payload) = match &evt {
-                DownloadEvent::Stats(s) => ("stats", serde_json::to_value(s)),
-                DownloadEvent::Chunks(c) => ("chunks", serde_json::to_value(c)),
-            };
-            let payload = payload.map_err(axum::Error::new)?;
-            Event::default()
-                .event(name)
-                .json_data(&payload)
-                .map_err(axum::Error::new)
-        });
-    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
 }

@@ -144,10 +144,7 @@ async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>, AppState)
                 async || Json(openapi)
             }),
         )
-        .route(
-            "/api/downloads/events",
-            get(routes::downloads::downloads_events),
-        )
+        .route("/api/events", get(routes::events::events))
         .route("/api/docs", get(scalar_html))
         .route(
             "/api/third-party-notices",

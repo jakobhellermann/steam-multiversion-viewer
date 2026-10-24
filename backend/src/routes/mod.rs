@@ -8,6 +8,7 @@ pub mod auth;
 pub mod config;
 pub mod diff;
 pub mod downloads;
+pub mod events;
 pub mod export;
 pub mod extra_manifests;
 pub mod files;

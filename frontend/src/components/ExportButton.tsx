@@ -37,9 +37,23 @@ export function ExportButton({
   const subdir = exportFolderName(appName, appid, gameInfo, manifestId);
   const destination = config.data ? joinExportPath(config.data.export_dir, subdir) : undefined;
 
+  // The backend only reports `idle`/`running`; the outcome arrives once as `export_finished`.
+  const [finished, setFinished] = useState<ExportStatus | null>(null);
+  useEffect(() => {
+    const es = new EventSource("/api/events");
+    es.addEventListener("export_finished", (e: MessageEvent) => {
+      setFinished(JSON.parse(e.data) as ExportStatus);
+      void qc.invalidateQueries({ queryKey: ["export-status"] });
+    });
+    return () => es.close();
+  }, [qc]);
+
   const start = useMutation({
     mutationFn: () => exportManifest(appid, depotId, manifestId, { branch, subdir }),
-    onSuccess: (s) => qc.setQueryData(["export-status"], s),
+    onSuccess: (s) => {
+      setFinished(null);
+      qc.setQueryData(["export-status"], s);
+    },
   });
   const cancel = useMutation({
     mutationFn: cancelExport,
@@ -48,29 +62,28 @@ export function ExportButton({
 
   // The backend runs one export at a time, so the status is global — only
   // treat it as ours when it names this manifest.
-  const target = status.data?.target;
-  const mine =
-    target?.app_id === appid && target?.depot_id === depotId && target?.manifest_id === manifestId;
-  const state = status.data?.state;
-  const running = state === "running";
-  const blocked = running && !mine;
+  const isMine = (s: ExportStatus | null | undefined) =>
+    s?.target?.app_id === appid &&
+    s.target.depot_id === depotId &&
+    s.target.manifest_id === manifestId;
+  const running = status.data?.state === "running";
+  const blocked = running && !isMine(status.data);
+  const current = running ? status.data : finished;
+  const shown = isMine(current) ? current : null;
 
-  const [dismissed, setDismissed] = useState(true);
-  const settled = mine && (state === "done" || state === "cancelled");
+  // A failure stays put — its message is the whole point.
   useEffect(() => {
-    if (running) setDismissed(false);
-    if (!settled) return;
-    const t = window.setTimeout(() => setDismissed(true), 3000);
+    if (finished?.state !== "done" && finished?.state !== "cancelled") return;
+    const t = window.setTimeout(() => setFinished(null), 3000);
     return () => window.clearTimeout(t);
-  }, [running, settled]);
+  }, [finished]);
 
-  const error =
-    (mine && !dismissed ? status.data?.error : undefined) ?? (start.error as Error | null)?.message;
+  const error = shown?.error ?? (start.error as Error | null)?.message;
 
   return (
     <div className="ml-auto text-right">
       <div className="flex items-center gap-3">
-        {status.data && mine && !dismissed && <ExportProgress status={status.data} />}
+        {shown && <ExportProgress status={shown} />}
         <button
           type="button"
           onClick={() => (running ? cancel.mutate() : start.mutate())}
@@ -78,7 +91,7 @@ export function ExportButton({
           title={blocked ? "Another export is running" : running ? undefined : destination}
           className="rounded border border-emerald-800 bg-emerald-950/40 px-3 py-1.5 text-sm whitespace-nowrap hover:bg-emerald-900/40 disabled:opacity-50"
         >
-          {running && mine ? "Cancel export" : start.isPending ? "Starting…" : "Export to disk"}
+          {running && !blocked ? "Cancel export" : start.isPending ? "Starting…" : "Export to disk"}
         </button>
       </div>
       {error && <p className="mt-2 max-w-96 text-xs wrap-break-word text-red-300">{error}</p>}
@@ -114,7 +127,7 @@ function ExportProgress({ status }: { status: ExportStatus }) {
       <div className="mt-1 h-1 overflow-hidden rounded bg-slate-800">
         <div
           className={`h-full transition-[width] ${status.state === "failed" ? "bg-red-500" : "bg-emerald-500"}`}
-          style={{ width: `${status.state === "running" ? pct : 100}%` }}
+          style={{ width: `${status.state === "done" ? 100 : pct}%` }}
         />
       </div>
     </div>

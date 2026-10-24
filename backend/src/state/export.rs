@@ -11,6 +11,7 @@ use futures_util::FutureExt as _;
 use serde::Serialize;
 use steam_vent_depot::{DepotFileKind, Manifest};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::broadcast;
 use utoipa::ToSchema;
 
 use super::Snapshot;
@@ -53,9 +54,12 @@ pub struct ExportStatus {
 }
 
 pub struct ExportManager {
+    /// `Idle` or `Running`; the outcome is only broadcast on `finished`.
     status: Mutex<ExportStatus>,
     downloads: Arc<ChunkService>,
     cancelled: AtomicBool,
+    /// Final status with `state` `Done`, `Failed` or `Cancelled`.
+    finished: broadcast::Sender<ExportStatus>,
 }
 
 #[derive(Debug)]
@@ -92,11 +96,17 @@ impl From<std::io::Error> for ExportError {
 
 impl ExportManager {
     pub fn new(downloads: Arc<ChunkService>) -> Arc<Self> {
+        let (finished, _) = broadcast::channel(4);
         Arc::new(Self {
             status: Mutex::new(ExportStatus::default()),
             downloads,
             cancelled: AtomicBool::new(false),
+            finished,
         })
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<ExportStatus> {
+        self.finished.subscribe()
     }
 
     pub fn current(&self) -> ExportStatus {
@@ -146,17 +156,20 @@ impl ExportManager {
             });
             let final_status = {
                 let mut status = this.status.lock().expect("export status poisoned");
-                status.current_path = None;
-                status.state = match &result {
+                let mut final_status = std::mem::take(&mut *status);
+                final_status.current_path = None;
+                final_status.state = match &result {
                     Ok(()) if this.cancelled.load(Ordering::Acquire) => ExportState::Cancelled,
                     Ok(()) => ExportState::Done,
                     Err(err) => {
-                        status.error = Some(err.to_string());
+                        final_status.error = Some(err.to_string());
                         ExportState::Failed
                     }
                 };
-                status.clone()
+                final_status
             };
+            // No subscriber means no open page, which has nothing to show the outcome on.
+            let _ = this.finished.send(final_status.clone());
             match &result {
                 Ok(()) => tracing::info!(
                     target_dir = %target_dir,
