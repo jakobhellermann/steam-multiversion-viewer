@@ -114,6 +114,6 @@ fn decode_texture<R: EnvResolver, P: TypeTreeProvider>(
         tex.m_TextureFormat,
         tex.m_Width as u32,
         tex.m_Height as u32,
-        &pixels,
+        pixels,
     )?)
 }

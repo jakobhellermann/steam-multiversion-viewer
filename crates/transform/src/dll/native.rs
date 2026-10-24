@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use object::{Object, ObjectSection};
+use object::{NameOrOrdinal, Object, ObjectSection};
 
 use crate::TransformError;
 use crate::structured::{Node, NodeStatus, StructuredTree, human_bytes};
@@ -20,10 +20,10 @@ pub fn build_tree(bytes: &[u8], file_label: &str) -> Result<StructuredTree, Tran
     if let Some(node) = sections_node(&file) {
         children.push(node);
     }
-    if let Some(node) = exports_node(&file) {
+    if let Some(node) = exports_node(&file)? {
         children.push(node);
     }
-    if let Some(node) = imports_node(&file) {
+    if let Some(node) = imports_node(&file)? {
         children.push(node);
     }
 
@@ -60,15 +60,46 @@ fn sections_node(file: &object::File) -> Option<Node> {
     })
 }
 
-fn exports_node(file: &object::File) -> Option<Node> {
-    let mut names: Vec<String> = file
-        .exports()
-        .ok()?
-        .into_iter()
-        .map(|e| String::from_utf8_lossy(e.name()).into_owned())
-        .collect();
+fn symbol_label<T: AsRef<[u8]>>(name: NameOrOrdinal<T>) -> String {
+    match name {
+        NameOrOrdinal::Name(name) => String::from_utf8_lossy(name.as_ref()).into_owned(),
+        NameOrOrdinal::Ordinal(ordinal) => format!("#{ordinal}"),
+    }
+}
+
+fn object_error(what: &str, e: object::Error) -> TransformError {
+    TransformError::Other(format!("failed to read {what}: {e}"))
+}
+
+fn export_names(file: &object::File) -> Result<Vec<String>, TransformError> {
+    file.exports()
+        .map_err(|e| object_error("exports", e))?
+        .map(|export| {
+            export
+                .map(|export| symbol_label(export.name()))
+                .map_err(|e| object_error("export", e))
+        })
+        .collect()
+}
+
+/// `(library, symbol)` pairs.
+fn import_names(file: &object::File) -> Result<Vec<(String, String)>, TransformError> {
+    file.imports()
+        .map_err(|e| object_error("imports", e))?
+        .map(|import| {
+            let import = import.map_err(|e| object_error("import", e))?;
+            Ok((
+                String::from_utf8_lossy(import.library()).into_owned(),
+                symbol_label(import.name()),
+            ))
+        })
+        .collect()
+}
+
+fn exports_node(file: &object::File) -> Result<Option<Node>, TransformError> {
+    let mut names = export_names(file)?;
     if names.is_empty() {
-        return None;
+        return Ok(None);
     }
     names.sort();
     let children = names
@@ -79,26 +110,23 @@ fn exports_node(file: &object::File) -> Option<Node> {
             ..Node::default()
         })
         .collect::<Vec<_>>();
-    Some(Node {
+    Ok(Some(Node {
         id: "exports".to_string(),
         label: "Exports".to_string(),
         badge: Some(children.len().to_string()),
         children,
         ..Node::default()
-    })
+    }))
 }
 
-fn imports_node(file: &object::File) -> Option<Node> {
-    let imports = file.imports().ok()?;
+fn imports_node(file: &object::File) -> Result<Option<Node>, TransformError> {
+    let imports = import_names(file)?;
     if imports.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut by_library: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for import in imports {
-        by_library
-            .entry(String::from_utf8_lossy(import.library()).into_owned())
-            .or_default()
-            .push(String::from_utf8_lossy(import.name()).into_owned());
+    for (library, name) in imports {
+        by_library.entry(library).or_default().push(name);
     }
     let children = by_library
         .into_iter()
@@ -122,13 +150,13 @@ fn imports_node(file: &object::File) -> Option<Node> {
             }
         })
         .collect::<Vec<_>>();
-    Some(Node {
+    Ok(Some(Node {
         id: "imports".to_string(),
         label: "Imports".to_string(),
         badge: Some(children.len().to_string()),
         children,
         ..Node::default()
-    })
+    }))
 }
 
 /// GNU-`diff` sense: only in `to` is Added, only in `from` is Removed.
@@ -146,10 +174,10 @@ pub fn build_diff_tree(
     if let Some(node) = diff_sections_node(&from, &to) {
         children.push(node);
     }
-    if let Some(node) = diff_exports_node(&from, &to) {
+    if let Some(node) = diff_exports_node(&from, &to)? {
         children.push(node);
     }
-    if let Some(node) = diff_imports_node(&from, &to) {
+    if let Some(node) = diff_imports_node(&from, &to)? {
         children.push(node);
     }
     let status = aggregate_status(&children);
@@ -224,36 +252,32 @@ fn section_leaf(name: &str) -> Node {
     }
 }
 
-fn diff_exports_node(from: &object::File, to: &object::File) -> Option<Node> {
-    let from_names: std::collections::BTreeSet<String> = from
-        .exports()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|e| String::from_utf8_lossy(e.name()).into_owned())
-        .collect();
-    let to_names: std::collections::BTreeSet<String> = to
-        .exports()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|e| String::from_utf8_lossy(e.name()).into_owned())
-        .collect();
+fn diff_exports_node(
+    from: &object::File,
+    to: &object::File,
+) -> Result<Option<Node>, TransformError> {
+    let from_names: std::collections::BTreeSet<String> = export_names(from)?.into_iter().collect();
+    let to_names: std::collections::BTreeSet<String> = export_names(to)?.into_iter().collect();
     let children = diff_name_set(&from_names, &to_names, "export");
-    diff_group_node("exports", "Exports", children)
+    Ok(diff_group_node("exports", "Exports", children))
 }
 
-fn diff_imports_node(from: &object::File, to: &object::File) -> Option<Node> {
-    let group = |file: &object::File| -> BTreeMap<String, std::collections::BTreeSet<String>> {
+fn diff_imports_node(
+    from: &object::File,
+    to: &object::File,
+) -> Result<Option<Node>, TransformError> {
+    let group = |file: &object::File| -> Result<
+        BTreeMap<String, std::collections::BTreeSet<String>>,
+        TransformError,
+    > {
         let mut by_library: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
-        for import in file.imports().unwrap_or_default() {
-            by_library
-                .entry(String::from_utf8_lossy(import.library()).into_owned())
-                .or_default()
-                .insert(String::from_utf8_lossy(import.name()).into_owned());
+        for (library, name) in import_names(file)? {
+            by_library.entry(library).or_default().insert(name);
         }
-        by_library
+        Ok(by_library)
     };
-    let mut from_libs = group(from);
-    let to_libs = group(to);
+    let mut from_libs = group(from)?;
+    let to_libs = group(to)?;
 
     let mut children: Vec<Node> = Vec::new();
     for (library, to_names) in &to_libs {
@@ -278,7 +302,7 @@ fn diff_imports_node(from: &object::File, to: &object::File) -> Option<Node> {
             });
         }
     }
-    diff_group_node("imports", "Imports", children)
+    Ok(diff_group_node("imports", "Imports", children))
 }
 
 /// Set-diff two name collections into status-tagged leaves, `id_prefix:name`.
