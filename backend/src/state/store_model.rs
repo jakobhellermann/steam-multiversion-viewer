@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use steam_depot_vfs::{ChunkHash, DepotStore};
 
+use super::store_index::ManifestStats;
 use crate::steam::{AppId, DepotId, ManifestId};
 
 pub type ManifestKey = (AppId, DepotId, ManifestId);
@@ -18,6 +19,8 @@ pub struct ManifestNode {
     pub creation_time: u32,
     /// Deduplicated; Steam can list the same chunk across several files.
     pub chunks: Vec<ChunkHash>,
+    /// Uncompressed size of `chunks`.
+    pub bytes_total: u64,
 }
 
 pub struct StoreModel {
@@ -48,10 +51,12 @@ impl StoreModel {
 
             let mut seen = HashSet::new();
             let mut chunks = Vec::new();
+            let mut bytes_total = 0;
             for file in &m.files {
                 for chunk in file.chunks() {
                     if seen.insert(chunk.sha) {
                         chunks.push(chunk.sha);
+                        bytes_total += u64::from(chunk.size_uncompressed);
                         chunk_size
                             .entry(chunk.sha)
                             .or_insert_with(|| u64::from(chunk.size_compressed));
@@ -67,6 +72,7 @@ impl StoreModel {
                 manifest_id: ManifestId(gid),
                 creation_time: m.creation_time,
                 chunks,
+                bytes_total,
             });
         }
 
@@ -75,6 +81,35 @@ impl StoreModel {
             chunk_refs,
             chunk_size,
         })
+    }
+
+    /// Download statistics and creation time of a manifest in the model, with chunk presence
+    /// read from `present`. Equals [`StoreIndex::manifest_stats`] of the decoded manifest.
+    ///
+    /// [`StoreIndex::manifest_stats`]: super::store_index::StoreIndex::manifest_stats
+    pub fn manifest_stats(
+        &self,
+        key: ManifestKey,
+        present: &HashSet<ChunkHash>,
+    ) -> Option<(ManifestStats, u32)> {
+        let node = self
+            .manifests
+            .iter()
+            .find(|n| (n.app_id, n.depot_id, n.manifest_id) == key)?;
+        let mut stats = ManifestStats {
+            chunks_total: node.chunks.len() as u32,
+            bytes_total: node.bytes_total,
+            ..ManifestStats::default()
+        };
+        for sha in &node.chunks {
+            let wire = self.chunk_size[sha];
+            stats.bytes_total_compressed += wire;
+            if !present.contains(sha) {
+                stats.chunks_missing += 1;
+                stats.bytes_missing_compressed += wire;
+            }
+        }
+        Some((stats, node.creation_time))
     }
 
     /// Present chunks whose every referencing manifest lies within
@@ -138,6 +173,7 @@ mod tests {
             manifest_id: ManifestId(m),
             creation_time: 0,
             chunks,
+            bytes_total: 0,
         };
         StoreModel {
             manifests: vec![
@@ -181,6 +217,24 @@ mod tests {
         assert_eq!(a, [sha(1)].into_iter().collect());
         assert_eq!(b, [sha(3)].into_iter().collect());
         assert_eq!(both, [sha(1), sha(2), sha(3)].into_iter().collect());
+    }
+
+    #[test]
+    fn manifest_stats_count_missing_chunks() {
+        let model = model();
+        let present: HashSet<ChunkHash> = [sha(1), sha(2)].into_iter().collect();
+        let (stats, creation_time) = model.manifest_stats(key(20), &present).unwrap();
+        assert_eq!(
+            (
+                stats.chunks_total,
+                stats.chunks_missing,
+                stats.bytes_total_compressed,
+                stats.bytes_missing_compressed,
+                creation_time,
+            ),
+            (2, 1, 200, 100, 0)
+        );
+        assert!(model.manifest_stats(key(30), &present).is_none());
     }
 
     #[test]

@@ -17,7 +17,8 @@ use steam_vent_proto::steammessages_player_steamclient::CPlayer_GetOwnedGames_Re
 use tokio::sync::Semaphore;
 use utoipa::{IntoParams, ToSchema};
 
-use crate::http::{CacheSeconds, ImmutableCache};
+use crate::http::{ApiError, CacheSeconds, ImmutableCache};
+use crate::state::store_index::ManifestStats;
 use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
@@ -487,11 +488,35 @@ pub async fn manifest_statuses(
         .filter(|r| seen.insert((r.depot_id, r.manifest_id)))
         .collect();
 
+    // Manifests on disk come from the in-memory store model; only the rest are opened.
+    let model = {
+        let state = state.clone();
+        tokio::task::spawn_blocking(move || state.store_model())
+            .await
+            .map_err(|e| ApiError::internal(format!("store model task panicked: {e}")))??
+    };
+    let mut out = Vec::new();
+    let mut unindexed = Vec::new();
+    {
+        let index = state.store_index.read().expect("store_index poisoned");
+        for r in refs {
+            match model.manifest_stats((appid, r.depot_id, r.manifest_id), index.present_chunks()) {
+                Some((stats, creation_time)) => out.push(status_entry(
+                    r.depot_id,
+                    r.manifest_id,
+                    stats,
+                    creation_time,
+                )),
+                None => unindexed.push(r),
+            }
+        }
+    }
+
     // Cap parallelism — even with mostly-cached calls, eight concurrent
     // file-reads is plenty. For the cold path, this caps CDN connections.
     let sem = Arc::new(Semaphore::new(8));
     let mut fu = FuturesUnordered::new();
-    for r in refs {
+    for r in unindexed {
         let state = &state;
         let sem = sem.clone();
         fu.push(async move {
@@ -503,7 +528,6 @@ pub async fn manifest_statuses(
         });
     }
 
-    let mut out = Vec::new();
     while let Some((depot_id, manifest_id, result)) = fu.next().await {
         let entry = match result {
             Ok(snap) => manifest_status_of(&state, &snap),
@@ -535,15 +559,29 @@ pub fn manifest_status_of(state: &AppState, snapshot: &Snapshot) -> ManifestStat
         .read()
         .expect("store_index poisoned")
         .manifest_stats(manifest);
+    status_entry(
+        DepotId(manifest.depot_id),
+        ManifestId(manifest.manifest_id),
+        stats,
+        manifest.creation_time,
+    )
+}
+
+fn status_entry(
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    stats: ManifestStats,
+    creation_time: u32,
+) -> ManifestStatusEntry {
     ManifestStatusEntry {
-        depot_id: DepotId(manifest.depot_id),
-        manifest_id: ManifestId(manifest.manifest_id),
+        depot_id,
+        manifest_id,
         error: None,
         chunks_total: stats.chunks_total,
         chunks_missing: stats.chunks_missing,
         bytes_total: stats.bytes_total,
         bytes_total_compressed: stats.bytes_total_compressed,
         bytes_missing_compressed: stats.bytes_missing_compressed,
-        creation_time: manifest.creation_time,
+        creation_time,
     }
 }
