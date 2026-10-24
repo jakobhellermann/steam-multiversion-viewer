@@ -3,6 +3,8 @@
 //! Cold data is left out and fetched by the frontend as usual, so a preload never
 //! delays the page.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use anyhow::Result;
 use axum::Json;
 use axum::extract::{Query, State};
@@ -13,9 +15,10 @@ use serde_json::Value;
 use crate::config::Config;
 use crate::routes::auth::AuthStatus;
 use crate::routes::config::build_config_dto;
-use crate::routes::game_info::{self, GameInfo};
+use crate::routes::extra_manifests::extra_manifests_of;
+use crate::routes::game_info;
 use crate::routes::library::{
-    ManifestRef, manifest_files_of, manifest_info_of, manifest_status_of,
+    ManifestRef, app_info_cache_key, manifest_files_of, manifest_info_of, manifest_status_of,
 };
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
@@ -25,6 +28,28 @@ use crate::steam::{AppId, DepotId, ManifestId};
 pub struct Entry {
     pub key: Value,
     pub data: Value,
+    /// When `data` was fetched (ms since the epoch), for data that can be outdated; absent
+    /// means current.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<u64>,
+}
+
+impl Entry {
+    fn current(key: Value, data: impl Serialize) -> Result<Self> {
+        Ok(Self {
+            key,
+            data: serde_json::to_value(data)?,
+            updated_at: None,
+        })
+    }
+
+    fn as_of(key: Value, data: Value, fetched: SystemTime) -> Result<Self> {
+        Ok(Self {
+            key,
+            data,
+            updated_at: Some(fetched.duration_since(UNIX_EPOCH)?.as_millis().try_into()?),
+        })
+    }
 }
 
 /// Query keys, mirrored by `frontend/src/data/queryKeys.ts`.
@@ -48,6 +73,14 @@ mod keys {
 
     pub fn config() -> Value {
         json!(["config"])
+    }
+
+    pub fn app(app: AppId) -> Value {
+        json!(["app", app])
+    }
+
+    pub fn extra_manifests(app: AppId) -> Value {
+        json!(["extra-manifests", app])
     }
 
     pub fn manifest_info(app: AppId, depot: DepotId, manifest: ManifestId, branch: &str) -> Value {
@@ -81,48 +114,49 @@ pub async fn entries(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
 /// In-memory state every page reads, e.g. the auth status the root route waits on.
 fn global(state: &AppState) -> Result<Vec<Entry>> {
     Ok(vec![
-        Entry {
-            key: keys::auth(),
-            data: serde_json::to_value(AuthStatus::from_state(state))?,
-        },
-        Entry {
-            key: keys::mount_status(),
-            data: serde_json::to_value(state.mount.status())?,
-        },
-        Entry {
-            key: keys::export_status(),
-            data: serde_json::to_value(state.exports.current())?,
-        },
-        Entry {
-            key: keys::config(),
-            data: serde_json::to_value(build_config_dto(state, Config::load_or_default()?))?,
-        },
+        Entry::current(keys::auth(), AuthStatus::from_state(state))?,
+        Entry::current(keys::mount_status(), state.mount.status())?,
+        Entry::current(keys::export_status(), state.exports.current())?,
+        Entry::current(
+            keys::config(),
+            build_config_dto(state, Config::load_or_default()?),
+        )?,
     ])
 }
 
 async fn route(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
     let segments: Vec<&str> = uri.path().trim_matches('/').split('/').collect();
-    match segments.as_slice() {
-        ["apps", app, "depots", depot, "manifests", manifest, ..] => {
-            let (Ok(app), Ok(depot), Ok(manifest)) = (app.parse(), depot.parse(), manifest.parse())
-            else {
-                return Ok(Vec::new());
-            };
-            let branch = Query::<BranchQuery>::try_from_uri(uri)?
-                .0
-                .branch
-                .unwrap_or_else(|| "public".to_owned());
-            manifest_page(
-                state,
-                AppId(app),
-                DepotId(depot),
-                ManifestId(manifest),
-                branch,
-            )
-            .await
-        }
-        _ => Ok(Vec::new()),
+    let ["apps", app, rest @ ..] = segments.as_slice() else {
+        return Ok(Vec::new());
+    };
+    let Ok(app) = app.parse().map(AppId) else {
+        return Ok(Vec::new());
+    };
+    let mut entries = app_pages(state, app)?;
+    if let ["depots", depot, "manifests", manifest, ..] = rest
+        && let (Ok(depot), Ok(manifest)) = (depot.parse(), manifest.parse())
+    {
+        let branch = Query::<BranchQuery>::try_from_uri(uri)?
+            .0
+            .branch
+            .unwrap_or_else(|| "public".to_owned());
+        entries
+            .extend(manifest_page(state, app, DepotId(depot), ManifestId(manifest), branch).await?);
     }
+    Ok(entries)
+}
+
+/// App info as last fetched from Steam (refetched by the frontend once outdated) and the
+/// user-tracked extras.
+fn app_pages(state: &AppState, app: AppId) -> Result<Vec<Entry>> {
+    let mut entries = vec![Entry::current(
+        keys::extra_manifests(app),
+        extra_manifests_of(state, app),
+    )?];
+    if let Some((info, fetched)) = state.disk_cache.read::<Value>(&app_info_cache_key(app))? {
+        entries.push(Entry::as_of(keys::app(app), info, fetched)?);
+    }
+    Ok(entries)
 }
 
 async fn manifest_page(
@@ -131,7 +165,7 @@ async fn manifest_page(
     depot: DepotId,
     manifest: ManifestId,
     branch: String,
-) -> anyhow::Result<Vec<Entry>> {
+) -> Result<Vec<Entry>> {
     let on_disk = state
         .store_index
         .read()
@@ -147,27 +181,24 @@ async fn manifest_page(
         branch: branch.clone(),
     };
     let mut entries = vec![
-        Entry {
-            key: keys::manifest_info(app, depot, manifest, &branch),
-            data: serde_json::to_value(manifest_info_of(&snapshot))?,
-        },
-        Entry {
-            key: keys::manifest_files(app, depot, manifest, &branch),
-            data: serde_json::to_value(manifest_files_of(&snapshot))?,
-        },
-        Entry {
-            key: keys::manifest_statuses(app, &[self_ref]),
-            data: serde_json::to_value([manifest_status_of(state, &snapshot)])?,
-        },
+        Entry::current(
+            keys::manifest_info(app, depot, manifest, &branch),
+            manifest_info_of(&snapshot),
+        )?,
+        Entry::current(
+            keys::manifest_files(app, depot, manifest, &branch),
+            manifest_files_of(&snapshot),
+        )?,
+        Entry::current(
+            keys::manifest_statuses(app, &[self_ref]),
+            [manifest_status_of(state, &snapshot)],
+        )?,
     ];
     if let Some((info, _)) = state
         .disk_cache
-        .read::<GameInfo>(&game_info::cache_key(depot, manifest))?
+        .read::<Value>(&game_info::cache_key(depot, manifest))?
     {
-        entries.push(Entry {
-            key: keys::game_info(app, depot, manifest),
-            data: serde_json::to_value(info)?,
-        });
+        entries.push(Entry::current(keys::game_info(app, depot, manifest), info)?);
     }
     Ok(entries)
 }
@@ -227,6 +258,8 @@ mod tests {
             branch: branch.to_owned(),
         };
         let actual = serde_json::json!({
+            "app": keys::app(app),
+            "extraManifests": keys::extra_manifests(app),
             "auth": keys::auth(),
             "mountStatus": keys::mount_status(),
             "exportStatus": keys::export_status(),

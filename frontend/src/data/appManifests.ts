@@ -14,8 +14,15 @@ import {
 } from "./api";
 import { queryKeys } from "./queryKeys";
 
+/// Preloaded app info can be a last-known copy; once older than the backend's HTTP max-age it
+/// is refetched in the background on mount.
 export function useAppInfo(appid: AppId): UseQueryResult<AppInfo> {
-  return useQuery({ queryKey: queryKeys.app(appid), queryFn: () => fetchAppInfo(appid) });
+  return useQuery({
+    queryKey: queryKeys.app(appid),
+    queryFn: () => fetchAppInfo(appid),
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: true,
+  });
 }
 
 export function useExtraManifests(appid: AppId): UseQueryResult<ExtraManifestEntry[]> {

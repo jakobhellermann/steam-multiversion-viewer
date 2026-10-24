@@ -10,6 +10,8 @@ test("query keys match the backend preload contract", () => {
     mountStatus: queryKeys.mountStatus(),
     exportStatus: queryKeys.exportStatus(),
     config: queryKeys.config(),
+    app: queryKeys.app(appid),
+    extraManifests: queryKeys.extraManifests(appid),
     manifestInfo: queryKeys.manifestInfo(appid, depotId, manifestId, branch),
     manifestFiles: queryKeys.manifestFiles(appid, depotId, manifestId, branch),
     gameInfo: queryKeys.gameInfo(appid, depotId, manifestId),

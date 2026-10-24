@@ -5,6 +5,12 @@ import type { QueryClient, QueryKey } from "@tanstack/react-query";
 export function applyPreload(queryClient: QueryClient) {
   const script = document.getElementById("preload");
   if (!script) return;
-  const entries = JSON.parse(script.textContent!) as { key: QueryKey; data: unknown }[];
-  for (const { key, data } of entries) queryClient.setQueryData(key, data);
+  const entries = JSON.parse(script.textContent!) as {
+    key: QueryKey;
+    data: unknown;
+    updated_at?: number;
+  }[];
+  for (const { key, data, updated_at } of entries) {
+    queryClient.setQueryData(key, data, { updatedAt: updated_at });
+  }
 }

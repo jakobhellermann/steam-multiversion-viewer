@@ -62,8 +62,16 @@ pub async fn get_extra_manifests(
     State(state): State<AppState>,
     Path(appid): Path<AppId>,
 ) -> Result<Json<Vec<ExtraManifestEntryDto>>> {
-    let list = state.extra_manifests.list(appid);
-    Ok(Json(list.into_iter().map(Into::into).collect()))
+    Ok(Json(extra_manifests_of(&state, appid)))
+}
+
+pub fn extra_manifests_of(state: &AppState, appid: AppId) -> Vec<ExtraManifestEntryDto> {
+    state
+        .extra_manifests
+        .list(appid)
+        .into_iter()
+        .map(Into::into)
+        .collect()
 }
 
 /// Replace tracked manifest list

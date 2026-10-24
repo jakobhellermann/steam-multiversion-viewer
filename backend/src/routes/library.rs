@@ -225,24 +225,28 @@ pub async fn app_info(
         })
         .collect();
 
+    let app = AppInfo {
+        appid,
+        name: info.common.name,
+        r#type: info.common.r#type,
+        developer: info.extended.as_ref().map(|e| e.developer.clone()),
+        publisher: info.extended.as_ref().map(|e| e.publisher.clone()),
+        homepage: info.extended.and_then(|e| e.homepage),
+        logo_url: info.common.logo.as_deref().map(|h| asset_url(h, "jpg")),
+        icon_url: asset_url(&info.common.icon, "jpg"),
+        branches,
+        depots,
+        private_branches: info.depots.private_branches,
+    };
+    state.disk_cache.write(&app_info_cache_key(appid), &app)?;
     // App metadata is pretty stable; let the browser cache it for 5 minutes
     // before re-asking.
-    Ok((
-        CacheSeconds(300),
-        Json(AppInfo {
-            appid,
-            name: info.common.name,
-            r#type: info.common.r#type,
-            developer: info.extended.as_ref().map(|e| e.developer.clone()),
-            publisher: info.extended.as_ref().map(|e| e.publisher.clone()),
-            homepage: info.extended.and_then(|e| e.homepage),
-            logo_url: info.common.logo.as_deref().map(|h| asset_url(h, "jpg")),
-            icon_url: asset_url(&info.common.icon, "jpg"),
-            branches,
-            depots,
-            private_branches: info.depots.private_branches,
-        }),
-    ))
+    Ok((CacheSeconds(300), Json(app)))
+}
+
+/// Disk-cache key of an app's info as last fetched from Steam.
+pub fn app_info_cache_key(appid: AppId) -> String {
+    format!("app_info/{appid}.json")
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
