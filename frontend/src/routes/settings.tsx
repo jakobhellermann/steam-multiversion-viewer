@@ -4,13 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { fetchConfig, patchConfig, type Config, type VibrancyEffect } from "../data/api";
 import { applyVibrancy, vibrancyActive, vibrancySupported } from "../vibrancy";
+import { queryKeys } from "../data/queryKeys";
 
 export const Route = createFileRoute("/settings")({ component: SettingsPage });
 
 function SettingsPage() {
   const qc = useQueryClient();
-  const query = useQuery({ queryKey: ["config"], queryFn: fetchConfig });
-  const onSaved = () => qc.invalidateQueries({ queryKey: ["config"] });
+  const query = useQuery({ queryKey: queryKeys.config(), queryFn: fetchConfig });
+  const onSaved = () => qc.invalidateQueries({ queryKey: queryKeys.config() });
 
   return (
     <div className="mx-auto max-w-4xl p-8">

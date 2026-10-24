@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { fetchAuthStatus, login, submitLoginCode, type AuthStatus } from "../data/api";
 import { ErrorBox } from "../components/ErrorBox";
+import { queryKeys } from "../data/queryKeys";
 
 type Search = {
   /// Where to send the user after a successful login. Defaults to the library.
@@ -17,7 +18,7 @@ export const Route = createFileRoute("/login")({
   beforeLoad: async ({ context, search }) => {
     // Already authenticated? Don't show the form.
     const status = await context.queryClient.ensureQueryData<AuthStatus>({
-      queryKey: ["auth"],
+      queryKey: queryKeys.auth(),
       queryFn: fetchAuthStatus,
     });
     if (status.authenticated) {
@@ -33,7 +34,7 @@ function LoginPage() {
   const { redirect: redirectTo } = Route.useSearch();
 
   const statusQuery = useQuery({
-    queryKey: ["auth"],
+    queryKey: queryKeys.auth(),
     queryFn: fetchAuthStatus,
     // Poll while a login is in flight (any phase except a terminal error).
     refetchInterval: (q) => {
@@ -74,7 +75,7 @@ function CredentialsForm() {
 
   const mutation = useMutation({
     mutationFn: () => login({ account, password }),
-    onSuccess: (s) => qc.setQueryData(["auth"], s),
+    onSuccess: (s) => qc.setQueryData(queryKeys.auth(), s),
   });
 
   const canSubmit = account.trim() !== "" && password !== "" && !mutation.isPending;
@@ -130,7 +131,7 @@ function PendingPanel({ pending }: { pending: NonNullable<AuthStatus["pending"]>
 
   const codeMutation = useMutation({
     mutationFn: (value: string) => submitLoginCode(value),
-    onSuccess: (s) => qc.setQueryData(["auth"], s),
+    onSuccess: (s) => qc.setQueryData(queryKeys.auth(), s),
   });
 
   if (pending.phase === "need_code") {

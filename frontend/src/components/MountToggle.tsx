@@ -2,13 +2,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { fetchMountStatus, type ProjfsEnableOutcome, startMount, stopMount } from "../data/api";
+import { queryKeys } from "../data/queryKeys";
 
 /// Header icon-button that toggles the depot mount. Sky-blue when the
 /// mount is up, slate when idle; hover-title shows the current
 /// mountpoint or "Mount (idle)".
 export function MountToggle() {
   const qc = useQueryClient();
-  const status = useQuery({ queryKey: ["mount-status"], queryFn: fetchMountStatus });
+  const status = useQuery({ queryKey: queryKeys.mountStatus(), queryFn: fetchMountStatus });
 
   // Neutral (non-error) notice, e.g. after ProjFS was enabled and the user
   // needs to click again.
@@ -23,23 +24,23 @@ export function MountToggle() {
     },
     onSuccess: (data) => {
       if (data.action === "stopped") {
-        qc.setQueryData(["mount-status"], data.status);
+        qc.setQueryData(queryKeys.mountStatus(), data.status);
         return;
       }
       const r = data.result;
       if (r.kind === "mounted") {
-        qc.setQueryData(["mount-status"], { state: "mounted", mountpoint: r.mountpoint });
+        qc.setQueryData(queryKeys.mountStatus(), { state: "mounted", mountpoint: r.mountpoint });
         setInfo(`${r.mountpoint}`);
         return;
       }
       // ProjFS was off; a UAC prompt was shown. Stay idle — the user mounts
       // again once it's enabled.
       setInfo(projfsMessage(r.outcome));
-      qc.invalidateQueries({ queryKey: ["mount-status"] });
+      qc.invalidateQueries({ queryKey: queryKeys.mountStatus() });
     },
     // On error the backend state may be out of sync with what we
     // assumed; refetch so the next click does the right thing.
-    onError: () => qc.invalidateQueries({ queryKey: ["mount-status"] }),
+    onError: () => qc.invalidateQueries({ queryKey: queryKeys.mountStatus() }),
   });
 
   const mounted = status.data?.state === "mounted";

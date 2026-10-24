@@ -19,6 +19,7 @@ import { StructuredDiffView } from "./-file/StructuredDiffView";
 import { projectRefToSide, qualifyRefForSide } from "./-file/pptrRef";
 import type { FileLocator } from "./-file/types";
 import { useAppManifestStatuses, useManifestStatus } from "../data/appManifests";
+import { queryKeys } from "../data/queryKeys";
 
 type Search = {
   /// Branch of the base manifest. Omitted in URL when `"public"`.
@@ -113,13 +114,13 @@ function DiffPage() {
   // usually cache hits; `null` engine or missing bundleVersion falls
   // back to the id below.
   const baseGameInfo = useQuery({
-    queryKey: ["game-info", appid, depotId, manifestId],
+    queryKey: queryKeys.gameInfo(appid, depotId, manifestId),
     queryFn: () => fetchGameInfo(appid, depotId, manifestId, branch),
     staleTime: Infinity,
     gcTime: 30 * 60 * 1000,
   });
   const targetGameInfo = useQuery({
-    queryKey: ["game-info", appid, targetDepotId, targetManifestId],
+    queryKey: queryKeys.gameInfo(appid, targetDepotId, targetManifestId),
     queryFn: () => fetchGameInfo(appid, targetDepotId, targetManifestId, targetBranch),
     staleTime: Infinity,
     gcTime: 30 * 60 * 1000,

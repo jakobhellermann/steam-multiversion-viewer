@@ -17,6 +17,7 @@ import { ErrorBox } from "../components/ErrorBox";
 import { formatDate } from "../lib/format";
 import { useBranchFilter } from "../lib/useBranchFilter";
 import { manifestRefOf, useDepotManifests } from "../data/useDepotManifests";
+import { queryKeys } from "../data/queryKeys";
 
 type Search = {
   /// Deep-compare toggle. In the URL so it survives reloads and links.
@@ -161,7 +162,7 @@ function DepotHistoryPage() {
     queries: entries.map((entry) => ({
       // Content-addressed key (same gid → same info), shared with the
       // switcher and the compare menu; `branch` still goes to the fetch.
-      queryKey: ["game-info", appid, entry.depot_id, entry.manifest_id],
+      queryKey: queryKeys.gameInfo(appid, entry.depot_id, entry.manifest_id),
       queryFn: () => fetchGameInfo(appid, entry.depot_id, entry.manifest_id, entry.branch),
       staleTime: Infinity,
     })),

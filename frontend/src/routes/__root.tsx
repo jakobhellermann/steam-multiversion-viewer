@@ -15,13 +15,14 @@ import { MountToggle } from "../components/MountToggle";
 import { fetchAuthStatus, fetchConfig, logout, type AuthStatus } from "../data/api";
 import { applyVibrancy, vibrancySupported } from "../vibrancy";
 import "../styles.css";
+import { queryKeys } from "../data/queryKeys";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   beforeLoad: async ({ context, location }) => {
     // The login page is the one route reachable while logged out.
     if (location.pathname === "/login") return;
     const status = await context.queryClient.ensureQueryData<AuthStatus>({
-      queryKey: ["auth"],
+      queryKey: queryKeys.auth(),
       queryFn: fetchAuthStatus,
     });
     if (!status.authenticated) {
@@ -55,7 +56,7 @@ function RootComponent() {
   // Sync the backdrop with persisted config (native window only); shares the
   // ["config"] query with settings so saving there re-applies it live.
   const { data: config } = useQuery({
-    queryKey: ["config"],
+    queryKey: queryKeys.config(),
     queryFn: fetchConfig,
     enabled: vibrancySupported(),
   });
@@ -113,12 +114,12 @@ function RootComponent() {
 function AccountMenu() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { data: auth } = useQuery({ queryKey: ["auth"], queryFn: fetchAuthStatus });
+  const { data: auth } = useQuery({ queryKey: queryKeys.auth(), queryFn: fetchAuthStatus });
 
   const mutation = useMutation({
     mutationFn: logout,
     onSuccess: async (status) => {
-      qc.setQueryData(["auth"], status);
+      qc.setQueryData(queryKeys.auth(), status);
       await navigate({ to: "/login" });
     },
   });

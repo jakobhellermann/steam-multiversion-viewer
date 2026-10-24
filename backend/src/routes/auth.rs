@@ -45,7 +45,7 @@ pub struct AuthStatus {
 }
 
 impl AuthStatus {
-    fn from_state(state: &AppState) -> Self {
+    pub fn from_state(state: &AppState) -> Self {
         if let Some(client) = state.steam.load_full() {
             return Self::logged_in(&client);
         }

@@ -11,6 +11,7 @@ import {
 } from "../data/api";
 import { exportFolderName, joinExportPath } from "../lib/exportName";
 import { formatBytes } from "../lib/format";
+import { queryKeys } from "../data/queryKeys";
 
 export function ExportButton({
   appid,
@@ -29,11 +30,11 @@ export function ExportButton({
 }) {
   const qc = useQueryClient();
   const status = useQuery({
-    queryKey: ["export-status"],
+    queryKey: queryKeys.exportStatus(),
     queryFn: fetchExportStatus,
     refetchInterval: (q) => (q.state.data?.state === "running" ? 1000 : false),
   });
-  const config = useQuery({ queryKey: ["config"], queryFn: fetchConfig });
+  const config = useQuery({ queryKey: queryKeys.config(), queryFn: fetchConfig });
   const subdir = exportFolderName(appName, appid, gameInfo, manifestId);
   const destination = config.data ? joinExportPath(config.data.export_dir, subdir) : undefined;
 
@@ -43,7 +44,7 @@ export function ExportButton({
     const es = new EventSource("/api/events");
     es.addEventListener("export_finished", (e: MessageEvent) => {
       setFinished(JSON.parse(e.data) as ExportStatus);
-      void qc.invalidateQueries({ queryKey: ["export-status"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.exportStatus() });
     });
     return () => es.close();
   }, [qc]);
@@ -52,12 +53,12 @@ export function ExportButton({
     mutationFn: () => exportManifest(appid, depotId, manifestId, { branch, subdir }),
     onSuccess: (s) => {
       setFinished(null);
-      qc.setQueryData(["export-status"], s);
+      qc.setQueryData(queryKeys.exportStatus(), s);
     },
   });
   const cancel = useMutation({
     mutationFn: cancelExport,
-    onSuccess: (s) => qc.setQueryData(["export-status"], s),
+    onSuccess: (s) => qc.setQueryData(queryKeys.exportStatus(), s),
   });
 
   // The backend runs one export at a time, so the status is global — only

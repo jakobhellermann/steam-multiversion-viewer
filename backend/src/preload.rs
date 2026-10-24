@@ -10,6 +10,10 @@ use axum::http::Uri;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::config::Config;
+use crate::routes::auth::AuthStatus;
+use crate::routes::config::build_config_dto;
+use crate::routes::game_info::{self, GameInfo};
 use crate::routes::library::{
     ManifestRef, manifest_files_of, manifest_info_of, manifest_status_of,
 };
@@ -30,12 +34,32 @@ mod keys {
     use crate::routes::library::ManifestRef;
     use crate::steam::{AppId, DepotId, ManifestId};
 
+    pub fn auth() -> Value {
+        json!(["auth"])
+    }
+
+    pub fn mount_status() -> Value {
+        json!(["mount-status"])
+    }
+
+    pub fn export_status() -> Value {
+        json!(["export-status"])
+    }
+
+    pub fn config() -> Value {
+        json!(["config"])
+    }
+
     pub fn manifest_info(app: AppId, depot: DepotId, manifest: ManifestId, branch: &str) -> Value {
         json!(["manifest-info", app, depot, manifest, branch])
     }
 
     pub fn manifest_files(app: AppId, depot: DepotId, manifest: ManifestId, branch: &str) -> Value {
         json!(["manifest-files", app, depot, manifest, branch])
+    }
+
+    pub fn game_info(app: AppId, depot: DepotId, manifest: ManifestId) -> Value {
+        json!(["game-info", app, depot, manifest])
     }
 
     pub fn manifest_statuses(app: AppId, refs: &[ManifestRef]) -> Value {
@@ -49,6 +73,34 @@ struct BranchQuery {
 }
 
 pub async fn entries(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
+    let mut entries = global(state)?;
+    entries.extend(route(state, uri).await?);
+    Ok(entries)
+}
+
+/// In-memory state every page reads, e.g. the auth status the root route waits on.
+fn global(state: &AppState) -> Result<Vec<Entry>> {
+    Ok(vec![
+        Entry {
+            key: keys::auth(),
+            data: serde_json::to_value(AuthStatus::from_state(state))?,
+        },
+        Entry {
+            key: keys::mount_status(),
+            data: serde_json::to_value(state.mount.status())?,
+        },
+        Entry {
+            key: keys::export_status(),
+            data: serde_json::to_value(state.exports.current())?,
+        },
+        Entry {
+            key: keys::config(),
+            data: serde_json::to_value(build_config_dto(state, Config::load_or_default()?))?,
+        },
+    ])
+}
+
+async fn route(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
     let segments: Vec<&str> = uri.path().trim_matches('/').split('/').collect();
     match segments.as_slice() {
         ["apps", app, "depots", depot, "manifests", manifest, ..] => {
@@ -94,7 +146,7 @@ async fn manifest_page(
         manifest_id: manifest,
         branch: branch.clone(),
     };
-    Ok(vec![
+    let mut entries = vec![
         Entry {
             key: keys::manifest_info(app, depot, manifest, &branch),
             data: serde_json::to_value(manifest_info_of(&snapshot))?,
@@ -107,7 +159,17 @@ async fn manifest_page(
             key: keys::manifest_statuses(app, &[self_ref]),
             data: serde_json::to_value([manifest_status_of(state, &snapshot)])?,
         },
-    ])
+    ];
+    if let Some((info, _)) = state
+        .disk_cache
+        .read::<GameInfo>(&game_info::cache_key(depot, manifest))?
+    {
+        entries.push(Entry {
+            key: keys::game_info(app, depot, manifest),
+            data: serde_json::to_value(info)?,
+        });
+    }
+    Ok(entries)
 }
 
 #[derive(Deserialize)]
@@ -165,8 +227,13 @@ mod tests {
             branch: branch.to_owned(),
         };
         let actual = serde_json::json!({
+            "auth": keys::auth(),
+            "mountStatus": keys::mount_status(),
+            "exportStatus": keys::export_status(),
+            "config": keys::config(),
             "manifestInfo": keys::manifest_info(app, depot, manifest, branch),
             "manifestFiles": keys::manifest_files(app, depot, manifest, branch),
+            "gameInfo": keys::game_info(app, depot, manifest),
             "manifestStatuses": keys::manifest_statuses(app, &[self_ref]),
         });
         assert_eq!(actual, contract);

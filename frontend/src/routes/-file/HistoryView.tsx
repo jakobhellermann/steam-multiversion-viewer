@@ -18,6 +18,7 @@ import { BranchFilter } from "../../components/BranchFilter";
 import { formatDate } from "../../lib/format";
 import { manifestRefOf, type DepotManifest } from "../../data/useDepotManifests";
 import { useBranchFilter } from "../../lib/useBranchFilter";
+import { queryKeys } from "../../data/queryKeys";
 
 /// Per-status text color. Follows the diff conventions (added = new side
 /// emerald, removed = old side rose); neutral states stay muted.
@@ -117,7 +118,7 @@ export function HistoryView({
     queries: entries.map((entry) => ({
       // game_info is content-addressed (same gid → same info); key
       // without the branch so the manifest page's cache entries apply.
-      queryKey: ["game-info", appid, entry.depot_id, entry.manifest_id],
+      queryKey: queryKeys.gameInfo(appid, entry.depot_id, entry.manifest_id),
       queryFn: () => fetchGameInfo(appid, entry.depot_id, entry.manifest_id, entry.branch),
       staleTime: Infinity,
     })),

@@ -11,6 +11,7 @@ import {
 } from "../data/api";
 import { formatDate } from "../lib/format";
 import { useBranchFilter } from "../lib/useBranchFilter";
+import { queryKeys } from "../data/queryKeys";
 
 /// Dropdown next to the manifest breadcrumb to jump to another manifest
 /// in the same depot without going back to the app page. Lists official
@@ -112,7 +113,7 @@ export function ManifestSwitcher({
     queries: visible.map((m) => ({
       // Branch omitted from the key on purpose — shared with the page +
       // compare menu (see the gameInfo query above).
-      queryKey: ["game-info", appid, depotId, m.manifestId],
+      queryKey: queryKeys.gameInfo(appid, depotId, m.manifestId),
       queryFn: () => fetchGameInfo(appid, depotId, m.manifestId, m.branch),
       enabled: open || (m.manifestId === currentManifestId && m.branch === currentBranch),
       staleTime: Infinity,

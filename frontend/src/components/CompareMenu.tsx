@@ -21,6 +21,7 @@ import {
 } from "./compareCandidates";
 import { formatDate } from "../lib/format";
 import { useBranchFilter } from "../lib/useBranchFilter";
+import { queryKeys } from "../data/queryKeys";
 
 // Re-exported for the route files that import it alongside the component.
 export { diffTargetKey };
@@ -322,7 +323,7 @@ export function CompareMenu({
       // addressed by manifest_id, so the same gid shares one entry across
       // branches and with the manifest page + switcher. Branch is still
       // passed to the fetch so the backend can open the manifest.
-      queryKey: ["game-info", appInfo.appid, c.depotId, c.manifestId],
+      queryKey: queryKeys.gameInfo(appInfo.appid, c.depotId, c.manifestId),
       queryFn: () => fetchGameInfo(appInfo.appid, c.depotId, c.manifestId, c.branch),
       enabled: open,
       staleTime: Infinity,

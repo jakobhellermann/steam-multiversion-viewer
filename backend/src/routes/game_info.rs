@@ -13,7 +13,7 @@ use utoipa::ToSchema;
 #[cfg(feature = "unity")]
 use crate::http::ApiError;
 use crate::http::ImmutableCache;
-use crate::state::AppState;
+use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::Result;
@@ -24,7 +24,7 @@ pub struct GameInfoQuery {
     pub branch: String,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 #[serde(tag = "engine", content = "data", rename_all = "snake_case")]
 pub enum EngineInfo {
     Unity {
@@ -58,7 +58,7 @@ impl rabex_env::rabex::objects::ClassIdType for PlayerSettingsSlim {
         rabex_env::rabex::objects::ClassId::PlayerSettings;
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct GameInfo {
     /// `null` when no supported engine was detected.
     pub engine: Option<EngineInfo>,
@@ -78,20 +78,54 @@ pub async fn game_info(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<GameInfoQuery>,
 ) -> Result<(ImmutableCache, Json<GameInfo>)> {
+    let key = cache_key(depot_id, manifest_id);
+    if let Some((cached, _)) = state.disk_cache.read(&key)? {
+        return Ok((ImmutableCache, Json(cached)));
+    }
+    let info = detect(&state, appid, depot_id, manifest_id, &q.branch).await?;
+    // Without the unity feature every manifest reads as engine-less, which must not stick.
+    if cfg!(feature = "unity") {
+        state.disk_cache.write(&key, &info)?;
+    }
+    Ok((ImmutableCache, Json(info)))
+}
+
+/// Disk-cache key of a manifest's game info; immutable like the manifest itself.
+pub fn cache_key(depot_id: DepotId, manifest_id: ManifestId) -> String {
+    format!("game_info/{depot_id}/{manifest_id}.json")
+}
+
+async fn detect(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    branch: &str,
+) -> Result<GameInfo> {
     state.steam()?; // 401 if not logged in
     let snapshot = Arc::new(
         state
-            .open_manifest(appid, depot_id, manifest_id, &q.branch)
+            .open_manifest(appid, depot_id, manifest_id, branch)
             .await?,
     );
+    detect_engine(state, appid, depot_id, manifest_id, branch, snapshot).await
+}
 
-    #[cfg(feature = "unity")]
+#[cfg(feature = "unity")]
+async fn detect_engine(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    branch: &str,
+    snapshot: Arc<Snapshot>,
+) -> Result<GameInfo> {
     {
         let scratch = state
             .manifest_cache
-            .scratch(appid, depot_id, manifest_id, &q.branch);
+            .scratch(appid, depot_id, manifest_id, branch);
         let Some(unity) = scratch.unity(snapshot) else {
-            return Ok((ImmutableCache, Json(GameInfo { engine: None })));
+            return Ok(GameInfo { engine: None });
         };
         let env = unity.env.clone();
 
@@ -130,20 +164,23 @@ pub async fn game_info(
         .map_err(|e| ApiError::internal(format!("game-info task panicked: {e}")))?
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-        return Ok((
-            ImmutableCache,
-            Json(GameInfo {
-                engine: Some(EngineInfo::Unity {
-                    version,
-                    bundle_version,
-                }),
+        Ok(GameInfo {
+            engine: Some(EngineInfo::Unity {
+                version,
+                bundle_version,
             }),
-        ));
+        })
     }
+}
 
-    #[cfg(not(feature = "unity"))]
-    {
-        let _ = snapshot;
-        Ok((ImmutableCache, Json(GameInfo { engine: None })))
-    }
+#[cfg(not(feature = "unity"))]
+async fn detect_engine(
+    _state: &AppState,
+    _appid: AppId,
+    _depot_id: DepotId,
+    _manifest_id: ManifestId,
+    _branch: &str,
+    _snapshot: Arc<Snapshot>,
+) -> Result<GameInfo> {
+    Ok(GameInfo { engine: None })
 }

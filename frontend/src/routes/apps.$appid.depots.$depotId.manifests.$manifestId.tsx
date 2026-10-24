@@ -120,7 +120,7 @@ function ManifestDetail() {
     // → same result regardless of branch), so the page, the switcher, and
     // the compare menu all share one cache entry. `branch` is still passed
     // to the fetch (the backend needs it to open the manifest).
-    queryKey: ["game-info", appid, depotId, manifestId],
+    queryKey: queryKeys.gameInfo(appid, depotId, manifestId),
     queryFn: () => fetchGameInfo(appid, depotId, manifestId, branch),
     placeholderData: keepPreviousData,
   });
@@ -142,7 +142,7 @@ function ManifestDetail() {
         queryFn: () => fetchManifestFiles(appid, depotId, targetManifestId, targetBranch),
       });
       queryClient.prefetchQuery({
-        queryKey: ["game-info", appid, depotId, targetManifestId],
+        queryKey: queryKeys.gameInfo(appid, depotId, targetManifestId),
         queryFn: () => fetchGameInfo(appid, depotId, targetManifestId, targetBranch),
       });
     },

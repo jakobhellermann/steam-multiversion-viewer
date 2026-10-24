@@ -1,6 +1,11 @@
 {
+  "auth": ["auth"],
+  "mountStatus": ["mount-status"],
+  "exportStatus": ["export-status"],
+  "config": ["config"],
   "manifestInfo": ["manifest-info", 1030300, 1030303, "5954103139200615141", "beta"],
   "manifestFiles": ["manifest-files", 1030300, 1030303, "5954103139200615141", "beta"],
+  "gameInfo": ["game-info", 1030300, 1030303, "5954103139200615141"],
   "manifestStatuses": [
     "manifest-statuses",
     1030300,

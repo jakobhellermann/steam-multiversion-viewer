@@ -1,3 +1,4 @@
+pub mod disk_cache;
 pub mod downloads;
 pub mod export;
 pub mod extra_manifests;
@@ -61,6 +62,7 @@ pub struct AppState {
     pub extra_manifests: Arc<ExtraManifestsStore>,
     pub mount: Arc<MountManager>,
     pub manifest_cache: Arc<manifest_cache::ManifestCache>,
+    pub disk_cache: Arc<disk_cache::DiskCache>,
 }
 
 impl AppState {
@@ -101,6 +103,7 @@ impl AppState {
             extra_manifests,
             mount,
             manifest_cache: Arc::new(manifest_cache::ManifestCache::new()),
+            disk_cache: Arc::new(disk_cache::DiskCache::new(&store_root)),
         })
     }
 

@@ -47,7 +47,7 @@ pub struct PatchConfig {
     pub vibrancy_tint: Option<u8>,
 }
 
-fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
+pub fn build_config_dto(state: &AppState, saved: Config) -> ConfigDto {
     ConfigDto {
         // Only `store_root` requires a restart — it's baked into
         // `DepotStore` at init. `mountpoint` is live-reloaded on the
