@@ -81,12 +81,12 @@ function DiffPage() {
   // endpoint a roundtrip for a missing path and lets us surface a
   // user-friendly error instead of a backend 404.
   const baseView = useQuery({
-    queryKey: ["file-view", appid, depotId, manifestId, branch, path],
+    queryKey: queryKeys.fileView(appid, depotId, manifestId, branch, path),
     queryFn: () => fetchFileViewOptional(appid, depotId, manifestId, branch, path),
     enabled: path.length > 0,
   });
   const targetView = useQuery({
-    queryKey: ["file-view", appid, targetDepotId, targetManifestId, targetBranch, path],
+    queryKey: queryKeys.fileView(appid, targetDepotId, targetManifestId, targetBranch, path),
     queryFn: () =>
       fetchFileViewOptional(appid, targetDepotId, targetManifestId, targetBranch, path),
     enabled: path.length > 0,

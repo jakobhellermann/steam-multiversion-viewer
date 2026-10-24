@@ -17,6 +17,7 @@ import { formatBytes, formatDate } from "../lib/format";
 import { FileMeta } from "./-file/FileMeta";
 import { FilePreview } from "./-file/FilePreview";
 import { findStatus, useAppManifestStatuses, useManifestStatus } from "../data/appManifests";
+import { queryKeys } from "../data/queryKeys";
 
 type Search = {
   /// Omitted in URL when the default; readers must apply `?? "public"`.
@@ -68,7 +69,7 @@ function FileViewPage() {
   const queryClient = useQueryClient();
 
   const view = useQuery({
-    queryKey: ["file-view", appid, depotId, manifestId, branch, path],
+    queryKey: queryKeys.fileView(appid, depotId, manifestId, branch, path),
     queryFn: () => fetchFileView(appid, depotId, manifestId, branch, path),
     enabled: path.length > 0,
     // chunks_present + auto-fetched content depend on what's on disk, so
@@ -150,7 +151,7 @@ function FileViewPage() {
   // count safely; useQuery in a loop would break the hook rule.
   const targetViews = useQueries({
     queries: diffRefs.map((ref) => ({
-      queryKey: ["file-view", appid, ref.depot_id, ref.manifest_id, ref.branch, path],
+      queryKey: queryKeys.fileView(appid, ref.depot_id, ref.manifest_id, ref.branch, path),
       queryFn: () => fetchFileViewOptional(appid, ref.depot_id, ref.manifest_id, ref.branch, path),
       enabled: path.length > 0,
     })),
@@ -160,7 +161,7 @@ function FileViewPage() {
     mutationFn: () => downloadManifest(appid, depotId, manifestId, { branch, paths: [path] }),
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ["file-view", appid, depotId, manifestId, branch, path],
+        queryKey: queryKeys.fileView(appid, depotId, manifestId, branch, path),
       });
     },
   });

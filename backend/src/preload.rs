@@ -3,6 +3,7 @@
 //! Cold data is left out and fetched by the frontend as usual, so a preload never
 //! delays the page.
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -16,12 +17,13 @@ use crate::config::Config;
 use crate::routes::auth::AuthStatus;
 use crate::routes::config::build_config_dto;
 use crate::routes::extra_manifests::extra_manifests_of;
+use crate::routes::files::file_view_of;
 use crate::routes::game_info;
 use crate::routes::library::{
     ManifestRef, app_info_cache_key, library_cache_key, manifest_files_of, manifest_info_of,
     manifest_status_of,
 };
-use crate::state::AppState;
+use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 /// One TanStack Query cache entry: `data` is exactly what the API route for `key` returns.
@@ -96,6 +98,16 @@ mod keys {
         json!(["manifest-files", app, depot, manifest, branch])
     }
 
+    pub fn file_view(
+        app: AppId,
+        depot: DepotId,
+        manifest: ManifestId,
+        branch: &str,
+        path: &str,
+    ) -> Value {
+        json!(["file-view", app, depot, manifest, branch, path])
+    }
+
     pub fn game_info(app: AppId, depot: DepotId, manifest: ManifestId) -> Value {
         json!(["game-info", app, depot, manifest])
     }
@@ -106,9 +118,13 @@ mod keys {
 }
 
 #[derive(Deserialize)]
-struct BranchQuery {
+struct ManifestPageQuery {
     branch: Option<String>,
+    path: Option<String>,
 }
+
+/// Files up to this size get their view (including inline text) preloaded into the HTML.
+const PRELOAD_FILE_CAP_BYTES: u64 = 1024 * 1024;
 
 pub async fn entries(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
     let mut entries = global(state)?;
@@ -155,18 +171,21 @@ async fn route(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
     {
         entries.extend(depot_game_infos(state, app, DepotId(depot))?);
     }
-    if let ["depots", depot, "manifests", manifest, ..] = rest
+    if let ["depots", depot, "manifests", manifest, subpage @ ..] = rest
         && let (Ok(depot), Ok(manifest)) = (depot.parse(), manifest.parse())
     {
-        if let ["file", "history"] = &rest[4..] {
-            entries.extend(depot_game_infos(state, app, DepotId(depot))?);
-        }
-        let branch = Query::<BranchQuery>::try_from_uri(uri)?
-            .0
-            .branch
-            .unwrap_or_else(|| "public".to_owned());
-        entries
-            .extend(manifest_page(state, app, DepotId(depot), ManifestId(manifest), branch).await?);
+        let query = Query::<ManifestPageQuery>::try_from_uri(uri)?.0;
+        entries.extend(
+            manifest_pages(
+                state,
+                app,
+                DepotId(depot),
+                ManifestId(manifest),
+                subpage,
+                query,
+            )
+            .await?,
+        );
     }
     Ok(entries)
 }
@@ -199,19 +218,25 @@ fn depot_game_infos(state: &AppState, app: AppId, depot: DepotId) -> Result<Vec<
         .collect()
 }
 
-async fn manifest_page(
+/// The manifest page and its file, diff and file-history subpages.
+async fn manifest_pages(
     state: &AppState,
     app: AppId,
     depot: DepotId,
     manifest: ManifestId,
-    branch: String,
+    subpage: &[&str],
+    query: ManifestPageQuery,
 ) -> Result<Vec<Entry>> {
+    let branch = query.branch.unwrap_or_else(|| "public".to_owned());
     let mut entries = Vec::new();
     if let Some((info, _)) = state
         .disk_cache
         .read::<Value>(&game_info::cache_key(depot, manifest))?
     {
         entries.push(Entry::current(keys::game_info(app, depot, manifest), info)?);
+    }
+    if subpage == ["file", "history"] {
+        entries.extend(depot_game_infos(state, app, depot)?);
     }
     // Opening a manifest needs the Steam client even when it is on disk.
     let on_disk = state
@@ -222,27 +247,53 @@ async fn manifest_page(
     if !on_disk || state.steam.load().is_none() {
         return Ok(entries);
     }
-    let snapshot = state.open_manifest(app, depot, manifest, &branch).await?;
+    let snapshot = Arc::new(state.open_manifest(app, depot, manifest, &branch).await?);
     let self_ref = ManifestRef {
         depot_id: depot,
         manifest_id: manifest,
         branch: branch.clone(),
     };
-    entries.extend([
-        Entry::current(
-            keys::manifest_info(app, depot, manifest, &branch),
-            manifest_info_of(&snapshot),
-        )?,
-        Entry::current(
-            keys::manifest_files(app, depot, manifest, &branch),
-            manifest_files_of(&snapshot),
-        )?,
-        Entry::current(
-            keys::manifest_statuses(app, &[self_ref]),
-            [manifest_status_of(state, &snapshot)],
-        )?,
-    ]);
+    entries.push(Entry::current(
+        keys::manifest_statuses(app, &[self_ref]),
+        [manifest_status_of(state, &snapshot)],
+    )?);
+    match subpage {
+        [] => entries.extend([
+            Entry::current(
+                keys::manifest_info(app, depot, manifest, &branch),
+                manifest_info_of(&snapshot),
+            )?,
+            Entry::current(
+                keys::manifest_files(app, depot, manifest, &branch),
+                manifest_files_of(&snapshot),
+            )?,
+        ]),
+        ["file"] => {
+            if let Some(path) = query.path
+                && file_is_local(state, &snapshot, &path)
+            {
+                let view = file_view_of(state, Arc::clone(&snapshot), &path, true)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("file view of {path}: {}", e.message))?;
+                entries.push(Entry::current(
+                    keys::file_view(app, depot, manifest, &branch, &path),
+                    view,
+                )?);
+            }
+        }
+        _ => {}
+    }
     Ok(entries)
+}
+
+/// Whether `path` is a file below the preload cap with every chunk on disk, so building its
+/// view downloads nothing.
+fn file_is_local(state: &AppState, snapshot: &Snapshot, path: &str) -> bool {
+    let Some(file) = snapshot.manifest().files.iter().find(|f| f.path == path) else {
+        return false;
+    };
+    let index = state.store_index.read().expect("store_index poisoned");
+    file.size <= PRELOAD_FILE_CAP_BYTES && file.chunks().iter().all(|c| index.has_chunk(&c.sha))
 }
 
 #[derive(Deserialize)]
@@ -310,6 +361,7 @@ mod tests {
             "manifestInfo": keys::manifest_info(app, depot, manifest, branch),
             "manifestFiles": keys::manifest_files(app, depot, manifest, branch),
             "gameInfo": keys::game_info(app, depot, manifest),
+            "fileView": keys::file_view(app, depot, manifest, branch, "Data/a.json"),
             "manifestStatuses": keys::manifest_statuses(app, &[self_ref]),
         });
         assert_eq!(actual, contract);

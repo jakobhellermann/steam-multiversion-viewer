@@ -14,9 +14,7 @@ use serde_json::json;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::http::{ApiError, ImmutableCache};
-use crate::state::AppState;
-#[cfg(feature = "unity")]
-use crate::state::Snapshot;
+use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::library::ManifestFileKind;
@@ -129,7 +127,18 @@ pub async fn manifest_file(
             .open_manifest(appid, depot_id, manifest_id, &q.branch)
             .await?,
     );
+    Ok(Json(
+        file_view_of(&state, snapshot, &q.path, q.auto_fetch).await?,
+    ))
+}
 
+/// With `auto_fetch`, missing chunks of a file below the preview cap are downloaded first.
+pub async fn file_view_of(
+    state: &AppState,
+    snapshot: Arc<Snapshot>,
+    path: &str,
+    auto_fetch: bool,
+) -> Result<FileView> {
     // Extract everything we need from the borrowed manifest before
     // handing the snapshot Arc to the download manager.
     let (
@@ -146,8 +155,8 @@ pub async fn manifest_file(
         let file = manifest
             .files
             .iter()
-            .find(|f| f.path == q.path)
-            .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
+            .find(|f| f.path == path)
+            .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {path}")))?;
         (
             file.path.clone(),
             file.size,
@@ -164,7 +173,7 @@ pub async fn manifest_file(
     };
 
     let mut sniff_bytes = None;
-    let (content_kind, content) = if !q.auto_fetch {
+    let (content_kind, content) = if !auto_fetch {
         // Caller wants metadata only — skip the download + content read.
         // We don't classify text-vs-binary without reading the bytes,
         // so return `Unknown`.
@@ -208,7 +217,7 @@ pub async fn manifest_file(
 
     let rich_view = rich_view_for(&file_path, sniff_bytes.as_deref());
 
-    Ok(Json(FileView {
+    Ok(FileView {
         path: file_path,
         size: file_size,
         kind: file_kind,
@@ -220,7 +229,7 @@ pub async fn manifest_file(
         content,
         preview_cap_bytes: PREVIEW_CAP_BYTES,
         rich_view,
-    }))
+    })
 }
 
 fn rich_view_for(path: &str, bytes: Option<&[u8]>) -> Option<RichView> {
