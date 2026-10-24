@@ -35,6 +35,9 @@ pub struct Entry {
     /// means current.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<u64>,
+    /// `data` covers only part of what the route returns; the frontend shows it and refetches.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub incomplete: bool,
 }
 
 impl Entry {
@@ -43,6 +46,7 @@ impl Entry {
             key,
             data: serde_json::to_value(data)?,
             updated_at: None,
+            incomplete: false,
         })
     }
 
@@ -51,6 +55,7 @@ impl Entry {
             key,
             data,
             updated_at: Some(fetched.duration_since(UNIX_EPOCH)?.as_millis().try_into()?),
+            incomplete: false,
         })
     }
 }
@@ -205,9 +210,13 @@ fn app_pages(state: &AppState, app: AppId, overview: bool) -> Result<Vec<Entry>>
     let mut entries = vec![Entry::current(keys::extra_manifests(app), &extras)?];
     if let Some((info, fetched)) = state.disk_cache.read::<AppInfo>(&app_info_cache_key(app))? {
         if overview
-            && let Some(statuses) = indexed_statuses(state, app, &app_manifest_refs(&info, &extras))
+            && let Some((statuses, complete)) =
+                indexed_statuses(state, app, &app_manifest_refs(&info, &extras))
         {
-            entries.push(Entry::current(keys::app_manifest_statuses(app), statuses)?);
+            entries.push(Entry {
+                incomplete: !complete,
+                ..Entry::current(keys::app_manifest_statuses(app), statuses)?
+            });
         }
         entries.push(Entry::as_of(
             keys::app(app),

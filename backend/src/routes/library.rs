@@ -537,17 +537,18 @@ pub async fn app_manifest_statuses(
     Ok(Json(statuses_of(&state, appid, &refs).await?))
 }
 
-/// Statuses of `refs` when the built store model holds all of them, without opening any
-/// manifest.
+/// Statuses of the `refs` the built store model holds, without opening any manifest, and
+/// whether that covers all of them.
 pub fn indexed_statuses(
     state: &AppState,
     appid: AppId,
     refs: &[ManifestRef],
-) -> Option<Vec<ManifestStatusEntry>> {
+) -> Option<(Vec<ManifestStatusEntry>, bool)> {
     let model = state.built_store_model()?;
     let index = state.store_index.read().expect("store_index poisoned");
-    refs.iter()
-        .map(|r| {
+    let statuses: Vec<_> = refs
+        .iter()
+        .filter_map(|r| {
             let (stats, creation_time) =
                 model.manifest_stats((appid, r.depot_id, r.manifest_id), index.present_chunks())?;
             Some(status_entry(
@@ -557,7 +558,9 @@ pub fn indexed_statuses(
                 creation_time,
             ))
         })
-        .collect()
+        .collect();
+    let complete = statuses.len() == refs.len();
+    Some((statuses, complete))
 }
 
 async fn statuses_of(

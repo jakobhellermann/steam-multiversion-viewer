@@ -51,6 +51,8 @@ export function useAppManifestStatuses(appid: AppId): {
   const statuses = useQuery({
     queryKey: queryKeys.appManifestStatuses(appid),
     queryFn: () => fetchAppManifestStatuses(appid),
+    // A preload may cover only the manifests the backend has on disk.
+    refetchOnMount: true,
   });
   // The backend derives the batch from its last fetched app info, so a refetched app info with
   // new content (a new build) outdates it. Structural sharing keeps an unchanged refetch's

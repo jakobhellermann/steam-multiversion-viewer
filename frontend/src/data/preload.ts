@@ -12,10 +12,16 @@ export function applyPreload(queryClient: QueryClient) {
     key: QueryKey;
     data: unknown;
     updated_at?: number;
+    incomplete?: boolean;
   }[];
-  for (const { key, data, updated_at } of entries) {
+  for (const { key, data, updated_at, incomplete } of entries) {
     queryClient.setQueryData(key, data, { updatedAt: updated_at });
-    preloaded.add(hashKey(key));
+    if (incomplete) {
+      // Shown until the refetch that queries with `refetchOnMount` start for stale data.
+      void queryClient.invalidateQueries({ queryKey: key, exact: true, refetchType: "none" });
+    } else {
+      preloaded.add(hashKey(key));
+    }
   }
 }
 
