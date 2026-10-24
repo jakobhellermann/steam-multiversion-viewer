@@ -41,6 +41,29 @@ fn vibrancy_init_script(active: bool) -> String {
     format!("window.__vibrancy = {{ active: {active} }};")
 }
 
+/// The page's own background (`index.html`), shown until its first frame instead of white.
+const PAGE_BACKGROUND_HEX: &str = "#0f172a";
+const PAGE_BACKGROUND: wry::RGBA = opaque_hex(PAGE_BACKGROUND_HEX);
+
+/// `#rrggbb` as an opaque color, evaluated at compile time.
+const fn opaque_hex(hex: &str) -> wry::RGBA {
+    const fn digit(c: u8) -> u8 {
+        match c {
+            b'0'..=b'9' => c - b'0',
+            b'a'..=b'f' => c - b'a' + 10,
+            _ => panic!("expected a lowercase hex digit"),
+        }
+    }
+    let b = hex.as_bytes();
+    assert!(b.len() == 7 && b[0] == b'#', "expected #rrggbb");
+    (
+        digit(b[1]) * 16 + digit(b[2]),
+        digit(b[3]) * 16 + digit(b[4]),
+        digit(b[5]) * 16 + digit(b[6]),
+        0xff,
+    )
+}
+
 #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 fn build_window(event_loop: &EventLoop<UserEvent>, transparent: bool) -> Window {
     let builder = WindowBuilder::new()
@@ -64,11 +87,13 @@ fn build_webview(
     #[cfg(target_os = "windows")]
     let builder = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_url(url)
-        .with_back_forward_navigation_gestures(true);
+        .with_back_forward_navigation_gestures(true)
+        .with_background_color(PAGE_BACKGROUND);
     #[cfg(not(target_os = "windows"))]
     let builder = WebViewBuilder::new()
         .with_url(url)
-        .with_back_forward_navigation_gestures(true);
+        .with_back_forward_navigation_gestures(true)
+        .with_background_color(PAGE_BACKGROUND);
 
     #[cfg(target_os = "windows")]
     let builder = builder
@@ -125,6 +150,19 @@ pub fn run(url: &str, state: AppState, handle: tokio::runtime::Handle) -> ! {
         if screen.resolution() < 0.0 {
             screen.set_resolution(96.0);
         }
+        // The window shows around the webview while it lags behind a resize (e.g. a tiling
+        // compositor resizing the new window).
+        use gtk::prelude::CssProviderExt;
+        let css = gtk::CssProvider::new();
+        css.load_from_data(
+            format!("window {{ background-color: {PAGE_BACKGROUND_HEX}; }}").as_bytes(),
+        )
+        .expect("window background CSS is valid");
+        gtk::StyleContext::add_provider_for_screen(
+            &screen,
+            &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
     }
 
     // The backdrop effect is baked into the window at creation (transparency
