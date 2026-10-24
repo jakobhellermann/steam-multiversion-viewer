@@ -164,29 +164,54 @@ function AppDetailBody({
         {info.branches.length === 0 ? (
           <p className="text-sm text-slate-500">No branches.</p>
         ) : (
-          <div className="max-h-80 overflow-y-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="sticky top-0">
-                <tr className="border-b border-slate-700">
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2 text-right">Build ID</th>
-                  <th className="px-3 py-2">Updated</th>
-                  <th className="px-3 py-2">Description</th>
-                </tr>
-              </thead>
-              <tbody>
-                {info.branches.map((b) => (
-                  <tr key={b.name} className="border-b border-slate-800">
-                    <td className="px-3 py-2 font-medium">{b.name}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{b.build_id}</td>
-                    <td className="px-3 py-2 tabular-nums">{formatTime(b.time_updated)}</td>
-                    <td className="px-3 py-2 text-slate-400">
-                      {b.description || <span className="text-slate-600">—</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          // Rows scroll in their own area below the head, so the head needs no background
+          // (an opaque one would sit badly on the mica backdrop).
+          <div
+            role="table"
+            className="grid grid-cols-[minmax(8rem,max-content)_max-content_max-content_minmax(0,1fr)] text-left text-sm"
+          >
+            <div
+              role="row"
+              className="col-span-full grid grid-cols-subgrid border-b border-slate-700 font-bold"
+            >
+              <div role="columnheader" className="px-3 py-2">
+                Name
+              </div>
+              <div role="columnheader" className="px-3 py-2 text-right">
+                Build ID
+              </div>
+              <div role="columnheader" className="px-3 py-2">
+                Updated
+              </div>
+              <div role="columnheader" className="px-3 py-2">
+                Description
+              </div>
+            </div>
+            <div
+              role="rowgroup"
+              className="col-span-full grid max-h-80 grid-cols-subgrid overflow-y-auto"
+            >
+              {info.branches.map((b) => (
+                <div
+                  key={b.name}
+                  role="row"
+                  className="col-span-full grid grid-cols-subgrid border-b border-slate-800"
+                >
+                  <div role="cell" className="px-3 py-2 font-medium">
+                    {b.name}
+                  </div>
+                  <div role="cell" className="px-3 py-2 text-right tabular-nums">
+                    {b.build_id}
+                  </div>
+                  <div role="cell" className="px-3 py-2 tabular-nums">
+                    {formatTime(b.time_updated)}
+                  </div>
+                  <div role="cell" className="px-3 py-2 text-slate-400">
+                    {b.description || <span className="text-slate-600">—</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {info.private_branches && (
