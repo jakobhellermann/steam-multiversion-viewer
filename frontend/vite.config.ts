@@ -55,7 +55,8 @@ const config = defineConfig({
     tailwindcss(),
     tanstackRouter({
       target: "react",
-      autoCodeSplitting: true,
+      // Served from localhost: splitting saves no transfer, but adds a chunk fetch per route.
+      autoCodeSplitting: false,
       routeFileIgnorePattern: "\\.(test|spec)\\.[cm]?[jt]sx?$",
     }),
     viteReact(),
