@@ -14,6 +14,8 @@ use clap::Parser;
 use directories::ProjectDirs;
 use std::time::Instant;
 use tokio::task::JoinHandle;
+use tower_http::compression::predicate::{NotForContentType, Predicate};
+use tower_http::compression::{CompressionLayer, DefaultPredicate};
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -152,6 +154,16 @@ async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>, AppState)
             get(static_files::third_party_notices),
         )
         .fallback(static_files::serve)
+        .layer(
+            // Raw game files (up to 64 MiB) and media: gzip would cost CPU on every request
+            // while a local connection gains nothing from the smaller transfer.
+            CompressionLayer::new().compress_when(
+                DefaultPredicate::new()
+                    .and(NotForContentType::const_new("application/octet-stream"))
+                    .and(NotForContentType::const_new("audio/"))
+                    .and(NotForContentType::const_new("video/")),
+            ),
+        )
         .layer(middleware::from_fn(http_log))
         .with_state(state.clone());
 
