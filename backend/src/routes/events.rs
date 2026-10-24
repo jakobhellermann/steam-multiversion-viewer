@@ -1,7 +1,8 @@
 // TODO(ai-review): review for style and correctness
 //! Server-Sent Events stream of background-work events: `stats` (aggregate
-//! download progress), `chunks` (per-file `chunks_present` updates) and
-//! `export_finished` (final [`ExportStatus`]).
+//! download progress), `chunks` (per-file `chunks_present` updates),
+//! `export_finished` (final [`ExportStatus`]) and `auth` ([`AuthStatus`] on connect and on
+//! every login change).
 
 use std::time::Duration;
 
@@ -9,8 +10,9 @@ use axum::extract::State;
 use axum::response::Sse;
 use axum::response::sse::{Event, KeepAlive};
 use futures_util::{Stream, StreamExt};
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 
+use crate::routes::auth::AuthStatus;
 use crate::state::AppState;
 use crate::state::downloads::DownloadEvent;
 use crate::state::export::ExportStatus;
@@ -18,6 +20,7 @@ use crate::state::export::ExportStatus;
 enum AppEvent {
     Download(DownloadEvent),
     ExportFinished(ExportStatus),
+    Auth(AuthStatus),
 }
 
 /// Emits the current download stats as the first event on (re)connect.
@@ -29,13 +32,25 @@ pub async fn events(
         .filter_map(async |res| res.ok().map(AppEvent::Download));
     let exports = BroadcastStream::new(state.exports.subscribe())
         .filter_map(async |res| res.ok().map(AppEvent::ExportFinished));
+    let (login, resuming) = state.auth_changes();
+    let auth_state = state.clone();
+    // The login watch yields its current value first, which delivers the status on connect.
+    let auth = futures_util::stream::select(
+        WatchStream::new(login),
+        WatchStream::from_changes(resuming).map(|_| ()),
+    )
+    .map(move |()| AppEvent::Auth(AuthStatus::from_state(&auth_state)));
     let stream = futures_util::stream::once(async move { initial })
-        .chain(futures_util::stream::select(downloads, exports))
+        .chain(futures_util::stream::select(
+            futures_util::stream::select(downloads, exports),
+            auth,
+        ))
         .map(|evt| {
             let (name, payload) = match &evt {
                 AppEvent::Download(DownloadEvent::Stats(s)) => ("stats", serde_json::to_value(s)),
                 AppEvent::Download(DownloadEvent::Chunks(c)) => ("chunks", serde_json::to_value(c)),
                 AppEvent::ExportFinished(s) => ("export_finished", serde_json::to_value(s)),
+                AppEvent::Auth(s) => ("auth", serde_json::to_value(s)),
             };
             let payload = payload.map_err(axum::Error::new)?;
             Event::default()

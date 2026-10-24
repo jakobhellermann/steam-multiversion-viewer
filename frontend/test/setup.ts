@@ -9,6 +9,12 @@ vi.mock("@tanstack/react-router-devtools", () => ({
   TanStackRouterDevtoolsPanel: () => null,
 }));
 
+// The test DOM has no EventSource; routes get no server events.
+class SilentEventSource extends EventTarget {
+  close() {}
+}
+globalThis.EventSource ??= SilentEventSource as unknown as typeof EventSource;
+
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();

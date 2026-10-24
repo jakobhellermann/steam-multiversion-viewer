@@ -7,7 +7,6 @@ import { server } from "../../test/msw/server";
 import { renderRoute } from "../../test/renderRoute";
 
 // Stub root-level siblings so the history route is what's being tested.
-// EventSource is unavailable in jsdom and unrelated to history rendering.
 vi.mock("../components/DownloadsDrawer", () => ({ DownloadsDrawer: () => null }));
 vi.mock("../components/MountToggle", () => ({ MountToggle: () => null }));
 

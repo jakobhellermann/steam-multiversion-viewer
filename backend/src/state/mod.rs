@@ -97,7 +97,7 @@ impl AppState {
         Ok(Self {
             steam: Arc::new(ArcSwapOption::empty()),
             resuming: Arc::new(watch::channel(false).0),
-            pending_login: Arc::new(std::sync::Mutex::new(None)),
+            pending_login: Arc::default(),
             store,
             initial_config: Arc::new(config.clone()),
             config: Arc::new(ArcSwap::from_pointee(config)),
@@ -167,15 +167,22 @@ impl AppState {
         *self.resuming.borrow()
     }
 
+    /// Fires on every change that [`AuthStatus`](crate::routes::auth::AuthStatus) reflects.
+    pub fn auth_changes(&self) -> (watch::Receiver<()>, watch::Receiver<bool>) {
+        (self.pending_login.subscribe(), self.resuming.subscribe())
+    }
+
     /// Install a freshly authenticated connection (login).
     pub fn set_steam(&self, client: SteamClient) {
         self.steam.store(Some(Arc::new(client)));
+        self.pending_login.notify();
     }
 
     /// Drop the current connection (logout). The cached refresh token is
     /// kept on disk so the next login can skip the password.
     pub fn clear_steam(&self) {
         self.steam.store(None);
+        self.pending_login.notify();
     }
 
     /// Fetch (or load from cache) a manifest and record it as indexed.

@@ -33,16 +33,8 @@ function LoginPage() {
   const qc = useQueryClient();
   const { redirect: redirectTo } = Route.useSearch();
 
-  const statusQuery = useQuery({
-    queryKey: queryKeys.auth(),
-    queryFn: fetchAuthStatus,
-    // Poll while a login is in flight (any phase except a terminal error).
-    refetchInterval: (q) => {
-      const d = q.state.data as AuthStatus | undefined;
-      const p = d?.pending;
-      return p && p.phase !== "error" && !d?.authenticated ? 1500 : false;
-    },
-  });
+  // Login progress arrives as `auth` server events.
+  const statusQuery = useQuery({ queryKey: queryKeys.auth(), queryFn: fetchAuthStatus });
   const status = statusQuery.data;
   const pending = status?.pending ?? null;
   const inFlight = !!pending && pending.phase !== "error";

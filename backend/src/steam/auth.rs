@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
@@ -14,7 +14,7 @@ use steam_vent::auth::{
 };
 use steam_vent::{Connection, ServerList};
 use tokio::io::{AsyncWriteExt, sink};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tracing::Instrument;
 use utoipa::ToSchema;
 
@@ -63,7 +63,36 @@ impl PendingLogin {
 }
 
 /// Shared handle to the (at most one) in-progress interactive login.
-pub type PendingLoginSlot = Arc<Mutex<Option<PendingLogin>>>;
+pub type PendingLoginSlot = Arc<LoginSlot>;
+
+/// Holds the in-progress login and signals every change to it.
+#[derive(Default)]
+pub struct LoginSlot {
+    pending: Mutex<Option<PendingLogin>>,
+    changed: watch::Sender<()>,
+}
+
+impl LoginSlot {
+    pub fn lock(&self) -> MutexGuard<'_, Option<PendingLogin>> {
+        self.pending.lock().expect("pending_login poisoned")
+    }
+
+    /// Changes the pending login and signals subscribers.
+    pub fn update<R>(&self, f: impl FnOnce(&mut Option<PendingLogin>) -> R) -> R {
+        let result = f(&mut self.lock());
+        self.notify();
+        result
+    }
+
+    /// Signals a login-related change outside the slot, e.g. the client being installed.
+    pub fn notify(&self) {
+        self.changed.send_replace(());
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<()> {
+        self.changed.subscribe()
+    }
+}
 
 static NEXT_LOGIN_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -73,11 +102,13 @@ static NEXT_LOGIN_ID: AtomicU64 = AtomicU64::new(1);
 pub fn begin_web_login(slot: PendingLoginSlot, account: String) -> (WebConfirmationHandler, u64) {
     let id = NEXT_LOGIN_ID.fetch_add(1, Ordering::Relaxed);
     let (code_tx, code_rx) = oneshot::channel();
-    *slot.lock().expect("pending_login poisoned") = Some(PendingLogin {
-        id,
-        account,
-        phase: LoginPhase::Starting,
-        code_tx: Some(code_tx),
+    slot.update(|pending| {
+        *pending = Some(PendingLogin {
+            id,
+            account,
+            phase: LoginPhase::Starting,
+            code_tx: Some(code_tx),
+        })
     });
     (
         WebConfirmationHandler {
@@ -92,7 +123,7 @@ pub fn begin_web_login(slot: PendingLoginSlot, account: String) -> (WebConfirmat
 /// Deliver a Steam Guard code to a parked login. Errors if no login is
 /// awaiting a code.
 pub fn submit_code(slot: &PendingLoginSlot, code: String) -> Result<(), &'static str> {
-    let mut guard = slot.lock().expect("pending_login poisoned");
+    let mut guard = slot.lock();
     let pending = guard.as_mut().ok_or("no login in progress")?;
     let tx = pending
         .code_tx
@@ -104,24 +135,26 @@ pub fn submit_code(slot: &PendingLoginSlot, code: String) -> Result<(), &'static
 /// Clear the pending slot once `id`'s login succeeded — but only if it
 /// hasn't been superseded by a newer attempt.
 pub fn clear_pending(slot: &PendingLoginSlot, id: u64) {
-    let mut guard = slot.lock().expect("pending_login poisoned");
-    if guard.as_ref().is_some_and(|p| p.id == id) {
-        *guard = None;
-    }
+    slot.update(|pending| {
+        if pending.as_ref().is_some_and(|p| p.id == id) {
+            *pending = None;
+        }
+    });
 }
 
 /// Record a terminal error for `id`'s login so the UI can show it — unless a
 /// newer attempt has already taken over the slot.
 pub fn fail_pending(slot: &PendingLoginSlot, id: u64, account: String, message: String) {
-    let mut guard = slot.lock().expect("pending_login poisoned");
-    if guard.as_ref().is_none_or(|p| p.id == id) {
-        *guard = Some(PendingLogin {
-            id,
-            account,
-            phase: LoginPhase::Error { message },
-            code_tx: None,
-        });
-    }
+    slot.update(|pending| {
+        if pending.as_ref().is_none_or(|p| p.id == id) {
+            *pending = Some(PendingLogin {
+                id,
+                account,
+                phase: LoginPhase::Error { message },
+                code_tx: None,
+            });
+        }
+    });
 }
 
 /// Confirmation handler that routes Steam Guard prompts to the web UI.
@@ -146,11 +179,13 @@ impl AuthConfirmationHandler for WebConfirmationHandler {
         let WebConfirmationHandler { slot, id, code_rx } = self;
 
         let set_phase = |phase: LoginPhase| {
-            if let Some(p) = slot.lock().expect("pending_login poisoned").as_mut()
-                && p.id == id
-            {
-                p.phase = phase;
-            }
+            slot.update(|pending| {
+                if let Some(p) = pending.as_mut()
+                    && p.id == id
+                {
+                    p.phase = phase;
+                }
+            });
         };
 
         let device_available = allowed_confirmations
@@ -205,11 +240,13 @@ impl AuthConfirmationHandler for WebConfirmationHandler {
 /// startup login as in progress instead of an empty login form.
 pub fn begin_startup_login(slot: &PendingLoginSlot, account: String) -> u64 {
     let id = NEXT_LOGIN_ID.fetch_add(1, Ordering::Relaxed);
-    *slot.lock().expect("pending_login poisoned") = Some(PendingLogin {
-        id,
-        account,
-        phase: LoginPhase::Starting,
-        code_tx: None,
+    slot.update(|pending| {
+        *pending = Some(PendingLogin {
+            id,
+            account,
+            phase: LoginPhase::Starting,
+            code_tx: None,
+        })
     });
     id
 }

@@ -52,7 +52,7 @@ impl AuthStatus {
         if let Some(client) = state.steam.load_full() {
             return Self::logged_in(&client);
         }
-        let pending = state.pending_login.lock().expect("pending_login poisoned");
+        let pending = state.pending_login.lock();
         match pending.as_ref() {
             Some(p) => Self {
                 authenticated: false,
@@ -165,7 +165,7 @@ pub async fn login_code(
 )]
 pub async fn logout(State(state): State<AppState>) -> Json<AuthStatus> {
     state.clear_steam();
-    *state.pending_login.lock().expect("pending_login poisoned") = None;
+    state.pending_login.update(|pending| *pending = None);
     auth::forget_session();
     tracing::info!("logged out");
     Json(AuthStatus::from_state(&state))

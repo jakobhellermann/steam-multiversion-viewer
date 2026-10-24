@@ -7,7 +7,6 @@ import { libraryFixture } from "../../test/msw/handlers";
 import { createQueryClient, renderRoute } from "../../test/renderRoute";
 
 // Stub root-level siblings so the library route is what we're testing.
-// EventSource is unavailable in jsdom and unrelated to library rendering.
 vi.mock("../components/DownloadsDrawer", () => ({ DownloadsDrawer: () => null }));
 vi.mock("../components/MountToggle", () => ({ MountToggle: () => null }));
 

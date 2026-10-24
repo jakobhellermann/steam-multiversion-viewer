@@ -16,6 +16,7 @@ import { fetchAuthStatus, fetchConfig, logout, type AuthStatus } from "../data/a
 import { applyVibrancy, vibrancySupported } from "../vibrancy";
 import "../styles.css";
 import { queryKeys } from "../data/queryKeys";
+import { useServerEvent } from "../data/serverEvents";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   beforeLoad: async ({ context, location }) => {
@@ -34,6 +35,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 });
 
 function RootComponent() {
+  const queryClient = useQueryClient();
+  useServerEvent("auth", (status) =>
+    queryClient.setQueryData(queryKeys.auth(), status as AuthStatus),
+  );
   // Publish the header's measured height on `<html>` as `--app-header-h`
   // so routes can size their containers against the remaining viewport
   // without hardcoding a pixel guess. Updates whenever the header
@@ -116,11 +121,7 @@ function RootComponent() {
 function AccountMenu() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { data: auth } = useQuery({
-    queryKey: queryKeys.auth(),
-    queryFn: fetchAuthStatus,
-    refetchInterval: (q) => (q.state.data?.resuming ? 500 : false),
-  });
+  const { data: auth } = useQuery({ queryKey: queryKeys.auth(), queryFn: fetchAuthStatus });
   const failedResume = auth != null && !auth.authenticated && !auth.resuming;
   useEffect(() => {
     if (failedResume) void navigate({ to: "/login", search: { redirect: location.href } });
