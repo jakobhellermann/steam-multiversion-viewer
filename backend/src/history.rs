@@ -44,6 +44,16 @@ pub struct FileHistoryRequest {
     pub node_id: Option<NodeId>,
 }
 
+/// How many consecutive version pairs a file history has compared.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct FileHistoryProgress {
+    pub current: HistoryManifest,
+    pub path: String,
+    pub node_id: Option<NodeId>,
+    pub done: usize,
+    pub total: usize,
+}
+
 /// File or node state at one earlier manifest.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct FileHistoryEntry {
@@ -145,6 +155,19 @@ pub async fn build_file_history(
     // One transition per consecutive pair (index, index + 1), computed
     // exactly once; the two passes meet at the current manifest.
     let mut outcomes: Vec<Option<PairOutcome>> = vec![None; versions.len().saturating_sub(1)];
+    let total = outcomes.len();
+    let progress = |done: usize| {
+        // No subscriber means no open page to show it on.
+        let _ = state.file_history_progress.send(FileHistoryProgress {
+            current: request.current.clone(),
+            path: request.path.clone(),
+            node_id: request.node_id.clone(),
+            done,
+            total,
+        });
+    };
+    let mut done = 0;
+    progress(done);
     // Pairs above the current manifest: chain the node upward, from each
     // pair's older side to its newer one.
     for index in (0..current_index).rev() {
@@ -152,6 +175,8 @@ pub async fn build_file_history(
         let outcome = pair_transition(state, appid, &versions, index, known, &request.path).await?;
         node_ids[index] = outcome.mapped_node.clone();
         outcomes[index] = Some(outcome);
+        done += 1;
+        progress(done);
     }
     // Pairs at and below the current manifest: chain the node downward.
     for index in current_index..outcomes.len() {
@@ -159,6 +184,8 @@ pub async fn build_file_history(
         let outcome = pair_transition(state, appid, &versions, index, known, &request.path).await?;
         node_ids[index + 1] = outcome.mapped_node.clone();
         outcomes[index] = Some(outcome);
+        done += 1;
+        progress(done);
     }
 
     let mut entries = Vec::with_capacity(versions.len());

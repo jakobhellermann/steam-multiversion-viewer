@@ -153,6 +153,15 @@ export type DeepDiffProgress = {
 
 export type ManifestRef = { depot_id: number; manifest_id: string; branch: string };
 
+/** How many consecutive version pairs a file history has compared. */
+export type FileHistoryProgress = {
+  current: ManifestRef;
+  path: string;
+  node_id: string | null;
+  done: number;
+  total: number;
+};
+
 export type ExtraManifestEntry = {
   depot_id: number;
   manifest_id: string;

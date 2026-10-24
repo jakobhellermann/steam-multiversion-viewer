@@ -23,6 +23,7 @@ use self::mount::MountManager;
 use self::store_index::StoreIndex;
 use self::store_model::StoreModel;
 use crate::config::Config;
+use crate::history::FileHistoryProgress;
 use crate::http::ApiError;
 use crate::routes::diff::manifest::DeepDiffProgress;
 use crate::steam::access::{ResumeGuard, SteamAccess};
@@ -68,6 +69,7 @@ pub struct AppState {
     pub mount: Arc<MountManager>,
     pub manifest_cache: Arc<manifest_cache::ManifestCache>,
     pub deep_diff_progress: broadcast::Sender<DeepDiffProgress>,
+    pub file_history_progress: broadcast::Sender<FileHistoryProgress>,
     pub disk_cache: Arc<disk_cache::DiskCache>,
 }
 
@@ -111,6 +113,7 @@ impl AppState {
             mount,
             manifest_cache: Arc::new(manifest_cache::ManifestCache::new()),
             deep_diff_progress: broadcast::channel(64).0,
+            file_history_progress: broadcast::channel(64).0,
             disk_cache: Arc::new(disk_cache::DiskCache::new(&store_root)),
         })
     }

@@ -1,6 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { Loader2 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import {
@@ -8,6 +9,7 @@ import {
   fetchFileStructured,
   fetchGameInfo,
   type FileHistoryEntry,
+  type FileHistoryProgress,
   type HistoryStatus,
   type ManifestRef,
   type StructuredNode,
@@ -18,6 +20,7 @@ import { formatDate } from "../../lib/format";
 import { manifestRefOf, type DepotManifest } from "../../data/useDepotManifests";
 import { useBranchFilter } from "../../lib/useBranchFilter";
 import { queryKeys } from "../../data/queryKeys";
+import { useServerEvent } from "../../data/serverEvents";
 
 /// Per-status text color. Follows the diff conventions (added = new side
 /// emerald, removed = old side rose); neutral states stay muted.
@@ -77,6 +80,17 @@ export function HistoryView({
     enabled: path.length > 0 && inputsReady,
     staleTime: Infinity,
   });
+  const [lastProgress, setLastProgress] = useState<FileHistoryProgress | null>(null);
+  useServerEvent("file_history_progress", (data) => setLastProgress(data as FileHistoryProgress));
+  const progress =
+    lastProgress &&
+    lastProgress.current.depot_id === current.depot_id &&
+    lastProgress.current.manifest_id === current.manifest_id &&
+    lastProgress.current.branch === current.branch &&
+    lastProgress.path === path &&
+    (lastProgress.node_id ?? undefined) === nodeId
+      ? lastProgress
+      : null;
   // Resolve the scoped node's label in the current tree — normally a
   // cache hit, the file page already loaded this exact tree.
   const treeQuery = useQuery({
@@ -184,6 +198,17 @@ export function HistoryView({
 
       {inputsReady && filteredPrevious.length <= 1 && (
         <p className="mb-3 text-sm text-slate-500">No other tracked manifests for this depot.</p>
+      )}
+      {historyQuery.isFetching && !historyQuery.data && (
+        <p className="mb-3 flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 size={13} className="animate-spin" />
+          Comparing versions
+          {progress && (
+            <span className="tabular-nums">
+              {progress.done}/{progress.total}
+            </span>
+          )}
+        </p>
       )}
       {historyQuery.error && (
         <ErrorBox title="History failed" error={historyQuery.error as Error} />

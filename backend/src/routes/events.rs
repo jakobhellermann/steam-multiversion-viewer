@@ -2,7 +2,8 @@
 //! Server-Sent Events stream of background-work events: `stats` (aggregate
 //! download progress), `chunks` (per-file `chunks_present` updates),
 //! `export_finished` (final [`ExportStatus`]), `auth` ([`AuthStatus`] on connect and on
-//! every login change) and `deep_diff_progress` ([`DeepDiffProgress`]).
+//! every login change), `deep_diff_progress` ([`DeepDiffProgress`]) and
+//! `file_history_progress` ([`FileHistoryProgress`]).
 
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use axum::response::sse::{Event, KeepAlive};
 use futures_util::{Stream, StreamExt};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 
+use crate::history::FileHistoryProgress;
 use crate::routes::auth::AuthStatus;
 use crate::routes::diff::manifest::DeepDiffProgress;
 use crate::state::AppState;
@@ -23,6 +25,7 @@ enum AppEvent {
     ExportFinished(ExportStatus),
     Auth(AuthStatus),
     DeepDiffProgress(DeepDiffProgress),
+    FileHistoryProgress(FileHistoryProgress),
 }
 
 /// Emits the current download stats as the first event on (re)connect.
@@ -44,10 +47,12 @@ pub async fn events(
     .map(move |()| AppEvent::Auth(AuthStatus::from_state(&auth_state)));
     let deep_diffs = BroadcastStream::new(state.deep_diff_progress.subscribe())
         .filter_map(async |res| res.ok().map(AppEvent::DeepDiffProgress));
+    let histories = BroadcastStream::new(state.file_history_progress.subscribe())
+        .filter_map(async |res| res.ok().map(AppEvent::FileHistoryProgress));
     let stream = futures_util::stream::once(async move { initial })
         .chain(futures_util::stream::select(
             futures_util::stream::select(downloads, exports),
-            futures_util::stream::select(auth, deep_diffs),
+            futures_util::stream::select(auth, futures_util::stream::select(deep_diffs, histories)),
         ))
         .map(|evt| {
             let (name, payload) = match &evt {
@@ -56,6 +61,9 @@ pub async fn events(
                 AppEvent::ExportFinished(s) => ("export_finished", serde_json::to_value(s)),
                 AppEvent::Auth(s) => ("auth", serde_json::to_value(s)),
                 AppEvent::DeepDiffProgress(p) => ("deep_diff_progress", serde_json::to_value(p)),
+                AppEvent::FileHistoryProgress(p) => {
+                    ("file_history_progress", serde_json::to_value(p))
+                }
             };
             let payload = payload.map_err(axum::Error::new)?;
             Event::default()
