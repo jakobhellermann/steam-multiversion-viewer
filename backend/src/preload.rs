@@ -150,9 +150,17 @@ async fn route(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
         return Ok(Vec::new());
     };
     let mut entries = app_pages(state, app)?;
+    if let ["depots", depot, "history"] = rest
+        && let Ok(depot) = depot.parse()
+    {
+        entries.extend(depot_game_infos(state, app, DepotId(depot))?);
+    }
     if let ["depots", depot, "manifests", manifest, ..] = rest
         && let (Ok(depot), Ok(manifest)) = (depot.parse(), manifest.parse())
     {
+        if let ["file", "history"] = &rest[4..] {
+            entries.extend(depot_game_infos(state, app, DepotId(depot))?);
+        }
         let branch = Query::<BranchQuery>::try_from_uri(uri)?
             .0
             .branch
@@ -174,6 +182,21 @@ fn app_pages(state: &AppState, app: AppId) -> Result<Vec<Entry>> {
         entries.push(Entry::as_of(keys::app(app), info, fetched)?);
     }
     Ok(entries)
+}
+
+/// Game info of every manifest of `depot` in the disk cache, for pages listing its versions.
+fn depot_game_infos(state: &AppState, app: AppId, depot: DepotId) -> Result<Vec<Entry>> {
+    state
+        .disk_cache
+        .list::<Value>(&game_info::cache_dir(depot))?
+        .into_iter()
+        .map(|(manifest, info)| {
+            Entry::current(
+                keys::game_info(app, depot, ManifestId(manifest.parse()?)),
+                info,
+            )
+        })
+        .collect()
 }
 
 async fn manifest_page(

@@ -38,6 +38,41 @@ impl DiskCache {
         Ok(Some((value, written)))
     }
 
+    /// File stems and values of every `.json` entry directly under `dir`.
+    pub fn list<T: DeserializeOwned>(&self, dir: &str) -> Result<Vec<(String, T)>, std::io::Error> {
+        let dir = self.root.join(dir);
+        let read_dir = match std::fs::read_dir(&dir) {
+            Ok(read_dir) => read_dir,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let mut entries = Vec::new();
+        for entry in read_dir {
+            let path = entry?.path();
+            if path.extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("non-UTF-8 cache entry {}", path.display()),
+                    )
+                })?
+                .to_owned();
+            let value = serde_json::from_slice(&std::fs::read(&path)?).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{}: {e}", path.display()),
+                )
+            })?;
+            entries.push((stem, value));
+        }
+        Ok(entries)
+    }
+
     pub fn write<T: Serialize>(&self, key: &str, value: &T) -> Result<(), std::io::Error> {
         let path = self.root.join(key);
         let parent = path.parent().expect("cache keys are relative file paths");

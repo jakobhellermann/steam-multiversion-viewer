@@ -93,7 +93,12 @@ pub async fn game_info(
 
 /// Disk-cache key of a manifest's game info; immutable like the manifest itself.
 pub fn cache_key(depot_id: DepotId, manifest_id: ManifestId) -> String {
-    format!("game_info/{depot_id}/{manifest_id}.json")
+    format!("{}/{manifest_id}.json", cache_dir(depot_id))
+}
+
+/// Disk-cache directory holding the game info of a depot's manifests.
+pub fn cache_dir(depot_id: DepotId) -> String {
+    format!("game_info/{depot_id}")
 }
 
 async fn detect(
