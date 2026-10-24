@@ -510,19 +510,19 @@ export function CompareMenu({
                             •
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate">{c.branch}</span>
+                            <span
+                              className={`block truncate tabular-nums ${
+                                bundleVersionByKey.has(c.key) ? "" : "font-mono"
+                              }`}
+                              title={bundleVersionByKey.has(c.key) ? c.manifestId : undefined}
+                            >
+                              {bundleVersionByKey.get(c.key) ?? `${c.manifestId.slice(0, 8)}…`}
+                            </span>
                             <span className="block truncate text-xs text-slate-600">
                               {c.creationTime > 0 ? formatDate(c.creationTime) : "date unknown"}
                             </span>
                           </span>
-                          <span
-                            className={`text-xs tabular-nums ${
-                              bundleVersionByKey.has(c.key) ? "" : "font-mono"
-                            }`}
-                            title={bundleVersionByKey.has(c.key) ? c.manifestId : undefined}
-                          >
-                            {bundleVersionByKey.get(c.key) ?? `${c.manifestId.slice(0, 8)}…`}
-                          </span>
+                          <span className="truncate text-xs">{c.branch}</span>
                         </div>
                       </li>
                     );
@@ -562,7 +562,14 @@ export function CompareMenu({
                           ✓
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate">{c.branch}</span>
+                          <span
+                            className={`block truncate tabular-nums ${
+                              bundleVersionByKey.has(c.key) ? "" : "font-mono"
+                            }`}
+                            title={bundleVersionByKey.has(c.key) ? c.manifestId : undefined}
+                          >
+                            {bundleVersionByKey.get(c.key) ?? `${c.manifestId.slice(0, 8)}…`}
+                          </span>
                           <span
                             className={`block truncate text-xs ${
                               checked ? "text-slate-400" : "text-slate-500"
@@ -572,12 +579,11 @@ export function CompareMenu({
                           </span>
                         </span>
                         <span
-                          className={`text-xs tabular-nums ${
+                          className={`truncate text-xs ${
                             checked ? "text-slate-400" : "text-slate-500"
-                          } ${bundleVersionByKey.has(c.key) ? "" : "font-mono"}`}
-                          title={bundleVersionByKey.has(c.key) ? c.manifestId : undefined}
+                          }`}
                         >
-                          {bundleVersionByKey.get(c.key) ?? `${c.manifestId.slice(0, 8)}…`}
+                          {c.branch}
                         </span>
                       </a>
                     </li>
