@@ -166,13 +166,21 @@ async fn manifest_page(
     manifest: ManifestId,
     branch: String,
 ) -> Result<Vec<Entry>> {
+    let mut entries = Vec::new();
+    if let Some((info, _)) = state
+        .disk_cache
+        .read::<Value>(&game_info::cache_key(depot, manifest))?
+    {
+        entries.push(Entry::current(keys::game_info(app, depot, manifest), info)?);
+    }
+    // Opening a manifest needs the Steam client even when it is on disk.
     let on_disk = state
         .store_index
         .read()
         .expect("store_index poisoned")
         .has_manifest(app, depot, manifest);
     if !on_disk || state.steam.load().is_none() {
-        return Ok(Vec::new());
+        return Ok(entries);
     }
     let snapshot = state.open_manifest(app, depot, manifest, &branch).await?;
     let self_ref = ManifestRef {
@@ -180,7 +188,7 @@ async fn manifest_page(
         manifest_id: manifest,
         branch: branch.clone(),
     };
-    let mut entries = vec![
+    entries.extend([
         Entry::current(
             keys::manifest_info(app, depot, manifest, &branch),
             manifest_info_of(&snapshot),
@@ -193,13 +201,7 @@ async fn manifest_page(
             keys::manifest_statuses(app, &[self_ref]),
             [manifest_status_of(state, &snapshot)],
         )?,
-    ];
-    if let Some((info, _)) = state
-        .disk_cache
-        .read::<Value>(&game_info::cache_key(depot, manifest))?
-    {
-        entries.push(Entry::current(keys::game_info(app, depot, manifest), info)?);
-    }
+    ]);
     Ok(entries)
 }
 
