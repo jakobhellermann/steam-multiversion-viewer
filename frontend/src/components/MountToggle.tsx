@@ -132,9 +132,11 @@ export function MountToggle() {
           <div
             ref={popoverRef}
             role="status"
-            className="absolute top-full right-0 z-50 mt-2 w-96 rounded-md border border-sky-700 bg-sky-950/95 px-4 py-3 text-sm text-sky-100 shadow-xl"
+            className="absolute top-full right-0 z-50 mt-2 w-96 rounded-md border border-sky-700 bg-sky-950/95 px-3 py-1.5 text-sm text-sky-100 shadow-xl"
           >
-            {info}
+            {/* Inline so a selection ends at the text: WebKitGTK paints a selection reaching the
+                block's end out to its edge. */}
+            <span className="select-all">{info}</span>
           </div>
         )
       )}
