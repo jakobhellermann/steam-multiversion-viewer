@@ -18,7 +18,8 @@ use crate::routes::config::build_config_dto;
 use crate::routes::extra_manifests::extra_manifests_of;
 use crate::routes::game_info;
 use crate::routes::library::{
-    ManifestRef, app_info_cache_key, manifest_files_of, manifest_info_of, manifest_status_of,
+    ManifestRef, app_info_cache_key, library_cache_key, manifest_files_of, manifest_info_of,
+    manifest_status_of,
 };
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
@@ -58,6 +59,10 @@ mod keys {
 
     use crate::routes::library::ManifestRef;
     use crate::steam::{AppId, DepotId, ManifestId};
+
+    pub fn library() -> Value {
+        json!(["library"])
+    }
 
     pub fn auth() -> Value {
         json!(["auth"])
@@ -113,15 +118,27 @@ pub async fn entries(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
 
 /// In-memory state every page reads, e.g. the auth status the root route waits on.
 fn global(state: &AppState) -> Result<Vec<Entry>> {
-    Ok(vec![
-        Entry::current(keys::auth(), AuthStatus::from_state(state))?,
+    let auth = AuthStatus::from_state(state);
+    let library = match &auth.account {
+        Some(account) => state
+            .disk_cache
+            .read::<Value>(&library_cache_key(account))?,
+        None => None,
+    };
+    let mut entries = vec![
+        Entry::current(keys::auth(), &auth)?,
         Entry::current(keys::mount_status(), state.mount.status())?,
         Entry::current(keys::export_status(), state.exports.current())?,
         Entry::current(
             keys::config(),
             build_config_dto(state, Config::load_or_default()?),
         )?,
-    ])
+    ];
+    // The frontend prefetches the library on every page.
+    if let Some((games, fetched)) = library {
+        entries.push(Entry::as_of(keys::library(), games, fetched)?);
+    }
+    Ok(entries)
 }
 
 async fn route(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
@@ -262,6 +279,7 @@ mod tests {
         let actual = serde_json::json!({
             "app": keys::app(app),
             "extraManifests": keys::extra_manifests(app),
+            "library": keys::library(),
             "auth": keys::auth(),
             "mountStatus": keys::mount_status(),
             "exportStatus": keys::export_status(),

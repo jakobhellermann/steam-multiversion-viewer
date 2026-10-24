@@ -6,6 +6,7 @@ import { queryKeys } from "./queryKeys";
 test("query keys match the backend preload contract", () => {
   const [appid, depotId, manifestId, branch] = [1030300, 1030303, "5954103139200615141", "beta"];
   expect({
+    library: queryKeys.library(),
     auth: queryKeys.auth(),
     mountStatus: queryKeys.mountStatus(),
     exportStatus: queryKeys.exportStatus(),

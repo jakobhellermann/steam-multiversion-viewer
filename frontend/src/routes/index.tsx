@@ -1,18 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { fetchLibrary, type OwnedGame } from "../data/api";
+import { type OwnedGame } from "../data/api";
+import { useLibrary } from "../data/library";
 import { ErrorBox } from "../components/ErrorBox";
 
 export const Route = createFileRoute("/")({ component: Home });
 
 function Home() {
-  const qc = useQueryClient();
-  const query = useQuery({
-    queryKey: ["library"],
-    queryFn: fetchLibrary,
-    initialData: () => qc.getQueryData<OwnedGame[]>(["library"]),
-  });
+  const query = useLibrary();
 
   const [search, setSearch] = useState("");
 

@@ -1,4 +1,5 @@
 {
+  "library": ["library"],
   "auth": ["auth"],
   "mountStatus": ["mount-status"],
   "exportStatus": ["export-status"],

@@ -1,7 +1,7 @@
 import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fetchLibrary } from "./data/api";
+import { libraryQuery } from "./data/library";
 import { applyPreload } from "./data/preload";
 import { createQueryClient } from "./data/queryClient";
 import { routeTree } from "./routeTree.gen";
@@ -11,7 +11,7 @@ const queryClient = createQueryClient();
 applyPreload(queryClient);
 
 // Always have the library warm so navigating back is instant.
-queryClient.prefetchQuery({ queryKey: ["library"], queryFn: fetchLibrary });
+void queryClient.prefetchQuery(libraryQuery);
 
 // Custom (de)serialiser that keeps URL search-param values as strings
 // lives in `./searchParams` — shared with the test router so route

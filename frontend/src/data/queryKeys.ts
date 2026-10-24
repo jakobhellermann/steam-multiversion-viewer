@@ -3,6 +3,7 @@
 import type { AppId, ManifestRef } from "./api";
 
 export const queryKeys = {
+  library: () => ["library"] as const,
   auth: () => ["auth"] as const,
   mountStatus: () => ["mount-status"] as const,
   exportStatus: () => ["export-status"] as const,

@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  fetchLibrary,
   fetchStore,
   prune,
   prunePreview,
@@ -15,6 +14,7 @@ import {
 } from "../data/api";
 import { Bytes } from "../components/Bytes";
 import { ErrorBox } from "../components/ErrorBox";
+import { useLibrary } from "../data/library";
 import { formatBytes, formatDate } from "../lib/format";
 
 export const Route = createFileRoute("/store")({ component: StorePage });
@@ -35,7 +35,7 @@ function refFromKey(key: string): StoreManifestRef {
 function StorePage() {
   const qc = useQueryClient();
   const store = useQuery({ queryKey: ["store"], queryFn: fetchStore });
-  const library = useQuery({ queryKey: ["library"], queryFn: fetchLibrary });
+  const library = useLibrary();
 
   const names = useMemo(() => {
     const map = new Map<number, string>();

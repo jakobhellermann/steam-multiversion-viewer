@@ -64,7 +64,7 @@ pub async fn fetch_owned_games(state: &AppState) -> Result<Vec<OwnedGame>> {
 
     let resp = steam.connection.service_method(req).await?;
 
-    let games = resp
+    let games: Vec<OwnedGame> = resp
         .games
         .into_iter()
         .map(|g| OwnedGame {
@@ -73,8 +73,15 @@ pub async fn fetch_owned_games(state: &AppState) -> Result<Vec<OwnedGame>> {
             playtime_minutes: g.playtime_forever() as u32,
         })
         .collect();
-
+    state
+        .disk_cache
+        .write(&library_cache_key(&steam.account), &games)?;
     Ok(games)
+}
+
+/// Disk-cache key of an account's owned games as last fetched from Steam.
+pub fn library_cache_key(account: &str) -> String {
+    format!("library/{account}.json")
 }
 
 #[derive(Serialize, ToSchema)]
