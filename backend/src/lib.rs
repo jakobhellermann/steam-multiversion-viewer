@@ -5,6 +5,7 @@
 pub mod config;
 pub mod history;
 pub mod http;
+pub mod platform_paths;
 pub mod preload;
 pub mod routes;
 pub mod state;

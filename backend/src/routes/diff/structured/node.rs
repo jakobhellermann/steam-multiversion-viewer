@@ -232,11 +232,11 @@ async fn addressables_node_body(
         .unwrap_or(0);
 
     let base_bytes = match (&base_snap, &base_target) {
-        (Some(snap), Some(_)) => Some(snap.read_full(&q.path).await?.to_vec()),
+        (Some(snap), Some(_)) => Some(snap.read_full(&side_path(snap, &q.path)).await?.to_vec()),
         _ => None,
     };
     let target_bytes = match (&target_snap, &target_target) {
-        (Some(snap), Some(_)) => Some(snap.read_full(&q.path).await?.to_vec()),
+        (Some(snap), Some(_)) => Some(snap.read_full(&side_path(snap, &q.path)).await?.to_vec()),
         _ => None,
     };
 
@@ -328,7 +328,8 @@ async fn bundle_node_body(
         .as_ref()
         .map(|s| s.manifest().creation_time)
         .unwrap_or(0);
-    let bundle_path = q.path.clone();
+    let base_path = base_snap.as_ref().map(|s| side_path(s, &q.path));
+    let target_path = target_snap.as_ref().map(|s| side_path(s, &q.path));
 
     let base_side = base_snap
         .as_ref()
@@ -352,32 +353,35 @@ async fn bundle_node_body(
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
         let dump_side =
             |side: Option<(Arc<crate::state::manifest_cache::ManifestScratch>, String)>,
+             bundle_path: Option<String>,
              target: Option<(String, rabex_env::rabex::objects::pptr::PathId)>|
              -> Option<anyhow::Result<Dumped>> {
-                side.zip(target).map(|((scratch, data_dir), (entry, pid))| {
-                    let unity = scratch
-                        .unity_already_initialized()
-                        .expect("unity scratch was initialised on the async side");
-                    let env = &unity.env;
-                    let opts = transform::unity::serializedfile::dump_value::DumpOptions {
-                        spp_key: unity.secure_player_prefs_key(),
-                        playmaker_game: Some(unity),
-                    };
-                    let (mime, text) =
-                        transform::unity::serializedfile::dump_value::dump_bundle_object_json(
-                            env,
-                            &data_dir,
-                            &bundle_path,
-                            &entry,
-                            pid,
-                            opts,
-                        )?;
-                    Ok(Dumped { mime, text })
-                })
+                side.zip(bundle_path).zip(target).map(
+                    |(((scratch, data_dir), bundle_path), (entry, pid))| {
+                        let unity = scratch
+                            .unity_already_initialized()
+                            .expect("unity scratch was initialised on the async side");
+                        let env = &unity.env;
+                        let opts = transform::unity::serializedfile::dump_value::DumpOptions {
+                            spp_key: unity.secure_player_prefs_key(),
+                            playmaker_game: Some(unity),
+                        };
+                        let (mime, text) =
+                            transform::unity::serializedfile::dump_value::dump_bundle_object_json(
+                                env,
+                                &data_dir,
+                                &bundle_path,
+                                &entry,
+                                pid,
+                                opts,
+                            )?;
+                        Ok(Dumped { mime, text })
+                    },
+                )
             };
         (
-            dump_side(base_side, base_target),
-            dump_side(target_side, target_target),
+            dump_side(base_side, base_path, base_target),
+            dump_side(target_side, target_path, target_target),
         )
     })
     .await
@@ -436,7 +440,8 @@ async fn unity_serialized_node_body(
     )
     .await?;
 
-    let path = q.path.clone();
+    let base_path = base_snap.as_ref().map(|s| side_path(s, &q.path));
+    let target_path = target_snap.as_ref().map(|s| side_path(s, &q.path));
     let base_ct = base_snap
         .as_ref()
         .map(|s| s.manifest().creation_time)
@@ -467,26 +472,29 @@ async fn unity_serialized_node_body(
     let (base_text, target_text) = tokio::task::spawn_blocking(move || {
         let dump_side =
             |side: Option<(Arc<crate::state::manifest_cache::ManifestScratch>, String)>,
+             path: Option<String>,
              pid: Option<rabex_env::rabex::objects::pptr::PathId>|
              -> Option<anyhow::Result<Dumped>> {
-                side.zip(pid).map(|((scratch, data_dir), pid)| {
-                    let unity = scratch
-                        .unity_already_initialized()
-                        .expect("unity scratch was initialised on the async side");
-                    let opts = transform::unity::serializedfile::dump_value::DumpOptions {
-                        spp_key: unity.secure_player_prefs_key(),
-                        playmaker_game: Some(unity),
-                    };
-                    let (mime, text) =
-                        transform::unity::serializedfile::dump_value::dump_object_json(
-                            &unity.env, &data_dir, &path, pid, opts,
-                        )?;
-                    Ok(Dumped { mime, text })
-                })
+                side.zip(path)
+                    .zip(pid)
+                    .map(|(((scratch, data_dir), path), pid)| {
+                        let unity = scratch
+                            .unity_already_initialized()
+                            .expect("unity scratch was initialised on the async side");
+                        let opts = transform::unity::serializedfile::dump_value::DumpOptions {
+                            spp_key: unity.secure_player_prefs_key(),
+                            playmaker_game: Some(unity),
+                        };
+                        let (mime, text) =
+                            transform::unity::serializedfile::dump_value::dump_object_json(
+                                &unity.env, &data_dir, &path, pid, opts,
+                            )?;
+                        Ok(Dumped { mime, text })
+                    })
             };
         (
-            dump_side(base_side, base_pid),
-            dump_side(target_side, target_pid),
+            dump_side(base_side, base_path, base_pid),
+            dump_side(target_side, target_path, target_pid),
         )
     })
     .await
@@ -617,6 +625,13 @@ async fn open_dll_side(
         sha,
         creation_time,
     }))
+}
+
+/// `path` as this side's manifest names the file (another platform keeps it in its own build
+/// folder, see [`crate::platform_paths`]).
+#[cfg(feature = "unity")]
+fn side_path(snap: &Snapshot, path: &str) -> String {
+    crate::platform_paths::resolve_path(snap.manifest(), path)
 }
 
 /// Open one side's manifest for a node-body request, or `None` if that side isn't needed.

@@ -38,7 +38,7 @@ use super::files::FileViewQuery;
 pub async fn manifest_file_structured(
     State(state): State<AppState>,
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
-    Query(q): Query<FileViewQuery>,
+    Query(mut q): Query<FileViewQuery>,
 ) -> Result<(ImmutableCache, Json<StructuredTree>)> {
     state.steam().await?; // 401 if not logged in
     let snapshot = Arc::new(
@@ -46,6 +46,8 @@ pub async fn manifest_file_structured(
             .open_manifest(appid, depot_id, manifest_id, &q.branch)
             .await?,
     );
+    // Links from another platform's manifest carry its build-folder path.
+    q.path = crate::platform_paths::resolve_path(snapshot.manifest(), &q.path);
 
     // Pre-download the file's own chunks so the actual tree-building
     // step doesn't stall mid-parse waiting on the CDN. Per-format
@@ -195,7 +197,7 @@ fn parse_program(tail: &str) -> Option<(u32, u32)> {
 pub async fn manifest_file_structured_node(
     State(state): State<AppState>,
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
-    Query(q): Query<NodeContentQuery>,
+    Query(mut q): Query<NodeContentQuery>,
 ) -> Result<(ImmutableCache, Json<NodeContent>)> {
     state.steam().await?; // 401 if not logged in
     let snapshot = Arc::new(
@@ -203,6 +205,8 @@ pub async fn manifest_file_structured_node(
             .open_manifest(appid, depot_id, manifest_id, &q.branch)
             .await?,
     );
+    // Links from another platform's manifest carry its build-folder path.
+    q.path = crate::platform_paths::resolve_path(snapshot.manifest(), &q.path);
     let file_sha = snapshot
         .manifest()
         .files
@@ -385,7 +389,7 @@ pub async fn manifest_file_structured_node(
 pub async fn manifest_file_structured_node_image(
     State(state): State<AppState>,
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
-    Query(q): Query<NodeContentQuery>,
+    Query(mut q): Query<NodeContentQuery>,
 ) -> Result<Response> {
     state.steam().await?; // 401 if not logged in
     let snapshot = Arc::new(
@@ -393,6 +397,8 @@ pub async fn manifest_file_structured_node_image(
             .open_manifest(appid, depot_id, manifest_id, &q.branch)
             .await?,
     );
+    // Links from another platform's manifest carry its build-folder path.
+    q.path = crate::platform_paths::resolve_path(snapshot.manifest(), &q.path);
 
     match transform::tools::transformer_for(&q.path, None) {
         #[cfg(feature = "unity")]

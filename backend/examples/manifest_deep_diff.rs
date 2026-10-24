@@ -298,7 +298,7 @@ fn diff_one<R: EnvResolver>(
                 base_data_dir,
                 target_env,
                 target_data_dir,
-                path,
+                &transform::diff::DiffPaths::same(path),
             )?)
         }
         Some(Transformer::UnityBundle) => Ok(transform::unity::bundle::build_diff(
@@ -306,7 +306,7 @@ fn diff_one<R: EnvResolver>(
             base_data_dir,
             target_env,
             target_data_dir,
-            path,
+            &transform::diff::DiffPaths::same(path),
         )?),
         _ => anyhow::bail!("not unity-deep-comparable: {path}"),
     }

@@ -128,7 +128,7 @@ async fn main() -> Result<()> {
             &base_data_dir,
             &target_env,
             &target_data_dir,
-            PATH,
+            &transform::diff::DiffPaths::same(PATH),
         )
     })
     .await??;

@@ -152,10 +152,7 @@ pub async fn file_view_of(
         chunk_shas,
     ) = {
         let manifest = snapshot.manifest();
-        let file = manifest
-            .files
-            .iter()
-            .find(|f| f.path == path)
+        let file = crate::platform_paths::find_corresponding(manifest, path)
             .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {path}")))?;
         (
             file.path.clone(),
@@ -276,10 +273,7 @@ pub async fn manifest_file_raw(
 
     let (file_path, file_kind, chunks_for_dl) = {
         let manifest = snapshot.manifest();
-        let file = manifest
-            .files
-            .iter()
-            .find(|f| f.path == q.path)
+        let file = crate::platform_paths::find_corresponding(manifest, &q.path)
             .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
         (
             file.path.clone(),
@@ -345,10 +339,7 @@ pub async fn manifest_file_transformed(
 
     let (file_path, file_sha, chunks_for_dl) = {
         let manifest = snapshot.manifest();
-        let file = manifest
-            .files
-            .iter()
-            .find(|f| f.path == q.path)
+        let file = crate::platform_paths::find_corresponding(manifest, &q.path)
             .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
         let sha = file
             .sha()

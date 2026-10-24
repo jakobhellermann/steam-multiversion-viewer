@@ -4,6 +4,7 @@
 //! call [`build_diff_from_bundles`] directly with their own
 //! [`Environment`]/[`BundleFileReader`] pairs.
 
+use crate::diff::DiffPaths;
 use std::collections::BTreeMap;
 use std::io::Cursor;
 
@@ -37,24 +38,30 @@ pub fn build_diff<R: EnvResolver, P: rabex_env::rabex::typetree::TypeTreeProvide
     base_data_dir: &str,
     target_env: &Environment<R, P>,
     target_data_dir: &str,
-    path: &str,
+    paths: &DiffPaths,
 ) -> Result<StructuredTree> {
     let base_bytes = base_env
         .game_files
         .read_path(std::path::Path::new(relative_to_data_dir(
             base_data_dir,
-            path,
+            &paths.base,
         )))?;
     let target_bytes =
         target_env
             .game_files
             .read_path(std::path::Path::new(relative_to_data_dir(
                 target_data_dir,
-                path,
+                &paths.target,
             )))?;
     let base_bundle = open_bundle_from_bytes(base_env, base_bytes)?;
     let target_bundle = open_bundle_from_bytes(target_env, target_bytes)?;
-    build_diff_from_bundles(base_env, &base_bundle, target_env, &target_bundle, path)
+    build_diff_from_bundles(
+        base_env,
+        &base_bundle,
+        target_env,
+        &target_bundle,
+        &paths.base,
+    )
 }
 
 /// Diff two already-parsed bundles. Same role as

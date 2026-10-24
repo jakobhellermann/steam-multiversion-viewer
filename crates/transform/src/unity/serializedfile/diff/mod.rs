@@ -1,6 +1,7 @@
 // TODO(ai-review): review for style and correctness
 //! Structured diffs for Unity serialized files.
 
+use crate::diff::DiffPaths;
 use std::collections::HashMap;
 
 use anyhow::Result;
@@ -90,10 +91,12 @@ pub fn build_diff<R: EnvResolver, P: TypeTreeProvider>(
     base_data_dir: &str,
     target_env: &Environment<R, P>,
     target_data_dir: &str,
-    path: &str,
+    paths: &DiffPaths,
 ) -> Result<StructuredTree> {
-    let base_file = base_env.load_serialized(relative_to_data_dir(base_data_dir, path))?;
-    let target_file = target_env.load_serialized(relative_to_data_dir(target_data_dir, path))?;
+    let base_file = base_env.load_serialized(relative_to_data_dir(base_data_dir, &paths.base))?;
+    let target_file =
+        target_env.load_serialized(relative_to_data_dir(target_data_dir, &paths.target))?;
+    let path = &paths.base;
 
     let (children, status) = diff_sections(&base_file, &target_file)?;
     let root = Node {

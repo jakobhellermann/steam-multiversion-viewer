@@ -2,6 +2,7 @@
 //! Structured (per-object) diff tree for one file across two manifests.
 
 use std::sync::Arc;
+use transform::diff::DiffPaths;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -104,7 +105,7 @@ pub async fn build_structured_diff(
 
     let kind = transform::tools::transformer_for(&request.path, None);
 
-    let (base, target) = tokio::try_join!(
+    let ((base, base_path), (target, target_path)) = tokio::try_join!(
         prepare_structured_side(
             state,
             request.appid,
@@ -122,11 +123,15 @@ pub async fn build_structured_diff(
             &request.target.branch,
         ),
     )?;
+    let paths = DiffPaths {
+        base: base_path,
+        target: target_path,
+    };
 
     let kind = match kind {
         Some(k) => Some(k),
         None => {
-            let bytes = base.read_full(&request.path).await?;
+            let bytes = base.read_full(&paths.base).await?;
             transform::tools::transformer_for(&request.path, Some(&bytes))
         }
     };
@@ -155,7 +160,7 @@ pub async fn build_structured_diff(
                 base_data_dir,
                 target_env,
                 target_data_dir,
-                &request.path,
+                &paths,
             )
             .await?
         }
@@ -177,19 +182,13 @@ pub async fn build_structured_diff(
                 &request.target.branch,
                 target,
             )?;
-            build_unity_bundle_diff(
-                base_env,
-                base_data_dir,
-                target_env,
-                target_data_dir,
-                &request.path,
-            )
-            .await?
+            build_unity_bundle_diff(base_env, base_data_dir, target_env, target_data_dir, &paths)
+                .await?
         }
-        Some(Transformer::Dll) => build_dll_diff(state, &base, &target, &request.path).await?,
+        Some(Transformer::Dll) => build_dll_diff(state, &base, &target, &paths).await?,
         #[cfg(feature = "unity")]
         Some(Transformer::AddressablesCatalog) => {
-            build_addressables_diff(&base, &target, &request.path).await?
+            build_addressables_diff(&base, &target, &paths).await?
         }
         _ => return Ok(None),
     };
@@ -204,16 +203,16 @@ pub(super) async fn build_unity_serialized_diff(
     base_data_dir: String,
     target_env: Arc<Environment>,
     target_data_dir: String,
-    path: &str,
+    paths: &DiffPaths,
 ) -> Result<StructuredTree> {
-    let path = path.to_owned();
+    let paths = paths.clone();
     tokio::task::spawn_blocking(move || {
         transform::unity::serializedfile::diff::build_diff(
             &base_env,
             &base_data_dir,
             &target_env,
             &target_data_dir,
-            &path,
+            &paths,
         )
     })
     .instrument(tracing::info_span!("diff_build", kind = "unity_serialized"))
@@ -229,16 +228,16 @@ pub(super) async fn build_unity_bundle_diff(
     base_data_dir: String,
     target_env: Arc<Environment>,
     target_data_dir: String,
-    path: &str,
+    paths: &DiffPaths,
 ) -> Result<StructuredTree> {
-    let path = path.to_owned();
+    let paths = paths.clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         transform::unity::bundle::build_diff(
             &base_env,
             &base_data_dir,
             &target_env,
             &target_data_dir,
-            &path,
+            &paths,
         )
     })
     .instrument(tracing::info_span!("diff_build", kind = "unity_bundle"))
@@ -253,11 +252,11 @@ pub(super) async fn build_unity_bundle_diff(
 pub(super) async fn build_addressables_diff(
     base: &Arc<Snapshot>,
     target: &Arc<Snapshot>,
-    path: &str,
+    paths: &DiffPaths,
 ) -> Result<StructuredTree> {
-    let base_bytes = base.read_full(path).await?.to_vec();
-    let target_bytes = target.read_full(path).await?.to_vec();
-    let path = path.to_owned();
+    let base_bytes = base.read_full(&paths.base).await?.to_vec();
+    let target_bytes = target.read_full(&paths.target).await?.to_vec();
+    let path = paths.base.clone();
     tokio::task::spawn_blocking(move || {
         transform::unity::addressables::build_diff(&base_bytes, &target_bytes, &path)
     })
@@ -272,20 +271,20 @@ async fn build_dll_diff(
     state: &AppState,
     base: &Arc<Snapshot>,
     target: &Arc<Snapshot>,
-    path: &str,
+    paths: &DiffPaths,
 ) -> Result<StructuredTree> {
     let cfg = state.config.load();
     let store_root = cfg.store_root.clone();
     // GNU dll-diff convention: only-in-`to` → Added; to=base, from=target, so Added means "in the viewed manifest".
-    let (to_bytes, to_sha) = dll_side_bytes(base, path).await?;
-    let (from_bytes, from_sha) = dll_side_bytes(target, path).await?;
+    let (to_bytes, to_sha) = dll_side_bytes(base, &paths.base).await?;
+    let (from_bytes, from_sha) = dll_side_bytes(target, &paths.target).await?;
     let tree = transform::dll::diff::build_tree(
         &store_root,
         &from_sha,
         &from_bytes,
         &to_sha,
         &to_bytes,
-        path,
+        &paths.base,
     )
     .instrument(tracing::info_span!("diff_build", kind = "dll"))
     .await
@@ -296,7 +295,10 @@ async fn build_dll_diff(
     Ok(tree)
 }
 
-/// Open a manifest, find the file, enqueue and await its chunks; returns the snapshot as an `Arc` for later blocking-task use.
+/// Open a manifest, find the file (see [`find_corresponding`]), enqueue and await its chunks;
+/// returns the snapshot as an `Arc` for later blocking-task use and the file's path in it.
+///
+/// [`find_corresponding`]: crate::platform_paths::find_corresponding
 #[tracing::instrument(skip_all, fields(depot_id = %depot_id, manifest_id = %manifest_id))]
 pub(super) async fn prepare_structured_side(
     state: &AppState,
@@ -305,33 +307,31 @@ pub(super) async fn prepare_structured_side(
     manifest_id: ManifestId,
     path: &str,
     branch: &str,
-) -> Result<Arc<Snapshot>> {
+) -> Result<(Arc<Snapshot>, String)> {
     let snapshot = Arc::new(
         state
             .open_manifest(appid, depot_id, manifest_id, branch)
             .await?,
     );
-    let chunks_for_dl: Vec<_> = {
-        let file = snapshot
-            .manifest()
-            .files
-            .iter()
-            .find(|f| f.path == path)
+    let (resolved, chunks_for_dl): (String, Vec<_>) = {
+        let file = crate::platform_paths::find_corresponding(snapshot.manifest(), path)
             .ok_or_else(|| {
                 ApiError::not_found(format!(
                     "file not in manifest {depot_id}/{manifest_id}: {path}"
                 ))
             })?;
-        file.chunks()
+        let chunks = file
+            .chunks()
             .iter()
             .map(|c| (c.sha, u64::from(c.size_compressed)))
-            .collect()
+            .collect();
+        (file.path.clone(), chunks)
     };
     state
         .downloads
         .enqueue_and_wait(snapshot.clone(), chunks_for_dl)
         .await;
-    Ok(snapshot)
+    Ok((snapshot, resolved))
 }
 
 /// Resolve the per-manifest unity `Environment` + data_dir; 415s if the manifest isn't a unity game.
@@ -357,15 +357,13 @@ pub(super) fn unity_env(
 
 /// Read a file's bytes + manifest-recorded sha1; the sha keys the decompile cache, so it must match the actual bytes.
 async fn dll_side_bytes(snap: &Arc<Snapshot>, path: &str) -> Result<(Vec<u8>, [u8; 20])> {
-    let sha = snap
-        .manifest()
-        .files
-        .iter()
-        .find(|f| f.path == path)
-        .and_then(|f| f.sha())
+    let file = crate::platform_paths::find_corresponding(snap.manifest(), path)
+        .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {path}")))?;
+    let sha = file
+        .sha()
         .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {path}")))?
         .0;
-    let bytes = snap.read_full(path).await?.to_vec();
+    let bytes = snap.read_full(&file.path).await?.to_vec();
     Ok((bytes, sha))
 }
 
@@ -463,7 +461,7 @@ pub(super) async fn deep_structured_diff(
 ) -> Result<StructuredTree> {
     use transform::Transformer;
 
-    let (base_snap, target_snap) = tokio::try_join!(
+    let ((base_snap, base_path), (target_snap, target_path)) = tokio::try_join!(
         prepare_structured_side(state, appid, depot_id, manifest_id, path, branch),
         prepare_structured_side(
             state,
@@ -474,6 +472,10 @@ pub(super) async fn deep_structured_diff(
             target_branch,
         ),
     )?;
+    let paths = DiffPaths {
+        base: base_path,
+        target: target_path,
+    };
 
     let UnityEnvPair {
         base: (base_env, base_data_dir),
@@ -481,15 +483,21 @@ pub(super) async fn deep_structured_diff(
     } = envs.clone();
     match transform::tools::transformer_for(path, None) {
         Some(Transformer::UnitySerialized) => {
-            build_unity_serialized_diff(base_env, base_data_dir, target_env, target_data_dir, path)
-                .await
+            build_unity_serialized_diff(
+                base_env,
+                base_data_dir,
+                target_env,
+                target_data_dir,
+                &paths,
+            )
+            .await
         }
         Some(Transformer::UnityBundle) => {
-            build_unity_bundle_diff(base_env, base_data_dir, target_env, target_data_dir, path)
+            build_unity_bundle_diff(base_env, base_data_dir, target_env, target_data_dir, &paths)
                 .await
         }
         Some(Transformer::AddressablesCatalog) => {
-            build_addressables_diff(&base_snap, &target_snap, path).await
+            build_addressables_diff(&base_snap, &target_snap, &paths).await
         }
         _ => unreachable!("deep diff only calls this for is_deep_comparable paths"),
     }

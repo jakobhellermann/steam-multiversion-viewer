@@ -1,6 +1,24 @@
 // TODO(ai-review): review for style and correctness
 //! Generic text-level diff helpers shared across formats.
 
+/// One file's path on the base and on the target side of a diff; they differ where the two
+/// manifests keep it under different folders (e.g. per-platform build folders).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiffPaths {
+    pub base: String,
+    pub target: String,
+}
+
+impl DiffPaths {
+    pub fn same(path: impl Into<String>) -> Self {
+        let path = path.into();
+        Self {
+            base: path.clone(),
+            target: path,
+        }
+    }
+}
+
 /// Unified diff in the exact wire format the `/file/structured-diff/
 /// node` route returns: `target` on the `-` side, `base` on the `+`
 /// side, three lines of context. Callers pass human-readable labels

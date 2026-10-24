@@ -223,11 +223,7 @@ fn file_download_info(
     snapshot: &Snapshot,
     path: &str,
 ) -> Result<(String, FileHash, Vec<(ChunkHash, u64)>)> {
-    let file = snapshot
-        .manifest()
-        .files
-        .iter()
-        .find(|f| f.path == path)
+    let file = crate::platform_paths::find_corresponding(snapshot.manifest(), path)
         .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {path}")))?;
     let DepotFileKind::File { sha, chunks, .. } = &file.kind else {
         return Err(ApiError::bad_request(format!(
