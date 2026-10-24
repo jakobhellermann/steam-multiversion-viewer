@@ -1,8 +1,8 @@
 // TODO(ai-review): review for style and correctness
 //! Server-Sent Events stream of background-work events: `stats` (aggregate
 //! download progress), `chunks` (per-file `chunks_present` updates),
-//! `export_finished` (final [`ExportStatus`]) and `auth` ([`AuthStatus`] on connect and on
-//! every login change).
+//! `export_finished` (final [`ExportStatus`]), `auth` ([`AuthStatus`] on connect and on
+//! every login change) and `deep_diff_progress` ([`DeepDiffProgress`]).
 
 use std::time::Duration;
 
@@ -13,6 +13,7 @@ use futures_util::{Stream, StreamExt};
 use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 
 use crate::routes::auth::AuthStatus;
+use crate::routes::diff::manifest::DeepDiffProgress;
 use crate::state::AppState;
 use crate::state::downloads::DownloadEvent;
 use crate::state::export::ExportStatus;
@@ -21,6 +22,7 @@ enum AppEvent {
     Download(DownloadEvent),
     ExportFinished(ExportStatus),
     Auth(AuthStatus),
+    DeepDiffProgress(DeepDiffProgress),
 }
 
 /// Emits the current download stats as the first event on (re)connect.
@@ -40,10 +42,12 @@ pub async fn events(
         WatchStream::from_changes(resuming).map(|_| ()),
     )
     .map(move |()| AppEvent::Auth(AuthStatus::from_state(&auth_state)));
+    let deep_diffs = BroadcastStream::new(state.deep_diff_progress.subscribe())
+        .filter_map(async |res| res.ok().map(AppEvent::DeepDiffProgress));
     let stream = futures_util::stream::once(async move { initial })
         .chain(futures_util::stream::select(
             futures_util::stream::select(downloads, exports),
-            auth,
+            futures_util::stream::select(auth, deep_diffs),
         ))
         .map(|evt| {
             let (name, payload) = match &evt {
@@ -51,6 +55,7 @@ pub async fn events(
                 AppEvent::Download(DownloadEvent::Chunks(c)) => ("chunks", serde_json::to_value(c)),
                 AppEvent::ExportFinished(s) => ("export_finished", serde_json::to_value(s)),
                 AppEvent::Auth(s) => ("auth", serde_json::to_value(s)),
+                AppEvent::DeepDiffProgress(p) => ("deep_diff_progress", serde_json::to_value(p)),
             };
             let payload = payload.map_err(axum::Error::new)?;
             Event::default()

@@ -141,6 +141,16 @@ export type ManifestStatusEntry = {
   creation_time: number;
 };
 
+/** How far a deep manifest diff has swept the changed files. */
+export type DeepDiffProgress = {
+  depot_id: number;
+  manifest_id: string;
+  target_depot_id: number;
+  target_manifest_id: string;
+  done: number;
+  total: number;
+};
+
 export type ManifestRef = { depot_id: number; manifest_id: string; branch: string };
 
 export type ExtraManifestEntry = {

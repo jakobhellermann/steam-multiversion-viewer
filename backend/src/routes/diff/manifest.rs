@@ -447,6 +447,17 @@ pub struct DeepDiffQuery {
     pub target_branch: String,
 }
 
+/// How far a deep manifest diff has swept the changed files.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct DeepDiffProgress {
+    pub depot_id: DepotId,
+    pub manifest_id: ManifestId,
+    pub target_depot_id: DepotId,
+    pub target_manifest_id: ManifestId,
+    pub done: usize,
+    pub total: usize,
+}
+
 /// Deep manifest diff
 ///
 /// Like [`manifest_diff`], but a changed Unity file only counts when its structured diff is non-empty (normalization noise like PPtr renumbering and HingeJoint2D m_ConnectedAnchor float noise is dropped); DLLs stay fingerprint-level since decompiling is expensive.
@@ -546,6 +557,18 @@ pub async fn manifest_diff_deep(
         });
     }
     tracing::info!("deep diff: sweeping {total_changed} changed files");
+    let progress = |done: usize| {
+        // No subscriber means no open page to show it on.
+        let _ = state.deep_diff_progress.send(DeepDiffProgress {
+            depot_id,
+            manifest_id,
+            target_depot_id: q.target_depot_id,
+            target_manifest_id: q.target_manifest_id,
+            done,
+            total: total_changed,
+        });
+    };
+    progress(0);
     let mut kept_changed = 0usize;
     let mut errored_changed = 0usize;
     let mut done_changed = 0usize;
@@ -634,6 +657,7 @@ pub async fn manifest_diff_deep(
                 }
             }
             done_changed += 1;
+            progress(done_changed);
             tracing::info!(parent: None, "deep diff: {done_changed}/{total_changed}");
         }
         #[allow(unused_mut)]

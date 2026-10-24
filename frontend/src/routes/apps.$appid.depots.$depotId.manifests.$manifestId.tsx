@@ -14,6 +14,7 @@ import {
   manifestDiffDeepKey,
   type AppId,
   type AppInfo,
+  type DeepDiffProgress,
   type ExtraManifestEntry,
   type GameInfo,
   type ManifestDiffStatus,
@@ -41,6 +42,7 @@ import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { pinScroll } from "../lib/pinScroll";
 import { useAppManifestStatuses, useManifestStatus } from "../data/appManifests";
 import { queryKeys } from "../data/queryKeys";
+import { useServerEvent } from "../data/serverEvents";
 
 type Search = {
   /// `undefined` means "default" (which is `public`). Keeping default
@@ -552,6 +554,17 @@ function FilesPanel({
     staleTime: Infinity,
     gcTime: 10 * 60 * 1000,
   });
+  const [lastDeepProgress, setLastDeepProgress] = useState<DeepDiffProgress | null>(null);
+  useServerEvent("deep_diff_progress", (data) => setLastDeepProgress(data as DeepDiffProgress));
+  const deepProgress =
+    lastDeepProgress &&
+    deepTarget &&
+    lastDeepProgress.depot_id === deepBase.depot_id &&
+    lastDeepProgress.manifest_id === deepBase.manifest_id &&
+    lastDeepProgress.target_depot_id === deepTarget.depot_id &&
+    lastDeepProgress.target_manifest_id === deepTarget.manifest_id
+      ? lastDeepProgress
+      : null;
   // Per-path diff status of the base rows. `null` when no compare
   // target is active (or the query hasn't landed yet) — callers treat
   // that as "no diff filter". `has(path)` mirrors the old Set API,
@@ -800,9 +813,15 @@ function FilesPanel({
               className="accent-sky-500"
             />
             Deep compare
-            {deepCompare && deepQuery.isFetching && (
-              <Loader2 size={13} className="animate-spin text-slate-500" />
-            )}
+            {deepCompare &&
+              deepQuery.isFetching &&
+              (deepProgress ? (
+                <span className="text-xs text-slate-500 tabular-nums">
+                  {deepProgress.done}/{deepProgress.total}
+                </span>
+              ) : (
+                <Loader2 size={13} className="animate-spin text-slate-500" />
+              ))}
           </label>
         )}
         {appInfo && (
