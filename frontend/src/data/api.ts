@@ -426,6 +426,7 @@ export type NodeStatus = "unchanged" | "changed" | "added" | "removed";
 export type HistoryStatus = NodeStatus | "initial" | "missing" | "unsupported";
 
 export type FileHistoryEntry = ManifestRef & {
+  creation_time: number;
   status: HistoryStatus;
   node_id?: string;
   diff_node_id?: string;

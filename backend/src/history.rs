@@ -49,6 +49,7 @@ pub struct FileHistoryRequest {
 pub struct FileHistoryEntry {
     #[serde(flatten)]
     pub manifest: HistoryManifest,
+    pub creation_time: u32,
     pub status: HistoryStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous: Option<HistoryManifest>,
@@ -162,12 +163,14 @@ pub async fn build_file_history(
 
     let mut entries = Vec::with_capacity(versions.len());
     for index in 0..versions.len() {
-        let (manifest, _) = &versions[index];
+        let (manifest, snapshot) = &versions[index];
+        let creation_time = snapshot.manifest().creation_time;
         // The oldest version has no pair below it — it is where the
         // tracked history begins.
         let entry = if let Some(outcome) = outcomes.get(index).and_then(|o| o.as_ref()) {
             FileHistoryEntry {
                 manifest: manifest.clone(),
+                creation_time,
                 status: outcome.status,
                 previous: Some(versions[index + 1].0.clone()),
                 node_id: node_ids[index].clone(),
@@ -176,6 +179,7 @@ pub async fn build_file_history(
         } else {
             FileHistoryEntry {
                 manifest: manifest.clone(),
+                creation_time,
                 status: HistoryStatus::Initial,
                 previous: None,
                 node_id: node_ids[index].clone(),

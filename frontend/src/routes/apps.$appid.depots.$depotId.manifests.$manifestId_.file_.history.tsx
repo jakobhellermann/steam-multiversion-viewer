@@ -121,7 +121,6 @@ function FileHistoryPage() {
         previous={previous}
         path={path}
         nodeId={nodeId}
-        statuses={statusQuery.data}
         inputsReady={ready}
       />
     </main>

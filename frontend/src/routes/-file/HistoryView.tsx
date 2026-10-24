@@ -10,7 +10,6 @@ import {
   type FileHistoryEntry,
   type HistoryStatus,
   type ManifestRef,
-  type ManifestStatusEntry,
   type StructuredNode,
 } from "../../data/api";
 import { ErrorBox } from "../../components/ErrorBox";
@@ -42,7 +41,6 @@ export function HistoryView({
   previous,
   path,
   nodeId,
-  statuses,
   inputsReady,
 }: {
   appid: number;
@@ -51,7 +49,6 @@ export function HistoryView({
   previous: DepotManifest[];
   path: string;
   nodeId?: string;
-  statuses: ManifestStatusEntry[] | undefined;
   /// Whether `previous` is complete (app info + tracked extras have
   /// loaded). Until then the history query must not fire — it would
   /// fetch with an incomplete manifest list and then again once the
@@ -97,23 +94,7 @@ export function HistoryView({
     staleTime: Infinity,
   });
   const selectedNode = nodeId && treeQuery.data ? findNode(treeQuery.data.root, nodeId) : undefined;
-  // Newest first: the backend already walks oldest → newest, but the
-  // manifest status list knows creation times for every ref (including
-  // ones the backend skipped), so sort on that when available.
-  const entries = useMemo(
-    () =>
-      [...(historyQuery.data ?? [])].sort((left, right) => {
-        const leftTime = statuses?.find(
-          (status) => status.depot_id === left.depot_id && status.manifest_id === left.manifest_id,
-        )?.creation_time;
-        const rightTime = statuses?.find(
-          (status) =>
-            status.depot_id === right.depot_id && status.manifest_id === right.manifest_id,
-        )?.creation_time;
-        return (rightTime ?? 0) - (leftTime ?? 0);
-      }),
-    [historyQuery.data, statuses],
-  );
+  const entries = useMemo(() => historyQuery.data ?? [], [historyQuery.data]);
   const versions = useQueries({
     queries: entries.map((entry) => ({
       // game_info is content-addressed (same gid → same info); key
@@ -228,10 +209,7 @@ export function HistoryView({
             )}
             {visibleEntries.map((entry) => {
               const index = entries.indexOf(entry);
-              const creationTime = statuses?.find(
-                (status) =>
-                  status.depot_id === entry.depot_id && status.manifest_id === entry.manifest_id,
-              )?.creation_time;
+              const creationTime = entry.creation_time;
               const gameVersion = versions[index]?.data?.engine?.data.bundle_version;
               const created =
                 creationTime != null && creationTime > 0 ? formatDate(creationTime) : "—";
