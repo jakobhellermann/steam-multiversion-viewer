@@ -317,28 +317,34 @@ function DiffPage() {
           The file is missing from the {missing} manifest — nothing to diff.
         </p>
       )}
-      {missing == null && baseView.data && targetView.data && (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <DiffBody
-            base={baseIsNewer ? baseView.data : targetView.data}
-            target={baseIsNewer ? targetView.data : baseView.data}
-            baseLocator={{
-              appid,
-              depotId: newSide.depotId,
-              manifestId: newSide.manifestId,
-              branch: newSide.branch,
-              path,
-            }}
-            targetLocator={{
-              appid,
-              depotId: oldSide.depotId,
-              manifestId: oldSide.manifestId,
-              branch: oldSide.branch,
-              path,
-            }}
-          />
-        </div>
-      )}
+      {/* Waits for both statuses: their creation times decide which side is newer, and a
+          flip would recompute the (possibly expensive) diff with the sides swapped. */}
+      {missing == null &&
+        baseView.data &&
+        targetView.data &&
+        !baseStatus.isPending &&
+        !targetStatus.isPending && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <DiffBody
+              base={baseIsNewer ? baseView.data : targetView.data}
+              target={baseIsNewer ? targetView.data : baseView.data}
+              baseLocator={{
+                appid,
+                depotId: newSide.depotId,
+                manifestId: newSide.manifestId,
+                branch: newSide.branch,
+                path,
+              }}
+              targetLocator={{
+                appid,
+                depotId: oldSide.depotId,
+                manifestId: oldSide.manifestId,
+                branch: oldSide.branch,
+                path,
+              }}
+            />
+          </div>
+        )}
     </div>
   );
 }

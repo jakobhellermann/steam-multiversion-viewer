@@ -121,6 +121,9 @@ mod keys {
 struct ManifestPageQuery {
     branch: Option<String>,
     path: Option<String>,
+    target_depot_id: Option<u32>,
+    target_manifest_id: Option<u64>,
+    target_branch: Option<String>,
 }
 
 /// Files up to this size get their view (including inline text) preloaded into the HTML.
@@ -228,35 +231,31 @@ async fn manifest_pages(
     query: ManifestPageQuery,
 ) -> Result<Vec<Entry>> {
     let branch = query.branch.unwrap_or_else(|| "public".to_owned());
-    let mut entries = Vec::new();
-    if let Some((info, _)) = state
-        .disk_cache
-        .read::<Value>(&game_info::cache_key(depot, manifest))?
-    {
-        entries.push(Entry::current(keys::game_info(app, depot, manifest), info)?);
-    }
+    let mut entries = cached_game_info(state, app, depot, manifest)?;
     if subpage == ["file", "history"] {
         entries.extend(depot_game_infos(state, app, depot)?);
     }
-    // Opening a manifest needs the Steam client even when it is on disk.
-    let on_disk = state
-        .store_index
-        .read()
-        .expect("store_index poisoned")
-        .has_manifest(app, depot, manifest);
-    if !on_disk || state.steam.load().is_none() {
-        return Ok(entries);
+    if subpage == ["diff"]
+        && let (Some(target_depot), Some(target_manifest)) =
+            (query.target_depot_id, query.target_manifest_id)
+    {
+        let (target_depot, target_manifest) = (DepotId(target_depot), ManifestId(target_manifest));
+        let target_branch = query.target_branch.unwrap_or_else(|| "public".to_owned());
+        entries.extend(cached_game_info(state, app, target_depot, target_manifest)?);
+        if let Some(target) =
+            open_if_on_disk(state, app, target_depot, target_manifest, &target_branch).await?
+        {
+            entries.push(status_entry(state, app, &target, &target_branch)?);
+            if let Some(path) = &query.path {
+                entries
+                    .extend(file_view_if_local(state, app, &target, &target_branch, path).await?);
+            }
+        }
     }
-    let snapshot = Arc::new(state.open_manifest(app, depot, manifest, &branch).await?);
-    let self_ref = ManifestRef {
-        depot_id: depot,
-        manifest_id: manifest,
-        branch: branch.clone(),
+    let Some(snapshot) = open_if_on_disk(state, app, depot, manifest, &branch).await? else {
+        return Ok(entries);
     };
-    entries.push(Entry::current(
-        keys::manifest_statuses(app, &[self_ref]),
-        [manifest_status_of(state, &snapshot)],
-    )?);
+    entries.push(status_entry(state, app, &snapshot, &branch)?);
     match subpage {
         [] => entries.extend([
             Entry::current(
@@ -268,22 +267,90 @@ async fn manifest_pages(
                 manifest_files_of(&snapshot),
             )?,
         ]),
-        ["file"] => {
-            if let Some(path) = query.path
-                && file_is_local(state, &snapshot, &path)
-            {
-                let view = file_view_of(state, Arc::clone(&snapshot), &path, true)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("file view of {path}: {}", e.message))?;
-                entries.push(Entry::current(
-                    keys::file_view(app, depot, manifest, &branch, &path),
-                    view,
-                )?);
+        ["file"] | ["diff"] => {
+            if let Some(path) = &query.path {
+                entries.extend(file_view_if_local(state, app, &snapshot, &branch, path).await?);
             }
         }
         _ => {}
     }
     Ok(entries)
+}
+
+fn cached_game_info(
+    state: &AppState,
+    app: AppId,
+    depot: DepotId,
+    manifest: ManifestId,
+) -> Result<Vec<Entry>> {
+    let Some((info, _)) = state
+        .disk_cache
+        .read::<Value>(&game_info::cache_key(depot, manifest))?
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(vec![Entry::current(
+        keys::game_info(app, depot, manifest),
+        info,
+    )?])
+}
+
+/// The manifest when it is on disk; opening needs the Steam client even then.
+async fn open_if_on_disk(
+    state: &AppState,
+    app: AppId,
+    depot: DepotId,
+    manifest: ManifestId,
+    branch: &str,
+) -> Result<Option<Arc<Snapshot>>> {
+    let on_disk = state
+        .store_index
+        .read()
+        .expect("store_index poisoned")
+        .has_manifest(app, depot, manifest);
+    if !on_disk || state.steam.load().is_none() {
+        return Ok(None);
+    }
+    Ok(Some(Arc::new(
+        state.open_manifest(app, depot, manifest, branch).await?,
+    )))
+}
+
+/// The single-manifest status entry `useManifestStatus` reads.
+fn status_entry(state: &AppState, app: AppId, snapshot: &Snapshot, branch: &str) -> Result<Entry> {
+    let status = manifest_status_of(state, snapshot);
+    let manifest_ref = ManifestRef {
+        depot_id: status.depot_id,
+        manifest_id: status.manifest_id,
+        branch: branch.to_owned(),
+    };
+    Entry::current(keys::manifest_statuses(app, &[manifest_ref]), [status])
+}
+
+async fn file_view_if_local(
+    state: &AppState,
+    app: AppId,
+    snapshot: &Arc<Snapshot>,
+    branch: &str,
+    path: &str,
+) -> Result<Option<Entry>> {
+    if !file_is_local(state, snapshot, path) {
+        return Ok(None);
+    }
+    let view = file_view_of(state, Arc::clone(snapshot), path, true)
+        .await
+        .map_err(|e| anyhow::anyhow!("file view of {path}: {}", e.message))?;
+    let manifest = snapshot.manifest();
+    Ok(Some(Entry::current(
+        keys::file_view(
+            app,
+            DepotId(manifest.depot_id),
+            ManifestId(manifest.manifest_id),
+            branch,
+            path,
+        ),
+        view,
+    )?))
 }
 
 /// Whether `path` is a file below the preload cap with every chunk on disk, so building its
