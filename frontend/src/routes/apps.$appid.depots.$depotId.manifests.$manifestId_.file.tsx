@@ -17,6 +17,7 @@ import { formatBytes, formatDate } from "../lib/format";
 import { FileMeta } from "./-file/FileMeta";
 import { FilePreview } from "./-file/FilePreview";
 import { findStatus, useAppManifestStatuses, useManifestStatus } from "../data/appManifests";
+import { isFreshPreload } from "../data/preload";
 import { queryKeys } from "../data/queryKeys";
 
 type Search = {
@@ -74,7 +75,7 @@ function FileViewPage() {
     enabled: path.length > 0,
     // chunks_present + auto-fetched content depend on what's on disk, so
     // re-run when navigated back to.
-    refetchOnMount: "always",
+    refetchOnMount: (query) => (isFreshPreload(query) ? false : "always"),
   });
 
   // Statuses give the compare menu creation times for its chronological sort.

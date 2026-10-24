@@ -2,7 +2,7 @@ import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { libraryQuery } from "./data/library";
-import { applyPreload } from "./data/preload";
+import { applyPreload, leaveInitialPage } from "./data/preload";
 import { createQueryClient } from "./data/queryClient";
 import { routeTree } from "./routeTree.gen";
 import { parseSearch, stringifySearch } from "./searchParams";
@@ -24,6 +24,10 @@ const router = createRouter({
   parseSearch,
   stringifySearch,
   context: { queryClient } as { queryClient: QueryClient },
+});
+
+router.subscribe("onBeforeNavigate", (event) => {
+  if (event.fromLocation && event.hrefChanged) leaveInitialPage();
 });
 
 declare module "@tanstack/react-router" {
