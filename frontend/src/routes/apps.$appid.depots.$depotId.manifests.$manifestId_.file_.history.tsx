@@ -1,14 +1,11 @@
 // TODO(ai-review): review for style and correctness
-import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, linkOptions, useNavigate } from "@tanstack/react-router";
-import { useMemo } from "react";
 
-import { fetchManifestStatuses, type ManifestRef } from "../api";
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
+import { findStatus, useAppManifestStatuses } from "../lib/appManifests";
 import { formatDate } from "../lib/format";
 import { useDepotManifests } from "../lib/useDepotManifests";
 import { HistoryView } from "./-file/HistoryView";
-import { queryKeys } from "../lib/queryKeys";
 
 type Search = {
   branch?: string;
@@ -46,45 +43,11 @@ function FileHistoryPage() {
     branch,
   });
 
-  // Statuses for the breadcrumb's manifest label. Same key as the other
-  // sub-pages so it's usually a cache hit; it also covers every manifest
-  // `previous` can contain, which the table's dates come from.
-  const compareRefs = useMemo<ManifestRef[]>(() => {
-    const seen = new Set<string>();
-    const refs: ManifestRef[] = [];
-    for (const depot of appInfo.data?.depots ?? []) {
-      for (const manifest of depot.manifests) {
-        const key = `${depot.depot_id}/${manifest.manifest_id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        refs.push({
-          depot_id: depot.depot_id,
-          manifest_id: manifest.manifest_id,
-          branch: manifest.branch,
-        });
-      }
-    }
-    for (const extra of extras.data ?? []) {
-      const key = `${extra.depot_id}/${extra.manifest_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      refs.push({
-        depot_id: extra.depot_id,
-        manifest_id: extra.manifest_id,
-        branch: extra.branch ?? "public",
-      });
-    }
-    return refs;
-  }, [appInfo.data, extras.data]);
-  const statusQuery = useQuery({
-    queryKey: queryKeys.manifestStatuses(appid, compareRefs),
-    queryFn: () => fetchManifestStatuses(appid, compareRefs),
-    enabled: compareRefs.length > 0 && extras.isSuccess,
-  });
+  // Statuses for the breadcrumb's manifest label; they also cover every manifest `previous`
+  // can contain, which the table's dates come from.
+  const { statuses: statusQuery } = useAppManifestStatuses(appid);
 
-  const currentCreation = (statusQuery.data ?? []).find(
-    (status) => status.depot_id === depotId && status.manifest_id === manifestId,
-  )?.creation_time;
+  const currentCreation = findStatus(statusQuery.data, depotId, manifestId)?.creation_time;
 
   return (
     // Scrolls with the page like the other list pages (app overview,

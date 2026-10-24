@@ -1,11 +1,8 @@
 // TODO(ai-review): review for style and correctness
 import { createFileRoute, Link, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
 
 import {
-  fetchAppInfo,
-  fetchExtraManifests,
   fetchFileViewOptional,
   fetchGameInfo,
   fetchManifestStatuses,
@@ -22,6 +19,7 @@ import { FilePreview } from "./-file/FilePreview";
 import { StructuredDiffView } from "./-file/StructuredDiffView";
 import { projectRefToSide, qualifyRefForSide } from "./-file/pptrRef";
 import type { FileLocator } from "./-file/types";
+import { findStatus, useAppManifestStatuses } from "../lib/appManifests";
 import { queryKeys } from "../lib/queryKeys";
 
 type Search = {
@@ -66,14 +64,12 @@ function DiffPage() {
   const appid = Number(appidParam);
   const depotId = Number(depotIdParam);
 
-  const appInfoQuery = useQuery({
-    queryKey: ["app", appid],
-    queryFn: () => fetchAppInfo(appid),
-  });
-  const extraQuery = useQuery({
-    queryKey: ["extra-manifests", appid],
-    queryFn: () => fetchExtraManifests(appid),
-  });
+  // App-wide statuses feed the manifest switcher; usually cache hits from the other pages.
+  const {
+    appInfo: appInfoQuery,
+    extras: extraQuery,
+    statuses: switcherStatusQuery,
+  } = useAppManifestStatuses(appid);
   const baseRef: ManifestRef = { depot_id: depotId, manifest_id: manifestId, branch };
   const targetRef: ManifestRef = {
     depot_id: targetDepotId,
@@ -83,37 +79,6 @@ function DiffPage() {
   const statusQuery = useQuery({
     queryKey: queryKeys.manifestStatuses(appid, [baseRef, targetRef]),
     queryFn: () => fetchManifestStatuses(appid, [baseRef, targetRef]),
-  });
-  // Full status query for the manifest switcher — shared cache key with
-  // the manifest detail + file pages so it's usually a cache hit.
-  const compareRefs = useMemo<ManifestRef[]>(() => {
-    if (!appInfoQuery.data) return [];
-    const seen = new Set<string>();
-    const refs: ManifestRef[] = [];
-    for (const d of appInfoQuery.data.depots) {
-      for (const m of d.manifests) {
-        const key = `${d.depot_id}/${m.manifest_id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        refs.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
-      }
-    }
-    for (const e of extraQuery.data ?? []) {
-      const key = `${e.depot_id}/${e.manifest_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      refs.push({
-        depot_id: e.depot_id,
-        manifest_id: e.manifest_id,
-        branch: e.branch ?? "public",
-      });
-    }
-    return refs;
-  }, [appInfoQuery.data, extraQuery.data]);
-  const switcherStatusQuery = useQuery({
-    queryKey: queryKeys.manifestStatuses(appid, compareRefs),
-    queryFn: () => fetchManifestStatuses(appid, compareRefs),
-    enabled: compareRefs.length > 0 && extraQuery.isSuccess,
   });
   // Confirm the file exists on both sides up front — saves the diff
   // endpoint a roundtrip for a missing path and lets us surface a
@@ -130,13 +95,9 @@ function DiffPage() {
     enabled: path.length > 0,
   });
 
-  const baseCreation =
-    statusQuery.data?.find((s) => s.depot_id === depotId && s.manifest_id === manifestId)
-      ?.creation_time ?? 0;
+  const baseCreation = findStatus(statusQuery.data, depotId, manifestId)?.creation_time ?? 0;
   const targetCreation =
-    statusQuery.data?.find(
-      (s) => s.depot_id === targetDepotId && s.manifest_id === targetManifestId,
-    )?.creation_time ?? 0;
+    findStatus(statusQuery.data, targetDepotId, targetManifestId)?.creation_time ?? 0;
 
   // Force the newer manifest to the `base`/`+` side so "added" means "in the newer
   // version" regardless of URL order (the backend is viewed-centric: added = only-in-base).

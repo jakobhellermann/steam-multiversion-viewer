@@ -1,16 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchAppInfo,
-  fetchExtraManifests,
-  fetchManifestStatuses,
   putExtraManifests,
   type AppInfo,
   type DepotEntry,
   type DepotManifest,
   type ExtraManifestEntry,
-  type ManifestRef,
   type ManifestStatusEntry,
 } from "../api";
 import { BranchFilter } from "../components/BranchFilter";
@@ -19,6 +15,7 @@ import { ErrorBox } from "../components/ErrorBox";
 import { parseSteamDbPaste, steamDbSignInGated, type ParsedExtra } from "../lib/parseSteamDbPaste";
 import { pinScroll } from "../lib/pinScroll";
 import { useBranchFilter } from "../lib/useBranchFilter";
+import { useAppManifestStatuses } from "../lib/appManifests";
 import { queryKeys } from "../lib/queryKeys";
 
 export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
@@ -26,51 +23,14 @@ export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
 function AppDetail() {
   const { appid: appidParam } = Route.useParams();
   const appid = Number(appidParam);
-  const query = useQuery({
-    queryKey: ["app", appid],
-    queryFn: () => fetchAppInfo(appid),
-  });
-  const extraQuery = useQuery({
-    queryKey: ["extra-manifests", appid],
-    queryFn: () => fetchExtraManifests(appid),
-  });
-  // (depot_id, manifest_id, branch) refs from app_info + extras. Dedup
-  // by (depot_id, manifest_id) — branches that share a gid don't add
-  // work, and the chosen branch only matters for the cache-miss path
-  // anyway. Extras with no branch fall back to "public".
-  const manifestRefs = useMemo<ManifestRef[]>(() => {
-    if (!query.data) return [];
-    const seen = new Set<string>();
-    const refs: ManifestRef[] = [];
-    for (const d of query.data.depots) {
-      for (const m of d.manifests) {
-        const key = `${d.depot_id}/${m.manifest_id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        refs.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
-      }
-    }
-    for (const e of extraQuery.data ?? []) {
-      const key = `${e.depot_id}/${e.manifest_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      refs.push({
-        depot_id: e.depot_id,
-        manifest_id: e.manifest_id,
-        branch: e.branch ?? "public",
-      });
-    }
-    return refs;
-  }, [query.data, extraQuery.data]);
-  const statusQuery = useQuery({
-    queryKey: queryKeys.manifestStatuses(appid, manifestRefs),
-    queryFn: () => fetchManifestStatuses(appid, manifestRefs),
-    // Don't fire on the half-populated ref list before extras land.
-    enabled: manifestRefs.length > 0 && extraQuery.isSuccess,
-    // Snapshot per session (global staleTime: Infinity): missing-bytes
-    // drift while downloads run, but the drawer shows live truth
-    // during a run and the numbers are decision data, not progress.
-  });
+  // Statuses are a snapshot per session (global staleTime: Infinity): missing bytes drift
+  // while downloads run, but the drawer shows live truth during a run and the numbers are
+  // decision data, not progress.
+  const {
+    appInfo: query,
+    extras: extraQuery,
+    statuses: statusQuery,
+  } = useAppManifestStatuses(appid);
 
   return (
     <div className="mx-auto max-w-4xl p-8">
@@ -435,7 +395,7 @@ function ExtrasSection({
         allExtras.filter((e) => e.depot_id !== depotId),
       ),
     onSuccess: (next) => {
-      queryClient.setQueryData(["extra-manifests", appid], next);
+      queryClient.setQueryData(queryKeys.extraManifests(appid), next);
     },
   });
   return (
@@ -726,7 +686,7 @@ function ImportExtrasModal({
       return putExtraManifests(appid, [...otherDepots, ...sameDepot]);
     },
     onSuccess: (next) => {
-      queryClient.setQueryData(["extra-manifests", appid], next);
+      queryClient.setQueryData(queryKeys.extraManifests(appid), next);
       onClose();
     },
   });

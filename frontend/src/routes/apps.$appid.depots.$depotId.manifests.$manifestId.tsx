@@ -6,14 +6,11 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { Loader2 } from "lucide-react";
 import {
   downloadManifest,
-  fetchAppInfo,
-  fetchExtraManifests,
   fetchGameInfo,
   fetchManifestDiff,
   fetchManifestDiffDeep,
   fetchManifestFiles,
   fetchManifestInfo,
-  fetchManifestStatuses,
   manifestDiffDeepKey,
   type AppId,
   type AppInfo,
@@ -42,6 +39,7 @@ import {
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { pinScroll } from "../lib/pinScroll";
+import { findStatus, useAppManifestStatuses } from "../lib/appManifests";
 import { queryKeys } from "../lib/queryKeys";
 
 type Search = {
@@ -150,50 +148,13 @@ function ManifestDetail() {
     },
     [queryClient, appid, depotId],
   );
-  // Needed by the "compare to…" menu so the user can pick any other
-  // manifest in the app (official or user-tracked) as a diff target.
-  const appInfoQuery = useQuery({
-    queryKey: ["app", appid],
-    queryFn: () => fetchAppInfo(appid),
-  });
-  const extraQuery = useQuery({
-    queryKey: ["extra-manifests", appid],
-    queryFn: () => fetchExtraManifests(appid),
-  });
-  // Statuses give us creation_time per manifest so the compare-with
-  // submenu can sort by date. We reuse the same query key as the app
-  // detail page so the cache is shared.
-  const compareRefs = useMemo<ManifestRef[]>(() => {
-    if (!appInfoQuery.data) return [];
-    const seen = new Set<string>();
-    const refs: ManifestRef[] = [];
-    for (const d of appInfoQuery.data.depots) {
-      for (const m of d.manifests) {
-        const key = `${d.depot_id}/${m.manifest_id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        refs.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
-      }
-    }
-    for (const e of extraQuery.data ?? []) {
-      const key = `${e.depot_id}/${e.manifest_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      refs.push({
-        depot_id: e.depot_id,
-        manifest_id: e.manifest_id,
-        branch: e.branch ?? "public",
-      });
-    }
-    return refs;
-  }, [appInfoQuery.data, extraQuery.data]);
-  const statusQuery = useQuery({
-    queryKey: queryKeys.manifestStatuses(appid, compareRefs),
-    queryFn: () => fetchManifestStatuses(appid, compareRefs),
-    // Wait until both inputs to `compareRefs` have settled — see the
-    // file-page route for the same rationale.
-    enabled: compareRefs.length > 0 && extraQuery.isSuccess,
-  });
+  // The "compare to…" menu offers every manifest of the app; statuses give it creation
+  // times to sort by. Same queries as the app page, so usually cache hits.
+  const {
+    appInfo: appInfoQuery,
+    extras: extraQuery,
+    statuses: statusQuery,
+  } = useAppManifestStatuses(appid);
 
   const downloadAll = useMutation({
     mutationFn: () => downloadManifest(appid, depotId, manifestId, { branch }),
@@ -201,10 +162,7 @@ function ManifestDetail() {
   // This manifest's own cache status, pulled out of the batch we already
   // fetch for the compare menu. Drives the download button so a manifest
   // that's fully on disk doesn't offer a pointless "Download all".
-  const selfStatus = useMemo(
-    () => statusQuery.data?.find((s) => s.depot_id === depotId && s.manifest_id === manifestId),
-    [statusQuery.data, depotId, manifestId],
-  );
+  const selfStatus = findStatus(statusQuery.data, depotId, manifestId);
 
   return (
     <div className="mx-auto max-w-6xl p-8">

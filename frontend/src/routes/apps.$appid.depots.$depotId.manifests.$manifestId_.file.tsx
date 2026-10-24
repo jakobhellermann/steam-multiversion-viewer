@@ -4,14 +4,10 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { useCallback, useMemo, useState } from "react";
 import {
   downloadManifest,
-  fetchAppInfo,
-  fetchExtraManifests,
   fetchFileView,
   fetchFileViewOptional,
-  fetchManifestStatuses,
   fileRawUrl,
   type ManifestRef,
-  type ManifestStatusEntry,
 } from "../api";
 import { CompareMenu, diffTargetKey } from "../components/CompareMenu";
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
@@ -20,7 +16,7 @@ import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { formatBytes, formatDate } from "../lib/format";
 import { FileMeta } from "./-file/FileMeta";
 import { FilePreview } from "./-file/FilePreview";
-import { queryKeys } from "../lib/queryKeys";
+import { findStatus, useAppManifestStatuses } from "../lib/appManifests";
 
 type Search = {
   /// Omitted in URL when the default; readers must apply `?? "public"`.
@@ -80,14 +76,12 @@ function FileViewPage() {
     refetchOnMount: "always",
   });
 
-  const appInfoQuery = useQuery({
-    queryKey: ["app", appid],
-    queryFn: () => fetchAppInfo(appid),
-  });
-  const extraQuery = useQuery({
-    queryKey: ["extra-manifests", appid],
-    queryFn: () => fetchExtraManifests(appid),
-  });
+  // Statuses give the compare menu creation times for its chronological sort.
+  const {
+    appInfo: appInfoQuery,
+    extras: extraQuery,
+    statuses: statusQuery,
+  } = useAppManifestStatuses(appid);
 
   const diffTargets = useMemo(
     () => new Set(compare_to ? compare_to.split(",").filter(Boolean) : []),
@@ -147,41 +141,6 @@ function FileViewPage() {
     return out;
   }, [appInfoQuery.data, extraQuery.data, diffTargets, depotId]);
 
-  // Status query gives us creation_time per manifest for the menu's
-  // chronological sort. Same key as elsewhere so the cache is shared.
-  const compareRefs = useMemo<ManifestRef[]>(() => {
-    if (!appInfoQuery.data) return [];
-    const seen = new Set<string>();
-    const refs: ManifestRef[] = [];
-    for (const d of appInfoQuery.data.depots) {
-      for (const m of d.manifests) {
-        const key = `${d.depot_id}/${m.manifest_id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        refs.push({ depot_id: d.depot_id, manifest_id: m.manifest_id, branch: m.branch });
-      }
-    }
-    for (const e of extraQuery.data ?? []) {
-      const key = `${e.depot_id}/${e.manifest_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      refs.push({
-        depot_id: e.depot_id,
-        manifest_id: e.manifest_id,
-        branch: e.branch ?? "public",
-      });
-    }
-    return refs;
-  }, [appInfoQuery.data, extraQuery.data]);
-  const statusQuery = useQuery({
-    queryKey: queryKeys.manifestStatuses(appid, compareRefs),
-    queryFn: () => fetchManifestStatuses(appid, compareRefs),
-    // Wait until both inputs to `compareRefs` have settled — firing
-    // first on just `appInfo` and again once `extras` lands fragments
-    // the cache into two entries (and means two slow round-trips).
-    enabled: compareRefs.length > 0 && extraQuery.isSuccess,
-  });
-
   // One file-view query per diff target. useQueries handles the dynamic
   // count safely; useQuery in a loop would break the hook rule.
   const targetViews = useQueries({
@@ -222,7 +181,9 @@ function FileViewPage() {
         </Link>
         <span className="text-slate-600">/</span>
         <ManifestSwitcher
-          label={manifestCrumbLabel(currentManifestCreation(statusQuery.data, depotId, manifestId))}
+          label={manifestCrumbLabel(
+            findStatus(statusQuery.data, depotId, manifestId)?.creation_time ?? 0,
+          )}
           appid={appid}
           depotId={depotId}
           currentManifestId={manifestId}
@@ -311,9 +272,7 @@ function FileViewPage() {
           <h2 className="mb-3 text-sm font-semibold text-slate-400">Compared to</h2>
           <div className="space-y-2">
             {diffRefs.map((ref, i) => {
-              const status = (statusQuery.data ?? []).find(
-                (s) => s.depot_id === ref.depot_id && s.manifest_id === ref.manifest_id,
-              );
+              const status = findStatus(statusQuery.data, ref.depot_id, ref.manifest_id);
               const targetView = targetViews[i];
               const targetMissing =
                 !targetView.isPending && targetView.error == null && targetView.data === null;
@@ -382,19 +341,6 @@ function CompareMenuPlaceholder({ count }: { count: number }) {
       Compare to{count > 0 && <span className="ml-1.5 tabular-nums">({count})</span>}
     </button>
   );
-}
-
-/// Pick the `creation_time` for the currently-viewed manifest out of
-/// the shared status-query result. Returns 0 (treated as "unknown") if
-/// the status query hasn't loaded yet or this manifest isn't in it.
-function currentManifestCreation(
-  statuses: ManifestStatusEntry[] | undefined,
-  depotId: number,
-  manifestId: string,
-): number {
-  if (!statuses) return 0;
-  const me = statuses.find((s) => s.depot_id === depotId && s.manifest_id === manifestId);
-  return me?.creation_time ?? 0;
 }
 
 /// Label for the manifest segment of the breadcrumb. Falls back to

@@ -1,14 +1,9 @@
 // TODO(ai-review): review for style and correctness
-import { useQuery } from "@tanstack/react-query";
+import type { UseQueryResult } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import {
-  fetchAppInfo,
-  fetchExtraManifests,
-  type AppInfo,
-  type ExtraManifestEntry,
-  type ManifestRef,
-} from "../api";
+import { type AppInfo, type ExtraManifestEntry, type ManifestRef } from "../api";
+import { useAppInfo, useExtraManifests } from "./appManifests";
 
 /// One tracked manifest of a depot. A gid can sit on several branches
 /// at once (public and beta heads pointing at the same build):
@@ -71,12 +66,14 @@ export function useDepotManifests(
   appid: number,
   depotId: number,
   seed?: { manifest_id: string; branch: string },
-) {
-  const appInfo = useQuery({ queryKey: ["app", appid], queryFn: () => fetchAppInfo(appid) });
-  const extras = useQuery({
-    queryKey: ["extra-manifests", appid],
-    queryFn: () => fetchExtraManifests(appid),
-  });
+): {
+  appInfo: UseQueryResult<AppInfo>;
+  extras: UseQueryResult<ExtraManifestEntry[]>;
+  manifests: DepotManifest[];
+  ready: boolean;
+} {
+  const appInfo = useAppInfo(appid);
+  const extras = useExtraManifests(appid);
   const seedId = seed?.manifest_id;
   const seedBranch = seed?.branch;
   const manifests = useMemo(
