@@ -12,7 +12,6 @@ use utoipa::ToSchema;
 
 #[cfg(feature = "unity")]
 use crate::http::ApiError;
-use crate::http::ImmutableCache;
 use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
@@ -77,17 +76,19 @@ pub async fn game_info(
     State(state): State<AppState>,
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<GameInfoQuery>,
-) -> Result<(ImmutableCache, Json<GameInfo>)> {
+) -> Result<Json<GameInfo>> {
+    // Not browser-cached although immutable: requests must reach the backend so the result
+    // lands in the disk cache the preload reads.
     let key = cache_key(depot_id, manifest_id);
     if let Some((cached, _)) = state.disk_cache.read(&key)? {
-        return Ok((ImmutableCache, Json(cached)));
+        return Ok(Json(cached));
     }
     let info = detect(&state, appid, depot_id, manifest_id, &q.branch).await?;
     // Without the unity feature every manifest reads as engine-less, which must not stick.
     if cfg!(feature = "unity") {
         state.disk_cache.write(&key, &info)?;
     }
-    Ok((ImmutableCache, Json(info)))
+    Ok(Json(info))
 }
 
 /// Disk-cache key of a manifest's game info; immutable like the manifest itself.
