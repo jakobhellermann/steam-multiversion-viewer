@@ -22,6 +22,7 @@ import {
 import { formatDate } from "../lib/format";
 import { useBranchFilter } from "../lib/useBranchFilter";
 import { queryKeys } from "../data/queryKeys";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 
 // Re-exported for the route files that import it alongside the component.
 export { diffTargetKey };
@@ -89,6 +90,9 @@ export function CompareMenu({
   searchBase?: ManifestRef;
 }) {
   const [open, setOpen] = useState(false);
+  // Hovering or focusing the trigger, or opening the menu, starts the search-filter request: it
+  // follows the search box, so fetching while the menu is untouched would run one per keystroke.
+  const [searchWanted, setSearchWanted] = useState(false);
   const [activeDepotId, setActiveDepotId] = useState<number | null>(currentDepotId);
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -213,8 +217,8 @@ export function CompareMenu({
   // in any path matching the user's current search box. Mutually
   // exclusive with `fileContext` — the file-detail page never has a
   // free-form search box.
-  const searchActive =
-    !fileContext && !!searchBase && !!searchQuery && searchQuery.trim().length > 0;
+  const settledQuery = useDebouncedValue(searchQuery?.trim() ?? "", 200);
+  const searchActive = !fileContext && !!searchBase && settledQuery.length > 0;
   const searchOthers = useMemo<ManifestRef[]>(() => {
     if (!searchActive) return [];
     return groups.flatMap((g) =>
@@ -233,15 +237,14 @@ export function CompareMenu({
       searchBase?.depot_id,
       searchBase?.manifest_id,
       searchBase?.branch,
-      searchQuery?.trim() ?? "",
+      settledQuery,
       searchOthers
         .map((r) => `${r.depot_id}/${r.manifest_id}`)
         .sort()
         .join(","),
     ],
-    queryFn: () =>
-      fetchManifestDiffTargets(appInfo.appid, searchBase!, searchOthers, searchQuery!.trim()),
-    enabled: searchActive && searchOthers.length > 0,
+    queryFn: () => fetchManifestDiffTargets(appInfo.appid, searchBase!, searchOthers, settledQuery),
+    enabled: (open || searchWanted) && searchActive && searchOthers.length > 0,
     staleTime: Infinity,
     gcTime: 60 * 60 * 1000,
     placeholderData: (prev) => prev,
@@ -364,6 +367,8 @@ export function CompareMenu({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        onMouseEnter={() => setSearchWanted(true)}
+        onFocus={() => setSearchWanted(true)}
         className={`dropdown-trigger ${
           count > 0
             ? "border-sky-700 bg-sky-950/40 text-sky-200 hover:bg-sky-900/40"
