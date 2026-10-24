@@ -55,8 +55,7 @@ export function ExportButton({
   const running = state === "running";
   const blocked = running && !mine;
 
-  // A failure stays put — its message is the whole point.
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(true);
   const settled = mine && (state === "done" || state === "cancelled");
   useEffect(() => {
     if (running) setDismissed(false);
@@ -65,7 +64,8 @@ export function ExportButton({
     return () => window.clearTimeout(t);
   }, [running, settled]);
 
-  const error = (mine ? status.data?.error : undefined) ?? (start.error as Error | null)?.message;
+  const error =
+    (mine && !dismissed ? status.data?.error : undefined) ?? (start.error as Error | null)?.message;
 
   return (
     <div className="ml-auto text-right">
