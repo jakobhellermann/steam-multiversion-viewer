@@ -1,6 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import {
   keepPreviousData,
+  queryOptions,
   useQuery,
   useQueryClient,
   type UseQueryResult,
@@ -21,21 +22,28 @@ import {
 import { queryKeys } from "./queryKeys";
 
 /// Preloaded app info can be a last-known copy; once older than the backend's HTTP max-age it
-/// is refetched in the background on mount.
-export function useAppInfo(appid: AppId): UseQueryResult<AppInfo> {
-  return useQuery({
+/// is refetched.
+export function appInfoQuery(appid: AppId) {
+  return queryOptions({
     queryKey: queryKeys.app(appid),
     queryFn: () => fetchAppInfo(appid),
     staleTime: 5 * 60 * 1000,
-    refetchOnMount: true,
   });
 }
 
-export function useExtraManifests(appid: AppId): UseQueryResult<ExtraManifestEntry[]> {
-  return useQuery({
+export function extraManifestsQuery(appid: AppId) {
+  return queryOptions({
     queryKey: queryKeys.extraManifests(appid),
     queryFn: () => fetchExtraManifests(appid),
   });
+}
+
+export function useAppInfo(appid: AppId): UseQueryResult<AppInfo> {
+  return useQuery({ ...appInfoQuery(appid), refetchOnMount: true });
+}
+
+export function useExtraManifests(appid: AppId): UseQueryResult<ExtraManifestEntry[]> {
+  return useQuery(extraManifestsQuery(appid));
 }
 
 /// App info, tracked extras, and the cache status of every manifest the backend derives from

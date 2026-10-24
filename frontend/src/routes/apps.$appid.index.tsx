@@ -15,10 +15,19 @@ import { ErrorBox } from "../components/ErrorBox";
 import { parseSteamDbPaste, steamDbSignInGated, type ParsedExtra } from "../lib/parseSteamDbPaste";
 import { pinScroll } from "../lib/pinScroll";
 import { useBranchFilter } from "../lib/useBranchFilter";
-import { useAppManifestStatuses } from "../data/appManifests";
+import { appInfoQuery, extraManifestsQuery, useAppManifestStatuses } from "../data/appManifests";
 import { queryKeys } from "../data/queryKeys";
 
-export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
+export const Route = createFileRoute("/apps/$appid/")({
+  // Not awaited: a hovered link starts the requests without ever holding up the navigation.
+  // Statuses are left out, since for an unopened app they download every manifest.
+  loader: ({ context: { queryClient }, params }) => {
+    const appid = Number(params.appid);
+    void queryClient.prefetchQuery(appInfoQuery(appid));
+    void queryClient.prefetchQuery(extraManifestsQuery(appid));
+  },
+  component: AppDetail,
+});
 
 function AppDetail() {
   const { appid: appidParam } = Route.useParams();

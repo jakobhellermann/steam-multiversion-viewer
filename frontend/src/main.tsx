@@ -19,6 +19,7 @@ void queryClient.prefetchQuery(libraryQuery);
 const router = createRouter({
   routeTree,
   defaultPreload: "intent",
+  defaultPreloadDelay: 100,
   defaultPreloadStaleTime: Infinity,
   scrollRestoration: true,
   parseSearch,
