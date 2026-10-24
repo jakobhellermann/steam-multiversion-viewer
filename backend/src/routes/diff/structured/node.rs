@@ -9,6 +9,8 @@ use axum::response::{IntoResponse as _, Response};
 use serde::Deserialize;
 
 use crate::http::ApiError;
+#[cfg(feature = "unity")]
+use crate::platform_paths::resolve_path;
 use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
@@ -232,11 +234,19 @@ async fn addressables_node_body(
         .unwrap_or(0);
 
     let base_bytes = match (&base_snap, &base_target) {
-        (Some(snap), Some(_)) => Some(snap.read_full(&side_path(snap, &q.path)).await?.to_vec()),
+        (Some(snap), Some(_)) => Some(
+            snap.read_full(&resolve_path(snap.manifest(), &q.path))
+                .await?
+                .to_vec(),
+        ),
         _ => None,
     };
     let target_bytes = match (&target_snap, &target_target) {
-        (Some(snap), Some(_)) => Some(snap.read_full(&side_path(snap, &q.path)).await?.to_vec()),
+        (Some(snap), Some(_)) => Some(
+            snap.read_full(&resolve_path(snap.manifest(), &q.path))
+                .await?
+                .to_vec(),
+        ),
         _ => None,
     };
 
@@ -328,8 +338,12 @@ async fn bundle_node_body(
         .as_ref()
         .map(|s| s.manifest().creation_time)
         .unwrap_or(0);
-    let base_path = base_snap.as_ref().map(|s| side_path(s, &q.path));
-    let target_path = target_snap.as_ref().map(|s| side_path(s, &q.path));
+    let base_path = base_snap
+        .as_ref()
+        .map(|s| resolve_path(s.manifest(), &q.path));
+    let target_path = target_snap
+        .as_ref()
+        .map(|s| resolve_path(s.manifest(), &q.path));
 
     let base_side = base_snap
         .as_ref()
@@ -440,8 +454,12 @@ async fn unity_serialized_node_body(
     )
     .await?;
 
-    let base_path = base_snap.as_ref().map(|s| side_path(s, &q.path));
-    let target_path = target_snap.as_ref().map(|s| side_path(s, &q.path));
+    let base_path = base_snap
+        .as_ref()
+        .map(|s| resolve_path(s.manifest(), &q.path));
+    let target_path = target_snap
+        .as_ref()
+        .map(|s| resolve_path(s.manifest(), &q.path));
     let base_ct = base_snap
         .as_ref()
         .map(|s| s.manifest().creation_time)
@@ -625,13 +643,6 @@ async fn open_dll_side(
         sha,
         creation_time,
     }))
-}
-
-/// `path` as this side's manifest names the file (another platform keeps it in its own build
-/// folder, see [`crate::platform_paths`]).
-#[cfg(feature = "unity")]
-fn side_path(snap: &Snapshot, path: &str) -> String {
-    crate::platform_paths::resolve_path(snap.manifest(), path)
 }
 
 /// Open one side's manifest for a node-body request, or `None` if that side isn't needed.

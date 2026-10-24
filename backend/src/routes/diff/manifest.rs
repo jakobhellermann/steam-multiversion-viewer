@@ -1,7 +1,6 @@
 // TODO(ai-review): review for style and correctness
 //! Manifest-level path diffs: which paths changed, were added, or exist only in the compare targets.
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
@@ -19,7 +18,7 @@ use steam_vent_depot::{DepotFile, DepotFileKind, FileHash};
 use tokio::sync::Semaphore;
 use utoipa::ToSchema;
 
-use crate::platform_paths::platform_neutral;
+use crate::platform_paths::{FileIndex, Paired};
 use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
@@ -101,43 +100,38 @@ pub async fn manifest_diff(
         Some((body.base.depot_id, body.base.manifest_id)),
     );
 
-    // Keyed by platform-neutral path, so a Linux and a Windows depot pair their build folders.
-    let base = base_snap.manifest();
-    let mut base_by_key: HashMap<Cow<'_, str>, &DepotFile> =
-        HashMap::with_capacity(base.files.len());
-    for f in &base.files {
-        if f.is_dir() {
-            continue;
-        }
-        base_by_key.insert(platform_neutral(&f.path), f);
-    }
+    let base = FileIndex::new(base_snap.manifest());
 
     // `Changed` wins over `Added`: added-vs-A-but-changed-vs-B is still demonstrably different somewhere.
-    let mut absent_in_all: HashSet<Cow<'_, str>> = base_by_key.keys().cloned().collect();
-    let mut changed: HashSet<String> = HashSet::new();
-    // Keys seen in every `other` so far, with the path and size from the first one carrying them.
-    let mut in_every_other: Option<HashMap<String, (String, u64)>> = None;
+    let mut absent_in_all: HashSet<&str> = base.files().map(|f| f.path.as_str()).collect();
+    let mut changed: HashSet<&str> = HashSet::new();
+    // Other-only files of every `other` so far by pair key, with the path and size from the first one.
+    let mut in_every_other: Option<HashMap<(String, String), (String, u64)>> = None;
     while let Some((_, result)) = others.next().await {
         let snap = result?;
-        let other = snap.manifest();
-        let mut keys: HashMap<String, (String, u64)> = HashMap::with_capacity(other.files.len());
-        for f in &other.files {
-            if f.is_dir() {
-                continue;
+        let other = FileIndex::new(snap.manifest());
+        let mut absent: HashSet<&str> = HashSet::new();
+        let mut other_only: HashMap<(String, String), (String, u64)> = HashMap::new();
+        for (key, paired) in base.pair(&other) {
+            match paired {
+                Paired::Both(b, o) => {
+                    if content_id(b) != content_id(o) {
+                        changed.insert(&b.path);
+                    }
+                }
+                Paired::BaseOnly(b) => {
+                    absent.insert(&b.path);
+                }
+                Paired::OtherOnly(o) => {
+                    other_only.insert(key.to_owned(), (o.path.clone(), o.size));
+                }
             }
-            let key = platform_neutral(&f.path);
-            absent_in_all.remove(key.as_ref());
-            if let Some(base_f) = base_by_key.get(key.as_ref())
-                && content_id(base_f) != content_id(f)
-            {
-                changed.insert(base_f.path.clone());
-            }
-            keys.insert(key.into_owned(), (f.path.clone(), f.size));
         }
+        absent_in_all.retain(|p| absent.contains(p));
         in_every_other = Some(match in_every_other {
-            None => keys,
+            None => other_only,
             Some(mut kept) => {
-                kept.retain(|k, _| keys.contains_key(k));
+                kept.retain(|k, _| other_only.contains_key(k));
                 kept
             }
         });
@@ -145,29 +139,25 @@ pub async fn manifest_diff(
 
     let mut entries: Vec<ManifestDiffEntry> =
         Vec::with_capacity(changed.len() + absent_in_all.len());
-    for path in &changed {
+    for &path in &changed {
         entries.push(ManifestDiffEntry {
-            path: path.clone(),
+            path: path.to_owned(),
             status: ManifestDiffStatus::Changed,
             size: None,
         });
     }
-    for key in &absent_in_all {
-        let path = &base_by_key[key].path;
+    for &path in &absent_in_all {
         // Changed wins: skip paths already reported as changed.
         if changed.contains(path) {
             continue;
         }
         entries.push(ManifestDiffEntry {
-            path: path.clone(),
+            path: path.to_owned(),
             status: ManifestDiffStatus::Added,
             size: None,
         });
     }
-    for (key, (path, size)) in in_every_other.into_iter().flatten() {
-        if base_by_key.contains_key(key.as_str()) {
-            continue;
-        }
+    for (path, size) in in_every_other.into_iter().flat_map(HashMap::into_values) {
         entries.push(ManifestDiffEntry {
             path,
             status: ManifestDiffStatus::Removed,
@@ -340,24 +330,11 @@ pub async fn manifest_diff_targets(
         .split_whitespace()
         .map(|t| t.to_lowercase())
         .collect();
-    let base = base_snap.manifest();
-    // Keyed by platform-neutral path, like `manifest_diff`.
-    let mut base_subset: HashMap<Cow<'_, str>, &DepotFile> =
-        HashMap::with_capacity(base.files.len());
-    let mut base_keys: HashSet<Cow<'_, str>> = HashSet::with_capacity(base.files.len());
-    for f in &base.files {
-        if f.is_dir() {
-            continue;
-        }
-        base_keys.insert(platform_neutral(&f.path));
-        if !tokens.is_empty() {
-            let path_lc = f.path.to_lowercase();
-            if !tokens.iter().all(|t| path_lc.contains(t)) {
-                continue;
-            }
-        }
-        base_subset.insert(platform_neutral(&f.path), f);
-    }
+    let matches_query = |path: &str| {
+        let path_lc = path.to_lowercase();
+        tokens.iter().all(|t| path_lc.contains(t))
+    };
+    let base = FileIndex::new(base_snap.manifest());
 
     let mut others = open_manifests_concurrently(
         &state,
@@ -385,46 +362,12 @@ pub async fn manifest_diff_targets(
                 continue;
             }
         };
-        let other = snap.manifest();
-        let mut other_by_key: HashMap<Cow<'_, str>, &DepotFile> =
-            HashMap::with_capacity(other.files.len());
-        for f in &other.files {
-            if f.is_dir() {
-                continue;
-            }
-            other_by_key.insert(platform_neutral(&f.path), f);
-        }
-        let mut has_diff = false;
-        for (key, base_f) in &base_subset {
-            match other_by_key.get(key.as_ref()) {
-                None => {
-                    has_diff = true;
-                    break;
-                }
-                Some(other_f) => {
-                    if content_id(base_f) != content_id(other_f) {
-                        has_diff = true;
-                        break;
-                    }
-                }
-            }
-        }
+        let other = FileIndex::new(snap.manifest());
         // Target-only paths count as a diff: the tree renders them as `Removed` rows.
-        if !has_diff {
-            for (key, other_f) in &other_by_key {
-                if base_keys.contains(key.as_ref()) {
-                    continue;
-                }
-                if !tokens.is_empty() {
-                    let path_lc = other_f.path.to_lowercase();
-                    if !tokens.iter().all(|t| path_lc.contains(t)) {
-                        continue;
-                    }
-                }
-                has_diff = true;
-                break;
-            }
-        }
+        let has_diff = base.pair(&other).any(|(_, paired)| match paired {
+            Paired::Both(b, o) => content_id(b) != content_id(o) && matches_query(&b.path),
+            Paired::BaseOnly(f) | Paired::OtherOnly(f) => matches_query(&f.path),
+        });
         if has_diff {
             matching_targets.push(ManifestRefShort {
                 depot_id: r.depot_id,
@@ -490,46 +433,27 @@ pub async fn manifest_diff_deep(
         )
         .await?;
 
-    let target = target_snap.manifest();
-    // Keyed by platform-neutral path, like `manifest_diff`.
-    let mut target_by_key: HashMap<Cow<'_, str>, &DepotFile> =
-        HashMap::with_capacity(target.files.len());
-    for f in &target.files {
-        if f.is_dir() {
-            continue;
-        }
-        target_by_key.insert(platform_neutral(&f.path), f);
-    }
-
-    let base = base_snap.manifest();
     let mut added: Vec<String> = Vec::new();
     let mut changed_candidates: Vec<String> = Vec::new();
-    for f in &base.files {
-        if f.is_dir() {
-            continue;
-        }
-        match target_by_key.get(platform_neutral(&f.path).as_ref()) {
-            None => added.push(f.path.clone()),
-            Some(tf) if content_id(f) != content_id(tf) => changed_candidates.push(f.path.clone()),
-            Some(_) => {}
+    let mut removed: Vec<ManifestDiffEntry> = Vec::new();
+    {
+        let base = FileIndex::new(base_snap.manifest());
+        let target = FileIndex::new(target_snap.manifest());
+        for (_, paired) in base.pair(&target) {
+            match paired {
+                Paired::Both(b, t) if content_id(b) != content_id(t) => {
+                    changed_candidates.push(b.path.clone())
+                }
+                Paired::Both(..) => {}
+                Paired::BaseOnly(b) => added.push(b.path.clone()),
+                Paired::OtherOnly(t) => removed.push(ManifestDiffEntry {
+                    path: t.path.clone(),
+                    status: ManifestDiffStatus::Removed,
+                    size: Some(t.size),
+                }),
+            }
         }
     }
-    let base_keys: HashSet<Cow<'_, str>> = base
-        .files
-        .iter()
-        .filter(|f| !f.is_dir())
-        .map(|f| platform_neutral(&f.path))
-        .collect();
-    let removed: Vec<ManifestDiffEntry> = target
-        .files
-        .iter()
-        .filter(|f| !f.is_dir() && !base_keys.contains(platform_neutral(&f.path).as_ref()))
-        .map(|f| ManifestDiffEntry {
-            path: f.path.clone(),
-            status: ManifestDiffStatus::Removed,
-            size: Some(f.size),
-        })
-        .collect();
 
     // Private env pair for the sweep, evicted at checkpoints; the shared per-manifest cache never evicts.
     #[cfg(feature = "unity")]

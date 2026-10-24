@@ -46,20 +46,15 @@ pub async fn manifest_file_structured(
             .open_manifest(appid, depot_id, manifest_id, &q.branch)
             .await?,
     );
-    // Links from another platform's manifest carry its build-folder path.
-    q.path = crate::platform_paths::resolve_path(snapshot.manifest(), &q.path);
-
     // Pre-download the file's own chunks so the actual tree-building
     // step doesn't stall mid-parse waiting on the CDN. Per-format
     // external files (rabex typetrees, etc) are fetched lazily by
     // their own resolvers.
     let (file_sha, chunks_for_dl) = {
-        let file = snapshot
-            .manifest()
-            .files
-            .iter()
-            .find(|f| f.path == q.path)
+        let file = crate::platform_paths::find_corresponding(snapshot.manifest(), &q.path)
             .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
+        // Links from another platform's manifest carry its build-folder path.
+        q.path = file.path.clone();
         let sha = file
             .sha()
             .ok_or_else(|| ApiError::bad_request(format!("file has no content sha: {}", q.path)))?
@@ -205,14 +200,12 @@ pub async fn manifest_file_structured_node(
             .open_manifest(appid, depot_id, manifest_id, &q.branch)
             .await?,
     );
+    let file = crate::platform_paths::find_corresponding(snapshot.manifest(), &q.path)
+        .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
     // Links from another platform's manifest carry its build-folder path.
-    q.path = crate::platform_paths::resolve_path(snapshot.manifest(), &q.path);
-    let file_sha = snapshot
-        .manifest()
-        .files
-        .iter()
-        .find(|f| f.path == q.path)
-        .and_then(|f| f.sha())
+    q.path = file.path.clone();
+    let file_sha = file
+        .sha()
         .map(|h| h.0)
         .ok_or_else(|| ApiError::not_found(format!("file not in manifest: {}", q.path)))?;
 

@@ -377,7 +377,7 @@ async fn file_view_if_local(
 /// Whether `path` is a file below the preload cap with every chunk on disk, so building its
 /// view downloads nothing.
 fn file_is_local(state: &AppState, snapshot: &Snapshot, path: &str) -> bool {
-    let Some(file) = snapshot.manifest().files.iter().find(|f| f.path == path) else {
+    let Some(file) = crate::platform_paths::find_corresponding(snapshot.manifest(), path) else {
         return false;
     };
     let index = state.store_index.read().expect("store_index poisoned");
