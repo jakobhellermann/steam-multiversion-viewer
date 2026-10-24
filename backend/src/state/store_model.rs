@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use steam_depot_vfs::{ChunkHash, DepotStore};
 
-use super::store_index::ManifestStats;
+use super::store_index::{ChunkMap, ChunkSet, ManifestStats};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 pub type ManifestKey = (AppId, DepotId, ManifestId);
@@ -21,23 +21,25 @@ pub struct ManifestNode {
     pub chunks: Vec<ChunkHash>,
     /// Uncompressed size of `chunks`.
     pub bytes_total: u64,
+    /// Compressed (CDN wire) size of `chunks`.
+    pub bytes_total_compressed: u64,
 }
 
 pub struct StoreModel {
     pub manifests: Vec<ManifestNode>,
     /// Number of distinct manifests referencing each chunk.
-    pub chunk_refs: HashMap<ChunkHash, u32>,
+    pub chunk_refs: ChunkMap<u32>,
     /// CDN wire size of each chunk. Approximates the on-disk frame size
     /// within a few percent; used for full-download projections. Exact
     /// disk usage is read from the files themselves.
-    pub chunk_size: HashMap<ChunkHash, u64>,
+    pub chunk_size: ChunkMap<u64>,
 }
 
 impl StoreModel {
     pub fn build(store: &DepotStore) -> Result<Self, std::io::Error> {
         let mut manifests = Vec::new();
-        let mut chunk_refs: HashMap<ChunkHash, u32> = HashMap::new();
-        let mut chunk_size: HashMap<ChunkHash, u64> = HashMap::new();
+        let mut chunk_refs = ChunkMap::<u32>::default();
+        let mut chunk_size = ChunkMap::<u64>::default();
 
         for (app_id, depot_id, gid) in store.list_manifests()? {
             let m = match store.load_cached_manifest(app_id, depot_id, gid) {
@@ -52,11 +54,13 @@ impl StoreModel {
             let mut seen = HashSet::new();
             let mut chunks = Vec::new();
             let mut bytes_total = 0;
+            let mut bytes_total_compressed = 0;
             for file in &m.files {
                 for chunk in file.chunks() {
                     if seen.insert(chunk.sha) {
                         chunks.push(chunk.sha);
                         bytes_total += u64::from(chunk.size_uncompressed);
+                        bytes_total_compressed += u64::from(chunk.size_compressed);
                         chunk_size
                             .entry(chunk.sha)
                             .or_insert_with(|| u64::from(chunk.size_compressed));
@@ -73,6 +77,7 @@ impl StoreModel {
                 creation_time: m.creation_time,
                 chunks,
                 bytes_total,
+                bytes_total_compressed,
             });
         }
 
@@ -90,7 +95,7 @@ impl StoreModel {
     pub fn manifest_stats(
         &self,
         key: ManifestKey,
-        present: &HashSet<ChunkHash>,
+        present: &ChunkSet,
     ) -> Option<(ManifestStats, u32)> {
         let node = self
             .manifests
@@ -99,14 +104,13 @@ impl StoreModel {
         let mut stats = ManifestStats {
             chunks_total: node.chunks.len() as u32,
             bytes_total: node.bytes_total,
+            bytes_total_compressed: node.bytes_total_compressed,
             ..ManifestStats::default()
         };
         for sha in &node.chunks {
-            let wire = self.chunk_size[sha];
-            stats.bytes_total_compressed += wire;
             if !present.contains(sha) {
                 stats.chunks_missing += 1;
-                stats.bytes_missing_compressed += wire;
+                stats.bytes_missing_compressed += self.chunk_size[sha];
             }
         }
         Some((stats, node.creation_time))
@@ -172,8 +176,9 @@ mod tests {
             depot_id: DepotId(2),
             manifest_id: ManifestId(m),
             creation_time: 0,
-            chunks,
             bytes_total: 0,
+            bytes_total_compressed: 100 * chunks.len() as u64,
+            chunks,
         };
         StoreModel {
             manifests: vec![
@@ -222,7 +227,7 @@ mod tests {
     #[test]
     fn manifest_stats_count_missing_chunks() {
         let model = model();
-        let present: HashSet<ChunkHash> = [sha(1), sha(2)].into_iter().collect();
+        let present: ChunkSet = [sha(1), sha(2)].into_iter().collect();
         let (stats, creation_time) = model.manifest_stats(key(20), &present).unwrap();
         assert_eq!(
             (

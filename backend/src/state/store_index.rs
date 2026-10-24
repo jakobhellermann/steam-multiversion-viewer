@@ -3,15 +3,39 @@
 //! tracks the set of chunk SHAs we actually have on disk. Populated at
 //! startup, and updated as manifests are opened and chunks come and go.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasherDefault, Hasher};
 
 use steam_depot_vfs::{ChunkHash, DepotStore};
 use steam_vent_depot::Manifest;
 
 use crate::steam::{AppId, DepotId, ManifestId};
 
+/// Chunk hashes are SHA-1 digests, so a cheap fold suffices; with SipHash the lookups took
+/// ~33 ms of a status batch over 86 manifests (~1.2M chunk lookups), with this ~6 ms.
+#[derive(Clone, Copy, Default)]
+pub struct ChunkHasher(u64);
+
+impl Hasher for ChunkHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.0 = (self.0.rotate_left(5) ^ u64::from_le_bytes(word))
+                .wrapping_mul(0x517c_c1b7_2722_0a95);
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+pub type ChunkSet = HashSet<ChunkHash, BuildHasherDefault<ChunkHasher>>;
+pub type ChunkMap<V> = HashMap<ChunkHash, V, BuildHasherDefault<ChunkHasher>>;
+
 pub struct StoreIndex {
-    chunks_present: HashSet<ChunkHash>,
+    chunks_present: ChunkSet,
     indexed_manifests: HashSet<(AppId, DepotId, ManifestId)>,
 }
 
@@ -20,7 +44,7 @@ impl StoreIndex {
     pub fn scan(store: &DepotStore) -> Result<Self, std::io::Error> {
         let started = std::time::Instant::now();
         let mut idx = Self {
-            chunks_present: HashSet::new(),
+            chunks_present: ChunkSet::default(),
             indexed_manifests: HashSet::new(),
         };
 
@@ -88,7 +112,7 @@ impl StoreIndex {
     }
 
     /// The set of chunks currently on disk.
-    pub fn present_chunks(&self) -> &HashSet<ChunkHash> {
+    pub fn present_chunks(&self) -> &ChunkSet {
         &self.chunks_present
     }
 

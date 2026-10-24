@@ -14,6 +14,7 @@ use utoipa::ToSchema;
 
 use crate::http::ApiError;
 use crate::state::AppState;
+use crate::state::store_index::ChunkSet;
 use crate::state::store_model::ManifestKey;
 use crate::steam::{AppId, DepotId, ManifestId};
 
@@ -81,7 +82,7 @@ pub async fn store_overview(State(state): State<AppState>) -> Result<Json<StoreO
 
     // Cloned out of the index so the read lock is free before the stat
     // calls: the same process serves the FUSE mount on this runtime.
-    let present: HashSet<ChunkHash> = {
+    let present: ChunkSet = {
         let index = state.store_index.read().expect("store_index poisoned");
         index.present_chunks().clone()
     };
