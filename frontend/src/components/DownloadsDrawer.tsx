@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cancelDownloads, type DownloadStats } from "../data/api";
 import { consumeShowImmediately } from "../lib/downloadsUiSignal";
+import { useServerEvent } from "../data/serverEvents";
 import { formatBytes } from "../lib/format";
 
 /// Live download progress panel, anchored top-right. Visible whenever
@@ -110,75 +111,64 @@ export function DownloadsDrawer() {
     return () => document.removeEventListener("mousedown", onDown);
   }, [activeNow]);
 
-  useEffect(() => {
-    const es = new EventSource("/api/events");
-    const onStats = (e: MessageEvent) => {
-      const s = JSON.parse(e.data) as DownloadStats;
-      setStats(s);
-      const now = performance.now();
-      // Drop the buffer on reset (cancel zeroes bytes_completed); a
-      // shrinking value would otherwise produce a negative slope.
-      if (
-        samples.current.length > 0 &&
-        s.bytes_completed < samples.current[samples.current.length - 1].bytes
-      ) {
-        samples.current = [];
-        runStart.current = null;
-        setOverallRate(0);
+  useServerEvent("stats", (data) => {
+    const s = data as DownloadStats;
+    setStats(s);
+    const now = performance.now();
+    // Drop the buffer on reset (cancel zeroes bytes_completed); a
+    // shrinking value would otherwise produce a negative slope.
+    if (
+      samples.current.length > 0 &&
+      s.bytes_completed < samples.current[samples.current.length - 1].bytes
+    ) {
+      samples.current = [];
+      runStart.current = null;
+      setOverallRate(0);
+    }
+    samples.current.push({ ts: now, bytes: s.bytes_completed });
+    const cutoff = now - RATE_WINDOW_MS;
+    while (samples.current.length > 2 && samples.current[0].ts < cutoff) {
+      samples.current.shift();
+    }
+    if (samples.current.length >= 2) {
+      const first = samples.current[0];
+      const last = samples.current[samples.current.length - 1];
+      const dt = (last.ts - first.ts) / 1000;
+      if (dt > 0.1) {
+        setRate(Math.max(0, (last.bytes - first.bytes) / dt));
       }
-      samples.current.push({ ts: now, bytes: s.bytes_completed });
-      const cutoff = now - RATE_WINDOW_MS;
-      while (samples.current.length > 2 && samples.current[0].ts < cutoff) {
-        samples.current.shift();
+    }
+    // Capture the run anchor as early as possible — when bytes_total
+    // is first known. We anchor at the current bytes_completed (often
+    // 0) so the rate represents *this* run only, not a previous one.
+    if (runStart.current == null && s.bytes_total > 0) {
+      runStart.current = { ts: now, bytes: s.bytes_completed };
+    }
+    if (runStart.current != null) {
+      const dt = (now - runStart.current.ts) / 1000;
+      const delivered = s.bytes_completed - runStart.current.bytes;
+      if (dt > 0.05 && delivered > 0) {
+        setOverallRate(delivered / dt);
       }
-      if (samples.current.length >= 2) {
-        const first = samples.current[0];
-        const last = samples.current[samples.current.length - 1];
-        const dt = (last.ts - first.ts) / 1000;
-        if (dt > 0.1) {
-          setRate(Math.max(0, (last.bytes - first.bytes) / dt));
-        }
+    }
+    // Tiny downloads finish in a single SSE frame; the anchor's `ts`
+    // ends up == now, so the divide above sees dt≈0. Fall back to
+    // bytes_total / something visible — the user is rarely interested
+    // in sub-second precision here.
+    const finished = s.chunks_completed + s.chunks_failed === s.chunks_total;
+    if (finished && runStart.current != null) {
+      const dt = (now - runStart.current.ts) / 1000;
+      if (dt < 0.1 && s.bytes_completed > 0) {
+        setOverallRate(s.bytes_completed / Math.max(dt, 0.1));
       }
-      // Capture the run anchor as early as possible — when bytes_total
-      // is first known. We anchor at the current bytes_completed (often
-      // 0) so the rate represents *this* run only, not a previous one.
-      if (runStart.current == null && s.bytes_total > 0) {
-        runStart.current = { ts: now, bytes: s.bytes_completed };
-      }
-      if (runStart.current != null) {
-        const dt = (now - runStart.current.ts) / 1000;
-        const delivered = s.bytes_completed - runStart.current.bytes;
-        if (dt > 0.05 && delivered > 0) {
-          setOverallRate(delivered / dt);
-        }
-      }
-      // Tiny downloads finish in a single SSE frame; the anchor's `ts`
-      // ends up == now, so the divide above sees dt≈0. Fall back to
-      // bytes_total / something visible — the user is rarely interested
-      // in sub-second precision here.
-      const finished = s.chunks_completed + s.chunks_failed === s.chunks_total;
-      if (finished && runStart.current != null) {
-        const dt = (now - runStart.current.ts) / 1000;
-        if (dt < 0.1 && s.bytes_completed > 0) {
-          setOverallRate(s.bytes_completed / Math.max(dt, 0.1));
-        }
-      }
-      // Chunk-store events deliberately do NOT invalidate page queries
-      // (`file-view`, `manifest-statuses`): those are snapshots per
-      // visit. SSE-driven invalidation here used to sustain a loop —
-      // a manifest the CDN refuses fails on every status request, the
-      // failure bumped chunks_failed, the invalidation refetched the
-      // status, which re-opened (and re-failed) the manifest.
-    };
-    es.addEventListener("stats", onStats);
-    es.onerror = () => {
-      // EventSource auto-reconnects; just leave it alone.
-    };
-    return () => {
-      es.removeEventListener("stats", onStats);
-      es.close();
-    };
-  }, []);
+    }
+    // Chunk-store events deliberately do NOT invalidate page queries
+    // (`file-view`, `manifest-statuses`): those are snapshots per
+    // visit. SSE-driven invalidation here used to sustain a loop —
+    // a manifest the CDN refuses fails on every status request, the
+    // failure bumped chunks_failed, the invalidation refetched the
+    // status, which re-opened (and re-failed) the manifest.
+  });
 
   if (!stats || stats.chunks_total === 0) return null;
   if (!visible) return null;

@@ -12,6 +12,7 @@ import {
 import { exportFolderName, joinExportPath } from "../lib/exportName";
 import { formatBytes } from "../lib/format";
 import { queryKeys } from "../data/queryKeys";
+import { useServerEvent } from "../data/serverEvents";
 
 export function ExportButton({
   appid,
@@ -40,14 +41,10 @@ export function ExportButton({
 
   // The backend only reports `idle`/`running`; the outcome arrives once as `export_finished`.
   const [finished, setFinished] = useState<ExportStatus | null>(null);
-  useEffect(() => {
-    const es = new EventSource("/api/events");
-    es.addEventListener("export_finished", (e: MessageEvent) => {
-      setFinished(JSON.parse(e.data) as ExportStatus);
-      void qc.invalidateQueries({ queryKey: queryKeys.exportStatus() });
-    });
-    return () => es.close();
-  }, [qc]);
+  useServerEvent("export_finished", (data) => {
+    setFinished(data as ExportStatus);
+    void qc.invalidateQueries({ queryKey: queryKeys.exportStatus() });
+  });
 
   const start = useMutation({
     mutationFn: () => exportManifest(appid, depotId, manifestId, { branch, subdir }),
