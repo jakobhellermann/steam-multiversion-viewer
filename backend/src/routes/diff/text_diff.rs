@@ -48,7 +48,7 @@ pub async fn manifest_file_diff(
     Query(q): Query<FileViewQuery>,
     Json(body): Json<FileDiffRequest>,
 ) -> Result<Response> {
-    state.steam()?; // 401 if not logged in
+    state.steam().await?; // 401 if not logged in
     let (base, target) = tokio::try_join!(
         resolve_diff_text(&state, appid, depot_id, manifest_id, &q.branch, &body.path),
         resolve_diff_text(

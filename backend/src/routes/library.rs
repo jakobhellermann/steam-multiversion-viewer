@@ -56,7 +56,7 @@ pub async fn library(
 /// Fetches the owned-games list directly from the Steam connection.
 /// Shared between the HTTP handler and the native menu bar.
 pub async fn fetch_owned_games(state: &AppState) -> Result<Vec<OwnedGame>> {
-    let steam = state.steam()?;
+    let steam = state.steam().await?;
     let req = CPlayer_GetOwnedGames_Request {
         steamid: Some(steam.connection.steam_id().into()),
         include_appinfo: Some(true),
@@ -206,7 +206,7 @@ pub async fn app_info_or_fetch(state: &AppState, appid: AppId) -> Result<AppInfo
 
 /// App info from Steam, persisted as the last fetched copy.
 pub async fn fetch_app_info(state: &AppState, appid: AppId) -> Result<AppInfo> {
-    let info = state.steam()?.depot.app_info(appid.0).await?;
+    let info = state.steam().await?.depot.app_info(appid.0).await?;
 
     let asset_url = |hash: &str, ext: &str| {
         format!(
@@ -391,7 +391,7 @@ pub async fn manifest_info(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestInfoQuery>,
 ) -> Result<(ImmutableCache, Json<ManifestInfo>)> {
-    state.steam()?; // 401 if not logged in
+    state.steam().await?; // 401 if not logged in
     let snapshot = state
         .open_manifest(appid, depot_id, manifest_id, &q.branch)
         .await?;
@@ -426,7 +426,7 @@ pub async fn manifest_files(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<ManifestFilesQuery>,
 ) -> Result<(ImmutableCache, Json<ManifestFiles>)> {
-    state.steam()?; // 401 if not logged in
+    state.steam().await?; // 401 if not logged in
     let snapshot = state
         .open_manifest(appid, depot_id, manifest_id, &q.branch)
         .await?;
@@ -568,7 +568,7 @@ async fn statuses_of(
     appid: AppId,
     manifests: &[ManifestRef],
 ) -> Result<Vec<ManifestStatusEntry>> {
-    state.steam()?; // 401 if not logged in
+    state.steam().await?; // 401 if not logged in
     // Dedupe — multiple branches often share a manifest_id, no point asking
     // the cache (or the CDN) for it twice in one request.
     let mut seen = HashSet::new();

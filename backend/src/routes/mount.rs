@@ -35,7 +35,7 @@ pub enum StartResult {
 )]
 #[tracing::instrument(skip_all)]
 pub async fn start(State(state): State<AppState>) -> Result<Json<StartResult>, ApiError> {
-    let steam = state.steam()?; // 401 if not logged in
+    let steam = state.steam().await?; // 401 if not logged in
     let cfg = state.config.load();
     // Snapshot the index under its lock so we can drop it before
     // entering Mount::start (which acquires the mount's own lock).

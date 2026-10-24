@@ -25,7 +25,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       queryKey: queryKeys.auth(),
       queryFn: fetchAuthStatus,
     });
-    if (!status.authenticated) {
+    // While the saved session resumes, pages render and their Steam-backed requests wait for it.
+    if (!status.authenticated && !status.resuming) {
       throw redirect({ to: "/login", search: { redirect: location.href } });
     }
   },
@@ -115,7 +116,15 @@ function RootComponent() {
 function AccountMenu() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { data: auth } = useQuery({ queryKey: queryKeys.auth(), queryFn: fetchAuthStatus });
+  const { data: auth } = useQuery({
+    queryKey: queryKeys.auth(),
+    queryFn: fetchAuthStatus,
+    refetchInterval: (q) => (q.state.data?.resuming ? 500 : false),
+  });
+  const failedResume = auth != null && !auth.authenticated && !auth.resuming;
+  useEffect(() => {
+    if (failedResume) void navigate({ to: "/login", search: { redirect: location.href } });
+  }, [failedResume, navigate]);
 
   const mutation = useMutation({
     mutationFn: logout,
@@ -125,7 +134,7 @@ function AccountMenu() {
     },
   });
 
-  if (!auth?.authenticated) return null;
+  if (!auth?.authenticated && !auth?.resuming) return null;
 
   return (
     <div className="flex items-center gap-2">
@@ -135,8 +144,10 @@ function AccountMenu() {
       <button
         type="button"
         onClick={() => mutation.mutate()}
-        disabled={mutation.isPending}
-        className="text-sm text-slate-400 hover:text-sky-400 disabled:opacity-30"
+        // Disabled without looking it: a logout during the resume would be undone by it.
+        disabled={mutation.isPending || auth.resuming}
+        title={auth.resuming ? "Signing in…" : undefined}
+        className={`text-sm text-slate-400 hover:text-sky-400 ${mutation.isPending ? "opacity-30" : ""}`}
       >
         {mutation.isPending ? "Signing out…" : "Sign out"}
       </button>

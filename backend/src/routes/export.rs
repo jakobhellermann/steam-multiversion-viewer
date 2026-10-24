@@ -38,7 +38,7 @@ pub async fn manifest_export(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Json(body): Json<ExportManifestBody>,
 ) -> Result<Json<ExportStatus>> {
-    state.steam()?; // 401 if not logged in
+    state.steam().await?; // 401 if not logged in
 
     let subdir = match body.subdir {
         Some(subdir) => check_single_component(&subdir)
@@ -54,7 +54,8 @@ pub async fn manifest_export(
     // Steam's manifests rarely carry the executable flag; the app's launch
     // config is where the runnable targets are actually named.
     let launch_targets: Vec<String> = state
-        .steam()?
+        .steam()
+        .await?
         .depot
         .app_info(appid.0)
         .await?

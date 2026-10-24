@@ -70,7 +70,7 @@ pub async fn manifest_file_structured_diff(
     Path((appid, depot_id, manifest_id)): Path<(AppId, DepotId, ManifestId)>,
     Query(q): Query<StructuredDiffQuery>,
 ) -> Result<(crate::http::ImmutableCache, Json<StructuredTree>)> {
-    state.steam()?; // 401 if not logged in
+    state.steam().await?; // 401 if not logged in
     let request = StructuredDiffRequest {
         appid,
         base: StructuredDiffSide {

@@ -329,7 +329,7 @@ async fn open_if_on_disk(
         .read()
         .expect("store_index poisoned")
         .has_manifest(app, depot, manifest);
-    if !on_disk || state.steam.load().is_none() {
+    if !on_disk {
         return Ok(None);
     }
     Ok(Some(Arc::new(

@@ -15,6 +15,7 @@ use arc_swap::{ArcSwap, ArcSwapOption};
 use steam_depot_vfs::chunk_store::{CdnChunkStore, FsCacheStore};
 use steam_depot_vfs::fs::DepotManifestStore;
 use steam_depot_vfs::{DepotStore, VfsError};
+use tokio::sync::watch;
 
 use self::downloads::ChunkService;
 use self::extra_manifests::ExtraManifestsStore;
@@ -23,13 +24,14 @@ use self::store_index::StoreIndex;
 use self::store_model::StoreModel;
 use crate::config::Config;
 use crate::http::ApiError;
+use crate::steam::access::{ResumeGuard, SteamAccess};
 use crate::steam::chunk_store::TrackedChunkStore;
 use crate::steam::{AppId, DepotId, ManifestId, SteamClient, auth};
 
 /// Concrete chunk-store stack used inside every opened manifest. Exposed
 /// as an alias so per-manifest caches (e.g. the unity `Environment`)
 /// can name the resolver type without re-typing the wrapping chain.
-pub type SnapChunkStore = FsCacheStore<TrackedChunkStore<CdnChunkStore<SteamClient>>>;
+pub type SnapChunkStore = FsCacheStore<TrackedChunkStore<CdnChunkStore<SteamAccess>>>;
 pub type Snapshot = DepotManifestStore<SnapChunkStore>;
 
 #[derive(Clone)]
@@ -39,6 +41,8 @@ pub struct AppState {
     /// effect without restarting the server. Read it through
     /// [`AppState::steam`] in request handlers to get a `401` when absent.
     pub steam: Arc<ArcSwapOption<SteamClient>>,
+    /// Whether the saved session is still being resumed; Steam access waits for it meanwhile.
+    resuming: Arc<watch::Sender<bool>>,
     /// The (at most one) in-progress interactive web login, so the auth
     /// status endpoint can report whether a code is needed.
     pub pending_login: auth::PendingLoginSlot,
@@ -92,6 +96,7 @@ impl AppState {
 
         Ok(Self {
             steam: Arc::new(ArcSwapOption::empty()),
+            resuming: Arc::new(watch::channel(false).0),
             pending_login: Arc::new(std::sync::Mutex::new(None)),
             store,
             initial_config: Arc::new(config.clone()),
@@ -143,10 +148,23 @@ impl AppState {
     /// The authenticated Steam client, or a `401` error when the user
     /// hasn't logged in yet. Request handlers that touch Steam should go
     /// through this so the logged-out case is a clean `Unauthorized`.
-    pub fn steam(&self) -> Result<Arc<SteamClient>, ApiError> {
-        self.steam
-            .load_full()
+    pub async fn steam(&self) -> Result<Arc<SteamClient>, ApiError> {
+        self.steam_access()
+            .client()
+            .await
             .ok_or_else(|| ApiError::unauthorized("not logged in to Steam"))
+    }
+
+    pub fn steam_access(&self) -> SteamAccess {
+        SteamAccess::new(Arc::clone(&self.steam), self.resuming.subscribe())
+    }
+
+    pub fn begin_resume(&self) -> ResumeGuard {
+        ResumeGuard::new(Arc::clone(&self.resuming))
+    }
+
+    pub fn is_resuming(&self) -> bool {
+        *self.resuming.borrow()
     }
 
     /// Install a freshly authenticated connection (login).
@@ -170,14 +188,11 @@ impl AppState {
     ) -> Result<Snapshot, VfsError> {
         let started = Instant::now();
         let downloads = Arc::clone(&self.downloads);
-        let steam = self
-            .steam
-            .load_full()
-            .ok_or_else(|| VfsError::Other("not logged in to Steam".into()))?;
+        // A manifest on disk opens without Steam; fetches through it wait for the login.
         let snap = self
             .store
             .open_depot_manifest_with_chunks(
-                steam,
+                Arc::new(self.steam_access()),
                 app_id.0,
                 depot_id.0,
                 manifest_id.0,

@@ -32,7 +32,8 @@ pub struct CodeRequest {
     "authenticated": true,
     "account": "alice",
     "steamid": "[U:1:12345678]",
-    "pending": null
+    "pending": null,
+    "resuming": false
 }))]
 pub struct AuthStatus {
     pub authenticated: bool,
@@ -42,6 +43,8 @@ pub struct AuthStatus {
     pub steamid: Option<String>,
     /// Progress of an in-flight interactive login, if any.
     pub pending: Option<LoginPhase>,
+    /// The saved session is being resumed at startup; Steam-backed requests wait for it.
+    pub resuming: bool,
 }
 
 impl AuthStatus {
@@ -56,12 +59,14 @@ impl AuthStatus {
                 account: Some(p.account().to_string()),
                 steamid: None,
                 pending: Some(p.phase().clone()),
+                resuming: state.is_resuming(),
             },
             None => Self {
                 authenticated: false,
                 account: None,
                 steamid: None,
                 pending: None,
+                resuming: state.is_resuming(),
             },
         }
     }
@@ -72,6 +77,7 @@ impl AuthStatus {
             account: Some(client.account.clone()),
             steamid: Some(client.connection.steam_id().steam3().to_string()),
             pending: None,
+            resuming: false,
         }
     }
 }

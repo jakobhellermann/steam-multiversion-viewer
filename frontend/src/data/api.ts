@@ -82,6 +82,8 @@ export type AuthStatus = {
   steamid?: string;
   /** Set while an interactive login is in progress. */
   pending?: LoginPhase | null;
+  /** The saved session is being resumed at startup; Steam-backed requests wait for it. */
+  resuming: boolean;
 };
 
 export function fetchAuthStatus(): Promise<AuthStatus> {

@@ -123,6 +123,8 @@ async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>, AppState)
     // logs in via `/login`.
     if let Some(session) = steam::auth::saved_session() {
         let id = steam::auth::begin_startup_login(&state.pending_login, session.account().into());
+        // Taken before the task starts, so requests arriving right away wait for the resume.
+        let resume = state.begin_resume();
         let state = state.clone();
         tokio::spawn(async move {
             match steam::auth::resume(session).await {
@@ -132,6 +134,7 @@ async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>, AppState)
                 Err(err) => tracing::warn!(%err, "resuming saved session failed"),
             }
             steam::auth::clear_pending(&state.pending_login, id);
+            drop(resume);
         });
     }
 

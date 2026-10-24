@@ -26,7 +26,7 @@ pub async fn file_history(
     Path(appid): Path<AppId>,
     Json(request): Json<FileHistoryRequest>,
 ) -> Result<Json<Vec<FileHistoryEntry>>> {
-    state.steam()?;
+    state.steam().await?;
     Ok(Json(build_file_history(&state, appid, &request).await?))
 }
 
@@ -43,6 +43,6 @@ pub async fn manifest_history(
     Path(appid): Path<AppId>,
     Json(request): Json<ManifestHistoryRequest>,
 ) -> Result<Json<Vec<ManifestHistoryEntry>>> {
-    state.steam()?;
+    state.steam().await?;
     Ok(Json(build_manifest_history(&state, appid, &request).await?))
 }
