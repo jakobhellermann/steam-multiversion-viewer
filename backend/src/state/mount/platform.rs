@@ -54,9 +54,14 @@ pub(super) async fn start_backend(
     }
 }
 
+/// Joins the FUSE thread, which only ends once no process uses the detached filesystem anymore
+/// (e.g. a suspended `find` inside it), hence the blocking pool.
 #[cfg(target_os = "linux")]
 pub(super) async fn unmount_backend(mount: Backend) -> Result<(), MountControlError> {
-    mount.unmount().map_err(MountControlError::Unmount)
+    tokio::task::spawn_blocking(move || mount.unmount())
+        .await
+        .map_err(|e| MountControlError::Unmount(std::io::Error::other(e)))?
+        .map_err(MountControlError::Unmount)
 }
 
 /// Ensure `path` exists as an empty directory ready to be FUSE-mounted.

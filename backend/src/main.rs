@@ -12,7 +12,7 @@ use axum::response::{Html, Response};
 use axum::routing::get;
 use clap::Parser;
 use directories::ProjectDirs;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 use tower_http::compression::predicate::{NotForContentType, Predicate};
 use tower_http::compression::{CompressionLayer, DefaultPredicate};
@@ -110,7 +110,17 @@ async fn unmount_on_signal(state: AppState) {
         return;
     }
     tracing::info!("signal received, unmounting before exit");
-    state.mount.stop_on_shutdown().await;
+    // The unmount waits for every process to let go of the filesystem; exiting closes the
+    // FUSE device, which ends the connection for them instead.
+    const UNMOUNT_WAIT: Duration = Duration::from_secs(3);
+    if tokio::time::timeout(UNMOUNT_WAIT, state.mount.stop_on_shutdown())
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            "mount still in use by another process after {UNMOUNT_WAIT:?}; exiting without waiting"
+        );
+    }
     std::process::exit(0);
 }
 
