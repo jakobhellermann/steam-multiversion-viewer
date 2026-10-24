@@ -10,6 +10,7 @@
   "manifestFiles": ["manifest-files", 1030300, 1030303, "5954103139200615141", "beta"],
   "fileView": ["file-view", 1030300, 1030303, "5954103139200615141", "beta", "Data/a.json"],
   "gameInfo": ["game-info", 1030300, 1030303, "5954103139200615141"],
+  "appManifestStatuses": ["manifest-statuses", 1030300],
   "manifestStatuses": [
     "manifest-statuses",
     1030300,

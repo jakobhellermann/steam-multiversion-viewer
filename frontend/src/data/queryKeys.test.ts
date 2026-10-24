@@ -17,6 +17,7 @@ test("query keys match the backend preload contract", () => {
     manifestFiles: queryKeys.manifestFiles(appid, depotId, manifestId, branch),
     fileView: queryKeys.fileView(appid, depotId, manifestId, branch, "Data/a.json"),
     gameInfo: queryKeys.gameInfo(appid, depotId, manifestId),
+    appManifestStatuses: queryKeys.appManifestStatuses(appid),
     manifestStatuses: queryKeys.manifestStatuses(appid, [
       { depot_id: depotId, manifest_id: manifestId, branch },
     ]),

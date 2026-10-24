@@ -18,6 +18,7 @@ export const queryKeys = {
     ["file-view", appid, depotId, manifestId, branch, path] as const,
   gameInfo: (appid: AppId, depotId: number, manifestId: string) =>
     ["game-info", appid, depotId, manifestId] as const,
+  appManifestStatuses: (appid: AppId) => ["manifest-statuses", appid] as const,
   manifestStatuses: (appid: AppId, refs: ManifestRef[]) =>
     ["manifest-statuses", appid, refs] as const,
 };

@@ -18,6 +18,7 @@ use tokio::sync::Semaphore;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::http::{ApiError, CacheSeconds, ImmutableCache};
+use crate::routes::extra_manifests::{ExtraManifestEntryDto, extra_manifests_of};
 use crate::state::store_index::ManifestStats;
 use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
@@ -85,7 +86,7 @@ pub fn library_cache_key(account: &str) -> String {
     format!("library/{account}.json")
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
     "appid": 1145360,
     "name": "Hades",
@@ -126,7 +127,7 @@ pub struct AppInfo {
     pub private_branches: bool,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
     "name": "public",
     "build_id": 10929685,
@@ -140,7 +141,7 @@ pub struct BranchInfo {
     pub description: Option<String>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
     "depot_id": 1234567,
     "oslist": "windows",
@@ -161,7 +162,7 @@ pub struct DepotEntry {
     pub manifests: Vec<DepotManifest>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 #[schema(example = json!({
     "branch": "public",
     "manifest_id": "9876543210987654321",
@@ -187,6 +188,24 @@ pub async fn app_info(
     State(state): State<AppState>,
     Path(appid): Path<AppId>,
 ) -> Result<(CacheSeconds, Json<AppInfo>)> {
+    // App metadata is pretty stable; let the browser cache it for 5 minutes
+    // before re-asking.
+    Ok((
+        CacheSeconds(300),
+        Json(fetch_app_info(&state, appid).await?),
+    ))
+}
+
+/// App info as last fetched, or fetched from Steam when there is none yet.
+pub async fn app_info_or_fetch(state: &AppState, appid: AppId) -> Result<AppInfo> {
+    match state.disk_cache.read(&app_info_cache_key(appid))? {
+        Some((info, _)) => Ok(info),
+        None => fetch_app_info(state, appid).await,
+    }
+}
+
+/// App info from Steam, persisted as the last fetched copy.
+pub async fn fetch_app_info(state: &AppState, appid: AppId) -> Result<AppInfo> {
     let info = state.steam()?.depot.app_info(appid.0).await?;
 
     let asset_url = |hash: &str, ext: &str| {
@@ -247,9 +266,29 @@ pub async fn app_info(
         private_branches: info.depots.private_branches,
     };
     state.disk_cache.write(&app_info_cache_key(appid), &app)?;
-    // App metadata is pretty stable; let the browser cache it for 5 minutes
-    // before re-asking.
-    Ok((CacheSeconds(300), Json(app)))
+    Ok(app)
+}
+
+/// Every tracked manifest of the app (app-info heads, then user-tracked extras), once per
+/// `(depot, gid)` with the first branch it was seen on.
+pub fn app_manifest_refs(info: &AppInfo, extras: &[ExtraManifestEntryDto]) -> Vec<ManifestRef> {
+    let mut seen = HashSet::new();
+    let heads = info.depots.iter().flat_map(|depot| {
+        depot.manifests.iter().map(|m| ManifestRef {
+            depot_id: depot.depot_id,
+            manifest_id: m.manifest_id,
+            branch: m.branch.clone(),
+        })
+    });
+    let tracked = extras.iter().map(|e| ManifestRef {
+        depot_id: e.depot_id,
+        manifest_id: e.manifest_id,
+        branch: e.branch.clone().unwrap_or_else(default_branch),
+    });
+    heads
+        .chain(tracked)
+        .filter(|r| seen.insert((r.depot_id, r.manifest_id)))
+        .collect()
 }
 
 /// Disk-cache key of an app's info as last fetched from Steam.
@@ -478,12 +517,59 @@ pub async fn manifest_statuses(
     Path(appid): Path<AppId>,
     Json(body): Json<ManifestStatusRequest>,
 ) -> Result<Json<Vec<ManifestStatusEntry>>> {
+    Ok(Json(statuses_of(&state, appid, &body.manifests).await?))
+}
+
+/// Status of every tracked manifest of the app, see [`app_manifest_refs`]
+#[utoipa::path(
+    get,
+    path = "/api/apps/{appid}/manifests/status",
+    tag = "library",
+    responses((status = 200, body = Vec<ManifestStatusEntry>))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn app_manifest_statuses(
+    State(state): State<AppState>,
+    Path(appid): Path<AppId>,
+) -> Result<Json<Vec<ManifestStatusEntry>>> {
+    let info = app_info_or_fetch(&state, appid).await?;
+    let refs = app_manifest_refs(&info, &extra_manifests_of(&state, appid));
+    Ok(Json(statuses_of(&state, appid, &refs).await?))
+}
+
+/// Statuses of `refs` when the built store model holds all of them, without opening any
+/// manifest.
+pub fn indexed_statuses(
+    state: &AppState,
+    appid: AppId,
+    refs: &[ManifestRef],
+) -> Option<Vec<ManifestStatusEntry>> {
+    let model = state.built_store_model()?;
+    let index = state.store_index.read().expect("store_index poisoned");
+    refs.iter()
+        .map(|r| {
+            let (stats, creation_time) =
+                model.manifest_stats((appid, r.depot_id, r.manifest_id), index.present_chunks())?;
+            Some(status_entry(
+                r.depot_id,
+                r.manifest_id,
+                stats,
+                creation_time,
+            ))
+        })
+        .collect()
+}
+
+async fn statuses_of(
+    state: &AppState,
+    appid: AppId,
+    manifests: &[ManifestRef],
+) -> Result<Vec<ManifestStatusEntry>> {
     state.steam()?; // 401 if not logged in
     // Dedupe — multiple branches often share a manifest_id, no point asking
     // the cache (or the CDN) for it twice in one request.
     let mut seen = HashSet::new();
-    let refs: Vec<&ManifestRef> = body
-        .manifests
+    let refs: Vec<&ManifestRef> = manifests
         .iter()
         .filter(|r| seen.insert((r.depot_id, r.manifest_id)))
         .collect();
@@ -517,7 +603,6 @@ pub async fn manifest_statuses(
     let sem = Arc::new(Semaphore::new(8));
     let mut fu = FuturesUnordered::new();
     for r in unindexed {
-        let state = &state;
         let sem = sem.clone();
         fu.push(async move {
             let _permit = sem.acquire().await.expect("semaphore not closed");
@@ -530,7 +615,7 @@ pub async fn manifest_statuses(
 
     while let Some((depot_id, manifest_id, result)) = fu.next().await {
         let entry = match result {
-            Ok(snap) => manifest_status_of(&state, &snap),
+            Ok(snap) => manifest_status_of(state, &snap),
             Err(err) => {
                 tracing::warn!(%depot_id, %manifest_id, %err, "manifest open failed");
                 ManifestStatusEntry {
@@ -549,7 +634,7 @@ pub async fn manifest_statuses(
         out.push(entry);
     }
 
-    Ok(Json(out))
+    Ok(out)
 }
 
 pub fn manifest_status_of(state: &AppState, snapshot: &Snapshot) -> ManifestStatusEntry {
@@ -583,5 +668,71 @@ fn status_entry(
         bytes_total_compressed: stats.bytes_total_compressed,
         bytes_missing_compressed: stats.bytes_missing_compressed,
         creation_time,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest(branch: &str, gid: u64) -> DepotManifest {
+        DepotManifest {
+            branch: branch.to_owned(),
+            manifest_id: ManifestId(gid),
+            size: 0,
+            download_size: 0,
+        }
+    }
+
+    #[test]
+    fn app_manifest_refs_dedupe_with_first_branch_and_public_default() {
+        let info = AppInfo {
+            appid: AppId(1),
+            name: String::new(),
+            r#type: String::new(),
+            developer: None,
+            publisher: None,
+            homepage: None,
+            logo_url: None,
+            icon_url: String::new(),
+            branches: Vec::new(),
+            depots: vec![DepotEntry {
+                depot_id: DepotId(2),
+                oslist: None,
+                osarch: None,
+                language: None,
+                from_app_id: None,
+                manifests: vec![
+                    manifest("public", 10),
+                    manifest("beta", 10),
+                    manifest("beta", 11),
+                ],
+            }],
+            private_branches: false,
+        };
+        let extras = [
+            ExtraManifestEntryDto {
+                depot_id: DepotId(2),
+                manifest_id: ManifestId(11),
+                branch: Some("old".to_owned()),
+            },
+            ExtraManifestEntryDto {
+                depot_id: DepotId(2),
+                manifest_id: ManifestId(12),
+                branch: None,
+            },
+        ];
+        let refs: Vec<(u64, String)> = app_manifest_refs(&info, &extras)
+            .into_iter()
+            .map(|r| (r.manifest_id.0, r.branch))
+            .collect();
+        assert_eq!(
+            refs,
+            [
+                (10, "public".to_owned()),
+                (11, "beta".to_owned()),
+                (12, "public".to_owned())
+            ]
+        );
     }
 }

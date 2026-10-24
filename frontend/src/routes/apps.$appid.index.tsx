@@ -396,6 +396,10 @@ function ExtrasSection({
       ),
     onSuccess: (next) => {
       queryClient.setQueryData(queryKeys.extraManifests(appid), next);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.appManifestStatuses(appid),
+        exact: true,
+      });
     },
   });
   return (
@@ -687,6 +691,10 @@ function ImportExtrasModal({
     },
     onSuccess: (next) => {
       queryClient.setQueryData(queryKeys.extraManifests(appid), next);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.appManifestStatuses(appid),
+        exact: true,
+      });
       onClose();
     },
   });

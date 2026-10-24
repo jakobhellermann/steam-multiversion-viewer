@@ -127,6 +127,15 @@ impl AppState {
     }
 
     /// Call whenever the set of cached manifests changes.
+    /// The store model if it is already built; unlike [`store_model`](Self::store_model) it
+    /// never builds one.
+    pub fn built_store_model(&self) -> Option<Arc<StoreModel>> {
+        self.store_model
+            .read()
+            .expect("store_model poisoned")
+            .clone()
+    }
+
     pub fn invalidate_store_model(&self) {
         *self.store_model.write().expect("store_model poisoned") = None;
     }

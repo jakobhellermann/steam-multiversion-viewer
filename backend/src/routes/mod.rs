@@ -38,7 +38,10 @@ pub fn register(router: OpenApiRouter<AppState>) -> OpenApiRouter<AppState> {
         .routes(routes!(library::app_info))
         .routes(routes!(library::manifest_info))
         .routes(routes!(library::manifest_files))
-        .routes(routes!(library::manifest_statuses))
+        .routes(routes!(
+            library::manifest_statuses,
+            library::app_manifest_statuses
+        ))
         .routes(routes!(game_info::game_info))
         .routes(routes!(history::file_history))
         .routes(routes!(history::manifest_history))

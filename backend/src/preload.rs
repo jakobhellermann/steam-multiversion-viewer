@@ -20,8 +20,8 @@ use crate::routes::extra_manifests::extra_manifests_of;
 use crate::routes::files::file_view_of;
 use crate::routes::game_info;
 use crate::routes::library::{
-    ManifestRef, app_info_cache_key, library_cache_key, manifest_files_of, manifest_info_of,
-    manifest_status_of,
+    AppInfo, ManifestRef, app_info_cache_key, app_manifest_refs, indexed_statuses,
+    library_cache_key, manifest_files_of, manifest_info_of, manifest_status_of,
 };
 use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
@@ -112,6 +112,10 @@ mod keys {
         json!(["game-info", app, depot, manifest])
     }
 
+    pub fn app_manifest_statuses(app: AppId) -> Value {
+        json!(["manifest-statuses", app])
+    }
+
     pub fn manifest_statuses(app: AppId, refs: &[ManifestRef]) -> Value {
         json!(["manifest-statuses", app, refs])
     }
@@ -168,7 +172,7 @@ async fn route(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
     let Ok(app) = app.parse().map(AppId) else {
         return Ok(Vec::new());
     };
-    let mut entries = app_pages(state, app)?;
+    let mut entries = app_pages(state, app, rest.is_empty())?;
     if let ["depots", depot, "history"] = rest
         && let Ok(depot) = depot.parse()
     {
@@ -194,14 +198,22 @@ async fn route(state: &AppState, uri: &Uri) -> Result<Vec<Entry>> {
 }
 
 /// App info as last fetched from Steam (refetched by the frontend once outdated) and the
-/// user-tracked extras.
-fn app_pages(state: &AppState, app: AppId) -> Result<Vec<Entry>> {
-    let mut entries = vec![Entry::current(
-        keys::extra_manifests(app),
-        extra_manifests_of(state, app),
-    )?];
-    if let Some((info, fetched)) = state.disk_cache.read::<Value>(&app_info_cache_key(app))? {
-        entries.push(Entry::as_of(keys::app(app), info, fetched)?);
+/// user-tracked extras. The status batch only on the overview, where it fills the table;
+/// elsewhere it feeds closed dropdowns and would delay the HTML by its computation.
+fn app_pages(state: &AppState, app: AppId, overview: bool) -> Result<Vec<Entry>> {
+    let extras = extra_manifests_of(state, app);
+    let mut entries = vec![Entry::current(keys::extra_manifests(app), &extras)?];
+    if let Some((info, fetched)) = state.disk_cache.read::<AppInfo>(&app_info_cache_key(app))? {
+        if overview
+            && let Some(statuses) = indexed_statuses(state, app, &app_manifest_refs(&info, &extras))
+        {
+            entries.push(Entry::current(keys::app_manifest_statuses(app), statuses)?);
+        }
+        entries.push(Entry::as_of(
+            keys::app(app),
+            serde_json::to_value(info)?,
+            fetched,
+        )?);
     }
     Ok(entries)
 }
@@ -430,6 +442,7 @@ mod tests {
             "gameInfo": keys::game_info(app, depot, manifest),
             "fileView": keys::file_view(app, depot, manifest, branch, "Data/a.json"),
             "manifestStatuses": keys::manifest_statuses(app, &[self_ref]),
+            "appManifestStatuses": keys::app_manifest_statuses(app),
         });
         assert_eq!(actual, contract);
     }

@@ -327,6 +327,11 @@ export async function fetchFileDiffTargets(
   return body.statuses;
 }
 
+/// Statuses of every manifest the backend tracks for the app (app-info heads and extras).
+export function fetchAppManifestStatuses(appid: AppId): Promise<ManifestStatusEntry[]> {
+  return getJson(`/api/apps/${appid}/manifests/status`);
+}
+
 export async function fetchManifestStatuses(
   appid: AppId,
   manifests: ManifestRef[],
