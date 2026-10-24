@@ -19,7 +19,7 @@ import {
 import { Loader2 } from "lucide-react";
 
 import { mediaKindForMime } from "../../lib/mediaKind";
-import { langForMime } from "../../lib/syntax";
+import { langForMime, warmLang } from "../../lib/syntax";
 import { useDelayedFlag } from "../../lib/useDelayedFlag";
 import { HighlightedPre, MediaView } from "./FilePreview";
 import { makePostProcess } from "./markers";
@@ -40,6 +40,11 @@ export function StructuredView({
   showHeader?: boolean;
   onSelectedHistoryNodeChange?: (nodeId: string | undefined) => void;
 }) {
+  // DLL nodes show decompiled C#.
+  const isDll = locator.path.toLowerCase().endsWith(".dll");
+  useEffect(() => {
+    if (isDll) warmLang("csharp");
+  }, [isDll]);
   const tree = useQuery({
     queryKey: [
       "file-structured",

@@ -93,6 +93,23 @@ export function langForMime(mime: string): Lang | null {
 
 /// Render `code` as syntax-highlighted HTML. Returns the HTML string of
 /// a `<pre>` element ready for `dangerouslySetInnerHTML`.
+/// Code exercising a grammar's common rules: the JS engine compiles each rule's regex on its
+/// first match, so a load alone leaves part of the setup to the first real highlight.
+const WARMUP_CODE: Partial<Record<Lang, string>> = {
+  csharp: `using System;
+public class A : B, IC {
+  private static readonly int d = 1; // e
+  public string F { get; set; } = "g";
+  public override void H(int i) { if (i > 0) { return; } }
+}`,
+};
+
+/// Loads and exercises `lang` ahead of the content that needs it; for C# that setup took ~45 ms
+/// of the first highlight (dev build), now spent while that content is still loading.
+export function warmLang(lang: Lang) {
+  void highlight(WARMUP_CODE[lang] ?? "", lang);
+}
+
 export async function highlight(code: string, lang: Lang): Promise<string> {
   const [h] = await Promise.all([getHighlighter(), ensureLang(lang)]);
   return h.codeToHtml(code, { lang, theme: THEME });
