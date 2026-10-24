@@ -583,10 +583,12 @@ function ExtraManifestRow({
         aria-hidden="true"
         className={`${cell} text-right whitespace-nowrap text-slate-500 tabular-nums`}
       >
-        {status?.error ? (
+        {!status ? (
+          <Skeleton />
+        ) : status.error ? (
           <span className="text-slate-600">—</span>
         ) : (
-          <Bytes value={status?.bytes_total ?? 0} />
+          <Bytes value={status.bytes_total} />
         )}
       </Link>
       <Link
