@@ -8,5 +8,8 @@ test("query keys match the backend preload contract", () => {
   expect({
     manifestInfo: queryKeys.manifestInfo(appid, depotId, manifestId, branch),
     manifestFiles: queryKeys.manifestFiles(appid, depotId, manifestId, branch),
+    manifestStatuses: queryKeys.manifestStatuses(appid, [
+      { depot_id: depotId, manifest_id: manifestId, branch },
+    ]),
   }).toEqual(contract);
 });

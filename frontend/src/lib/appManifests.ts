@@ -1,5 +1,5 @@
 // TODO(ai-review): review for style and correctness
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import {
@@ -75,4 +75,26 @@ export function findStatus(
   manifestId: string,
 ): ManifestStatusEntry | undefined {
   return statuses?.find((s) => s.depot_id === depotId && s.manifest_id === manifestId);
+}
+
+/// One manifest's cache status: from the app-wide `batch` when that is cached, otherwise its own
+/// (preloadable) request, which needn't wait for app info, extras and every other manifest.
+export function useManifestStatus(
+  appid: AppId,
+  ref: ManifestRef,
+  batch: ManifestStatusEntry[] | undefined,
+): { data: ManifestStatusEntry | undefined; isPending: boolean; error: Error | null } {
+  const fromBatch = findStatus(batch, ref.depot_id, ref.manifest_id);
+  const refs = [ref];
+  const own = useQuery({
+    queryKey: queryKeys.manifestStatuses(appid, refs),
+    queryFn: () => fetchManifestStatuses(appid, refs),
+    enabled: fromBatch === undefined,
+    placeholderData: keepPreviousData,
+  });
+  return {
+    data: fromBatch ?? own.data?.[0],
+    isPending: fromBatch === undefined && own.isPending,
+    error: own.error,
+  };
 }

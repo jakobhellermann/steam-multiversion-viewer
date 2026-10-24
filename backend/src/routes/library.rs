@@ -495,25 +495,7 @@ pub async fn manifest_statuses(
     let mut out = Vec::new();
     while let Some((depot_id, manifest_id, result)) = fu.next().await {
         let entry = match result {
-            Ok(snap) => {
-                let manifest = snap.manifest();
-                let stats = state
-                    .store_index
-                    .read()
-                    .expect("store_index poisoned")
-                    .manifest_stats(manifest);
-                ManifestStatusEntry {
-                    depot_id,
-                    manifest_id,
-                    error: None,
-                    chunks_total: stats.chunks_total,
-                    chunks_missing: stats.chunks_missing,
-                    bytes_total: stats.bytes_total,
-                    bytes_total_compressed: stats.bytes_total_compressed,
-                    bytes_missing_compressed: stats.bytes_missing_compressed,
-                    creation_time: manifest.creation_time,
-                }
-            }
+            Ok(snap) => manifest_status_of(&state, &snap),
             Err(err) => {
                 tracing::warn!(%depot_id, %manifest_id, %err, "manifest open failed");
                 ManifestStatusEntry {
@@ -533,4 +515,24 @@ pub async fn manifest_statuses(
     }
 
     Ok(Json(out))
+}
+
+pub fn manifest_status_of(state: &AppState, snapshot: &Snapshot) -> ManifestStatusEntry {
+    let manifest = snapshot.manifest();
+    let stats = state
+        .store_index
+        .read()
+        .expect("store_index poisoned")
+        .manifest_stats(manifest);
+    ManifestStatusEntry {
+        depot_id: DepotId(manifest.depot_id),
+        manifest_id: ManifestId(manifest.manifest_id),
+        error: None,
+        chunks_total: stats.chunks_total,
+        chunks_missing: stats.chunks_missing,
+        bytes_total: stats.bytes_total,
+        bytes_total_compressed: stats.bytes_total_compressed,
+        bytes_missing_compressed: stats.bytes_missing_compressed,
+        creation_time: manifest.creation_time,
+    }
 }

@@ -1,4 +1,9 @@
 {
   "manifestInfo": ["manifest-info", 1030300, 1030303, "5954103139200615141", "beta"],
-  "manifestFiles": ["manifest-files", 1030300, 1030303, "5954103139200615141", "beta"]
+  "manifestFiles": ["manifest-files", 1030300, 1030303, "5954103139200615141", "beta"],
+  "manifestStatuses": [
+    "manifest-statuses",
+    1030300,
+    [{ "depot_id": 1030303, "manifest_id": "5954103139200615141", "branch": "beta" }]
+  ]
 }

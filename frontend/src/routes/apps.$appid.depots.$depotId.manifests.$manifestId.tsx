@@ -39,7 +39,7 @@ import {
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { pinScroll } from "../lib/pinScroll";
-import { findStatus, useAppManifestStatuses } from "../lib/appManifests";
+import { useAppManifestStatuses, useManifestStatus } from "../lib/appManifests";
 import { queryKeys } from "../lib/queryKeys";
 
 type Search = {
@@ -159,10 +159,13 @@ function ManifestDetail() {
   const downloadAll = useMutation({
     mutationFn: () => downloadManifest(appid, depotId, manifestId, { branch }),
   });
-  // This manifest's own cache status, pulled out of the batch we already
-  // fetch for the compare menu. Drives the download button so a manifest
-  // that's fully on disk doesn't offer a pointless "Download all".
-  const selfStatus = findStatus(statusQuery.data, depotId, manifestId);
+  // Decides whether "Download all" is offered; the header waits for it so the button never
+  // appears and then vanishes.
+  const selfStatus = useManifestStatus(
+    appid,
+    { depot_id: depotId, manifest_id: manifestId, branch },
+    statusQuery.data,
+  );
 
   return (
     <div className="mx-auto max-w-6xl p-8">
@@ -199,8 +202,13 @@ function ManifestDetail() {
         />
       </nav>
 
-      {info.isPending && <p className="text-slate-400">Loading manifest…</p>}
+      {(info.isPending || selfStatus.isPending) && (
+        <p className="text-slate-400">Loading manifest…</p>
+      )}
       {info.error && <ErrorBox title="Failed to load manifest" error={info.error as Error} />}
+      {selfStatus.error && (
+        <ErrorBox title="Failed to load cache status" error={selfStatus.error} />
+      )}
       {/* While switching to another manifest we keep the previous content
           on screen (see `placeholderData` above) and dim it, rather than
           unmounting to an empty loading state. */}
@@ -208,7 +216,7 @@ function ManifestDetail() {
         aria-busy={info.isPlaceholderData}
         className={`transition-opacity duration-150 ${info.isPlaceholderData ? "opacity-50" : ""}`}
       >
-        {info.data && (
+        {info.data && selfStatus.data && (
           <ManifestHeader
             info={info.data}
             gameInfo={gameInfo.data}
@@ -223,7 +231,7 @@ function ManifestDetail() {
             }}
             downloadPending={downloadAll.isPending}
             downloadError={downloadAll.error as Error | null}
-            cachedStatus={selfStatus}
+            cachedStatus={selfStatus.data}
           />
         )}
 
@@ -273,15 +281,9 @@ function ManifestHeader({
   onDownload: () => void;
   downloadPending: boolean;
   downloadError: Error | null;
-  cachedStatus: ManifestStatusEntry | undefined;
+  cachedStatus: ManifestStatusEntry;
 }) {
-  // Every chunk already on disk → nothing to download. `chunks_total > 0`
-  // guards against the not-yet-loaded / errored status (both report 0).
-  const fullyCached =
-    cachedStatus != null &&
-    cachedStatus.error == null &&
-    cachedStatus.chunks_total > 0 &&
-    cachedStatus.chunks_missing === 0;
+  const fullyCached = cachedStatus.error == null && cachedStatus.chunks_missing === 0;
   return (
     <div>
       <div className="flex items-start gap-4">
@@ -301,7 +303,7 @@ function ManifestHeader({
               onClick={onDownload}
               disabled={downloadPending}
               title={
-                cachedStatus && cachedStatus.error == null && cachedStatus.chunks_total > 0
+                cachedStatus.error == null
                   ? `${cachedStatus.chunks_missing.toLocaleString()} of ${cachedStatus.chunks_total.toLocaleString()} chunks missing (${formatBytes(cachedStatus.bytes_missing_compressed)} compressed).`
                   : undefined
               }

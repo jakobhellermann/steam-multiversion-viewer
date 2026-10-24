@@ -10,7 +10,9 @@ use axum::http::Uri;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::routes::library::{manifest_files_of, manifest_info_of};
+use crate::routes::library::{
+    ManifestRef, manifest_files_of, manifest_info_of, manifest_status_of,
+};
 use crate::state::AppState;
 use crate::steam::{AppId, DepotId, ManifestId};
 
@@ -25,6 +27,7 @@ pub struct Entry {
 mod keys {
     use serde_json::{Value, json};
 
+    use crate::routes::library::ManifestRef;
     use crate::steam::{AppId, DepotId, ManifestId};
 
     pub fn manifest_info(app: AppId, depot: DepotId, manifest: ManifestId, branch: &str) -> Value {
@@ -33,6 +36,10 @@ mod keys {
 
     pub fn manifest_files(app: AppId, depot: DepotId, manifest: ManifestId, branch: &str) -> Value {
         json!(["manifest-files", app, depot, manifest, branch])
+    }
+
+    pub fn manifest_statuses(app: AppId, refs: &[ManifestRef]) -> Value {
+        json!(["manifest-statuses", app, refs])
     }
 }
 
@@ -82,6 +89,11 @@ async fn manifest_page(
         return Ok(Vec::new());
     }
     let snapshot = state.open_manifest(app, depot, manifest, &branch).await?;
+    let self_ref = ManifestRef {
+        depot_id: depot,
+        manifest_id: manifest,
+        branch: branch.clone(),
+    };
     Ok(vec![
         Entry {
             key: keys::manifest_info(app, depot, manifest, &branch),
@@ -90,6 +102,10 @@ async fn manifest_page(
         Entry {
             key: keys::manifest_files(app, depot, manifest, &branch),
             data: serde_json::to_value(manifest_files_of(&snapshot))?,
+        },
+        Entry {
+            key: keys::manifest_statuses(app, &[self_ref]),
+            data: serde_json::to_value([manifest_status_of(state, &snapshot)])?,
         },
     ])
 }
@@ -128,6 +144,7 @@ mod tests {
     use serde_json::Value;
 
     use super::keys;
+    use crate::routes::library::ManifestRef;
     use crate::steam::{AppId, DepotId, ManifestId};
 
     #[test]
@@ -142,9 +159,15 @@ mod tests {
             ManifestId(5954103139200615141),
             "beta",
         );
+        let self_ref = ManifestRef {
+            depot_id: depot,
+            manifest_id: manifest,
+            branch: branch.to_owned(),
+        };
         let actual = serde_json::json!({
             "manifestInfo": keys::manifest_info(app, depot, manifest, branch),
             "manifestFiles": keys::manifest_files(app, depot, manifest, branch),
+            "manifestStatuses": keys::manifest_statuses(app, &[self_ref]),
         });
         assert_eq!(actual, contract);
     }

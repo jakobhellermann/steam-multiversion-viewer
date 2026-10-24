@@ -16,7 +16,7 @@ import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { formatBytes, formatDate } from "../lib/format";
 import { FileMeta } from "./-file/FileMeta";
 import { FilePreview } from "./-file/FilePreview";
-import { findStatus, useAppManifestStatuses } from "../lib/appManifests";
+import { findStatus, useAppManifestStatuses, useManifestStatus } from "../lib/appManifests";
 
 type Search = {
   /// Omitted in URL when the default; readers must apply `?? "public"`.
@@ -82,6 +82,11 @@ function FileViewPage() {
     extras: extraQuery,
     statuses: statusQuery,
   } = useAppManifestStatuses(appid);
+  const selfStatus = useManifestStatus(
+    appid,
+    { depot_id: depotId, manifest_id: manifestId, branch },
+    statusQuery.data,
+  );
 
   const diffTargets = useMemo(
     () => new Set(compare_to ? compare_to.split(",").filter(Boolean) : []),
@@ -181,9 +186,7 @@ function FileViewPage() {
         </Link>
         <span className="text-slate-600">/</span>
         <ManifestSwitcher
-          label={manifestCrumbLabel(
-            findStatus(statusQuery.data, depotId, manifestId)?.creation_time ?? 0,
-          )}
+          label={manifestCrumbLabel(selfStatus.data?.creation_time ?? 0)}
           appid={appid}
           depotId={depotId}
           currentManifestId={manifestId}

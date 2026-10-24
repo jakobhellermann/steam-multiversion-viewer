@@ -2,7 +2,7 @@
 import { Link, createFileRoute, linkOptions, useNavigate } from "@tanstack/react-router";
 
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
-import { findStatus, useAppManifestStatuses } from "../lib/appManifests";
+import { useAppManifestStatuses, useManifestStatus } from "../lib/appManifests";
 import { formatDate } from "../lib/format";
 import { useDepotManifests } from "../lib/useDepotManifests";
 import { HistoryView } from "./-file/HistoryView";
@@ -47,7 +47,11 @@ function FileHistoryPage() {
   // can contain, which the table's dates come from.
   const { statuses: statusQuery } = useAppManifestStatuses(appid);
 
-  const currentCreation = findStatus(statusQuery.data, depotId, manifestId)?.creation_time;
+  const currentCreation = useManifestStatus(
+    appid,
+    { depot_id: depotId, manifest_id: manifestId, branch },
+    statusQuery.data,
+  ).data?.creation_time;
 
   return (
     // Scrolls with the page like the other list pages (app overview,

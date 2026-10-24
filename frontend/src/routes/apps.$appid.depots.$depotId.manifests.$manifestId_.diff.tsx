@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchFileViewOptional,
   fetchGameInfo,
-  fetchManifestStatuses,
   fileRawUrl,
   type FileView,
   type GameInfo,
@@ -19,8 +18,7 @@ import { FilePreview } from "./-file/FilePreview";
 import { StructuredDiffView } from "./-file/StructuredDiffView";
 import { projectRefToSide, qualifyRefForSide } from "./-file/pptrRef";
 import type { FileLocator } from "./-file/types";
-import { findStatus, useAppManifestStatuses } from "../lib/appManifests";
-import { queryKeys } from "../lib/queryKeys";
+import { useAppManifestStatuses, useManifestStatus } from "../lib/appManifests";
 
 type Search = {
   /// Branch of the base manifest. Omitted in URL when `"public"`.
@@ -76,10 +74,8 @@ function DiffPage() {
     manifest_id: targetManifestId,
     branch: targetBranch,
   };
-  const statusQuery = useQuery({
-    queryKey: queryKeys.manifestStatuses(appid, [baseRef, targetRef]),
-    queryFn: () => fetchManifestStatuses(appid, [baseRef, targetRef]),
-  });
+  const baseStatus = useManifestStatus(appid, baseRef, switcherStatusQuery.data);
+  const targetStatus = useManifestStatus(appid, targetRef, switcherStatusQuery.data);
   // Confirm the file exists on both sides up front — saves the diff
   // endpoint a roundtrip for a missing path and lets us surface a
   // user-friendly error instead of a backend 404.
@@ -95,9 +91,8 @@ function DiffPage() {
     enabled: path.length > 0,
   });
 
-  const baseCreation = findStatus(statusQuery.data, depotId, manifestId)?.creation_time ?? 0;
-  const targetCreation =
-    findStatus(statusQuery.data, targetDepotId, targetManifestId)?.creation_time ?? 0;
+  const baseCreation = baseStatus.data?.creation_time ?? 0;
+  const targetCreation = targetStatus.data?.creation_time ?? 0;
 
   // Force the newer manifest to the `base`/`+` side so "added" means "in the newer
   // version" regardless of URL order (the backend is viewed-centric: added = only-in-base).
