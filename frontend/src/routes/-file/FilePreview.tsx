@@ -178,6 +178,11 @@ function TransformedPreview({ locator }: { locator: FileLocator }) {
 /// Shiki-rendered code block. Memoised so a rerender of the parent
 /// route (e.g. when the URL `compare_to` set changes) doesn't force
 /// React to diff a multi-megabyte `dangerouslySetInnerHTML` blob.
+/// Line height of `text-xs` (1rem).
+const LINE_HEIGHT_PX = 16;
+/// Lines per independently laid-out block of a large plain-text view.
+const CHUNK_LINES = 200;
+
 export const HighlightedPre = memo(function HighlightedPre({
   code,
   lang,
@@ -216,10 +221,20 @@ export const HighlightedPre = memo(function HighlightedPre({
   // for off-screen chunks. Pair with `contain-intrinsic-size` so the
   // scrollbar thumb is stable when chunks haven't been measured yet —
   // 16px/line is a fine guess for the text-xs font.
-  const lineCount = useMemo(() => code.split("\n").length, [code]);
+  const lines = useMemo(() => code.split("\n"), [code]);
+  const lineCount = lines.length;
+  const chunks = useMemo(() => {
+    if (lines.length <= CHUNK_LINES * 2) return null;
+    const out: { text: string; lines: number }[] = [];
+    for (let i = 0; i < lines.length; i += CHUNK_LINES) {
+      const block = lines.slice(i, i + CHUNK_LINES);
+      out.push({ text: block.join("\n"), lines: block.length });
+    }
+    return out;
+  }, [lines]);
   const cvStyle = {
     contentVisibility: "auto",
-    containIntrinsicSize: `1px ${lineCount * 16}px`,
+    containIntrinsicSize: `1px ${lineCount * LINE_HEIGHT_PX}px`,
   } as React.CSSProperties;
   // Shiki emits its own <pre> with the theme background; wrap so our
   // own padding/border/scroll behavior stays consistent.
@@ -235,6 +250,28 @@ export const HighlightedPre = memo(function HighlightedPre({
   const chrome = bare
     ? "font-mono text-xs whitespace-pre"
     : "overflow-x-auto rounded border border-slate-800 surface-well p-3 font-mono text-xs whitespace-pre";
+  if (chunks) {
+    // `content-visibility` only skips elements entirely off-screen, so a single huge <pre> is
+    // laid out whole (~1 s for a 240k-line dump); blocks let the browser skip all but the
+    // visible ones. Markers sit inside JSON strings, which hold no raw newline, so they never
+    // straddle a block.
+    return (
+      <pre className={chrome}>
+        {chunks.map((chunk, i) => (
+          <div
+            key={i}
+            style={{
+              contentVisibility: "auto",
+              containIntrinsicSize: `auto 1px auto ${chunk.lines * LINE_HEIGHT_PX}px`,
+            }}
+            {...(postProcess
+              ? { dangerouslySetInnerHTML: { __html: postProcess(escHTML(chunk.text)) } }
+              : { children: chunk.text })}
+          />
+        ))}
+      </pre>
+    );
+  }
   // Pre-shiki / too-big-for-shiki fallback. Escape first, then run
   // `postProcess` on the escaped text so `__MARK__…` sentinels are
   // already swapped for their HTML on the very first paint — without
