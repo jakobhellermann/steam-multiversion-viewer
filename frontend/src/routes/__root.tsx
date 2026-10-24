@@ -8,7 +8,7 @@ import {
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 import { DownloadsDrawer } from "../components/DownloadsDrawer";
 import { MountToggle } from "../components/MountToggle";
@@ -38,7 +38,8 @@ function RootComponent() {
   // without hardcoding a pixel guess. Updates whenever the header
   // itself changes size (e.g. on narrow widths).
   const headerRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
+  // Layout effect: set before the first paint, so it never shows with the consumers' fallback.
+  useLayoutEffect(() => {
     const el = headerRef.current;
     if (!el) return;
     const update = () => {
