@@ -5,6 +5,7 @@
 pub mod config;
 pub mod history;
 pub mod http;
+pub mod preload;
 pub mod routes;
 pub mod state;
 pub mod static_files;

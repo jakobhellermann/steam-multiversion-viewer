@@ -21,7 +21,7 @@ use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 
 use steam_multiversion_viewer::state::AppState;
-use steam_multiversion_viewer::{routes, static_files, steam, window};
+use steam_multiversion_viewer::{preload, routes, static_files, steam, window};
 
 #[derive(OpenApi)]
 #[openapi(info(
@@ -145,6 +145,7 @@ async fn start_server() -> Result<(SocketAddr, JoinHandle<Result<()>>, AppState)
             }),
         )
         .route("/api/events", get(routes::events::events))
+        .route("/api/preload", get(preload::preload))
         .route("/api/docs", get(scalar_html))
         .route(
             "/api/third-party-notices",

@@ -8,6 +8,7 @@ import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { formatDate } from "../lib/format";
 import { useDepotManifests } from "../lib/useDepotManifests";
 import { HistoryView } from "./-file/HistoryView";
+import { queryKeys } from "../lib/queryKeys";
 
 type Search = {
   branch?: string;
@@ -76,7 +77,7 @@ function FileHistoryPage() {
     return refs;
   }, [appInfo.data, extras.data]);
   const statusQuery = useQuery({
-    queryKey: ["manifest-statuses", appid, compareRefs],
+    queryKey: queryKeys.manifestStatuses(appid, compareRefs),
     queryFn: () => fetchManifestStatuses(appid, compareRefs),
     enabled: compareRefs.length > 0 && extras.isSuccess,
   });

@@ -17,9 +17,13 @@
 //! the backend on 6556. The embed only matters for release builds.
 
 use axum::body::Body;
+use axum::extract::State;
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
+
+use crate::preload;
+use crate::state::AppState;
 
 #[derive(RustEmbed)]
 #[folder = "../frontend/dist"]
@@ -43,18 +47,43 @@ pub async fn third_party_notices() -> Response {
 /// up in [`FrontendAssets`], serves it with a matching `Content-Type`.
 /// On miss falls back to `index.html` so single-page-app routes work
 /// even on a hard reload.
-pub async fn serve(uri: Uri) -> Response {
+pub async fn serve(State(state): State<AppState>, uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
-    let candidate = if path.is_empty() { "index.html" } else { path };
-    if let Some(res) = lookup(candidate) {
+    if !path.is_empty()
+        && path != "index.html"
+        && let Some(res) = lookup(path)
+    {
         return res;
     }
     // SPA fallback: any unknown path under the catch-all returns
     // `index.html` with a 200 so the tanstack router can resolve it
     // client-side. The router itself decides what to show, including
     // its own 404.
-    lookup("index.html")
-        .unwrap_or_else(|| (StatusCode::NOT_FOUND, "index.html missing from embed").into_response())
+    let Some(index) = FrontendAssets::get("index.html") else {
+        return (StatusCode::NOT_FOUND, "index.html missing from embed").into_response();
+    };
+    let html = String::from_utf8_lossy(&index.data);
+    let html = match preload::entries(&state, &uri).await {
+        Ok(entries) if entries.is_empty() => html.into_owned(),
+        Ok(entries) => html.replacen(
+            "</head>",
+            &format!("{}</head>", preload::script_tag(&entries)),
+            1,
+        ),
+        // The page still works without it: the frontend fetches and reports the same error.
+        Err(err) => {
+            tracing::error!(%uri, %err, "preload failed");
+            html.into_owned()
+        }
+    };
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        html,
+    )
+        .into_response()
 }
 
 fn lookup(path: &str) -> Option<Response> {

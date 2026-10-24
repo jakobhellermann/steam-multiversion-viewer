@@ -42,6 +42,7 @@ import {
 import { ManifestSwitcher } from "../components/ManifestSwitcher";
 import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { pinScroll } from "../lib/pinScroll";
+import { queryKeys } from "../lib/queryKeys";
 
 type Search = {
   /// `undefined` means "default" (which is `public`). Keeping default
@@ -112,7 +113,7 @@ function ManifestDetail() {
   // state. Paired with `prefetchManifest` below (hover warms the target),
   // the switch is usually instant.
   const info = useQuery({
-    queryKey: ["manifest-info", appid, depotId, manifestId, branch],
+    queryKey: queryKeys.manifestInfo(appid, depotId, manifestId, branch),
     queryFn: () => fetchManifestInfo(appid, depotId, manifestId, branch),
     placeholderData: keepPreviousData,
   });
@@ -126,7 +127,7 @@ function ManifestDetail() {
     placeholderData: keepPreviousData,
   });
   const files = useQuery({
-    queryKey: ["manifest-files", appid, depotId, manifestId, branch],
+    queryKey: queryKeys.manifestFiles(appid, depotId, manifestId, branch),
     queryFn: () => fetchManifestFiles(appid, depotId, manifestId, branch),
     placeholderData: keepPreviousData,
   });
@@ -135,11 +136,11 @@ function ManifestDetail() {
   const prefetchManifest = useCallback(
     (targetManifestId: string, targetBranch: string) => {
       queryClient.prefetchQuery({
-        queryKey: ["manifest-info", appid, depotId, targetManifestId, targetBranch],
+        queryKey: queryKeys.manifestInfo(appid, depotId, targetManifestId, targetBranch),
         queryFn: () => fetchManifestInfo(appid, depotId, targetManifestId, targetBranch),
       });
       queryClient.prefetchQuery({
-        queryKey: ["manifest-files", appid, depotId, targetManifestId, targetBranch],
+        queryKey: queryKeys.manifestFiles(appid, depotId, targetManifestId, targetBranch),
         queryFn: () => fetchManifestFiles(appid, depotId, targetManifestId, targetBranch),
       });
       queryClient.prefetchQuery({
@@ -187,7 +188,7 @@ function ManifestDetail() {
     return refs;
   }, [appInfoQuery.data, extraQuery.data]);
   const statusQuery = useQuery({
-    queryKey: ["manifest-statuses", appid, compareRefs],
+    queryKey: queryKeys.manifestStatuses(appid, compareRefs),
     queryFn: () => fetchManifestStatuses(appid, compareRefs),
     // Wait until both inputs to `compareRefs` have settled — see the
     // file-page route for the same rationale.

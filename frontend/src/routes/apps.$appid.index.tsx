@@ -19,6 +19,7 @@ import { ErrorBox } from "../components/ErrorBox";
 import { parseSteamDbPaste, steamDbSignInGated, type ParsedExtra } from "../lib/parseSteamDbPaste";
 import { pinScroll } from "../lib/pinScroll";
 import { useBranchFilter } from "../lib/useBranchFilter";
+import { queryKeys } from "../lib/queryKeys";
 
 export const Route = createFileRoute("/apps/$appid/")({ component: AppDetail });
 
@@ -62,7 +63,7 @@ function AppDetail() {
     return refs;
   }, [query.data, extraQuery.data]);
   const statusQuery = useQuery({
-    queryKey: ["manifest-statuses", appid, manifestRefs],
+    queryKey: queryKeys.manifestStatuses(appid, manifestRefs),
     queryFn: () => fetchManifestStatuses(appid, manifestRefs),
     // Don't fire on the half-populated ref list before extras land.
     enabled: manifestRefs.length > 0 && extraQuery.isSuccess,

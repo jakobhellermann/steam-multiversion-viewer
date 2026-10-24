@@ -18,7 +18,7 @@ use tokio::sync::Semaphore;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::http::{CacheSeconds, ImmutableCache};
-use crate::state::AppState;
+use crate::state::{AppState, Snapshot};
 use crate::steam::{AppId, DepotId, ManifestId};
 
 use super::{Result, default_branch};
@@ -344,21 +344,21 @@ pub async fn manifest_info(
     let snapshot = state
         .open_manifest(appid, depot_id, manifest_id, &q.branch)
         .await?;
-    let m = snapshot.manifest();
+    Ok((ImmutableCache, Json(manifest_info_of(&snapshot))))
+}
 
-    Ok((
-        ImmutableCache,
-        Json(ManifestInfo {
-            depot_id: DepotId(m.depot_id),
-            manifest_id: ManifestId(m.manifest_id),
-            creation_time: m.creation_time,
-            size_uncompressed: m.size_uncompressed,
-            size_compressed: m.size_compressed,
-            // Directories are implicit in file paths, so don't count
-            // them — keeps the value consistent with the listing route.
-            file_count: m.files.iter().filter(|f| !f.is_dir()).count(),
-        }),
-    ))
+pub fn manifest_info_of(snapshot: &Snapshot) -> ManifestInfo {
+    let m = snapshot.manifest();
+    ManifestInfo {
+        depot_id: DepotId(m.depot_id),
+        manifest_id: ManifestId(m.manifest_id),
+        creation_time: m.creation_time,
+        size_uncompressed: m.size_uncompressed,
+        size_compressed: m.size_compressed,
+        // Directories are implicit in file paths, so don't count
+        // them — keeps the value consistent with the listing route.
+        file_count: m.files.iter().filter(|f| !f.is_dir()).count(),
+    }
 }
 
 /// Manifest file list
@@ -379,8 +379,11 @@ pub async fn manifest_files(
     let snapshot = state
         .open_manifest(appid, depot_id, manifest_id, &q.branch)
         .await?;
-    let m = snapshot.manifest();
+    Ok((ImmutableCache, Json(manifest_files_of(&snapshot))))
+}
 
+pub fn manifest_files_of(snapshot: &Snapshot) -> ManifestFiles {
+    let m = snapshot.manifest();
     // Directories are implicit in file paths — skipping them keeps the
     // listing scannable.
     let files = m
@@ -396,14 +399,11 @@ pub async fn manifest_files(
         })
         .collect();
 
-    Ok((
-        ImmutableCache,
-        Json(ManifestFiles {
-            depot_id: DepotId(m.depot_id),
-            manifest_id: ManifestId(m.manifest_id),
-            files,
-        }),
-    ))
+    ManifestFiles {
+        depot_id: DepotId(m.depot_id),
+        manifest_id: ManifestId(m.manifest_id),
+        files,
+    }
 }
 
 #[derive(Deserialize, ToSchema)]

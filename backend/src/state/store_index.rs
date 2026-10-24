@@ -63,6 +63,11 @@ impl StoreIndex {
             .insert((app_id, DepotId(m.depot_id), ManifestId(m.manifest_id)))
     }
 
+    pub fn has_manifest(&self, app_id: AppId, depot_id: DepotId, manifest_id: ManifestId) -> bool {
+        self.indexed_manifests
+            .contains(&(app_id, depot_id, manifest_id))
+    }
+
     /// Iterate every indexed `(app, depot, manifest)` triple.
     pub fn indexed(&self) -> impl Iterator<Item = (AppId, DepotId, ManifestId)> + '_ {
         self.indexed_manifests.iter().copied()

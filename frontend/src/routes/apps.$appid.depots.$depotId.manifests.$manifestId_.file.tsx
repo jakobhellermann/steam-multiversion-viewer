@@ -20,6 +20,7 @@ import { markShowImmediately } from "../lib/downloadsUiSignal";
 import { formatBytes, formatDate } from "../lib/format";
 import { FileMeta } from "./-file/FileMeta";
 import { FilePreview } from "./-file/FilePreview";
+import { queryKeys } from "../lib/queryKeys";
 
 type Search = {
   /// Omitted in URL when the default; readers must apply `?? "public"`.
@@ -173,7 +174,7 @@ function FileViewPage() {
     return refs;
   }, [appInfoQuery.data, extraQuery.data]);
   const statusQuery = useQuery({
-    queryKey: ["manifest-statuses", appid, compareRefs],
+    queryKey: queryKeys.manifestStatuses(appid, compareRefs),
     queryFn: () => fetchManifestStatuses(appid, compareRefs),
     // Wait until both inputs to `compareRefs` have settled — firing
     // first on just `appInfo` and again once `extras` lands fragments

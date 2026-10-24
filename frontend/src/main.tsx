@@ -2,11 +2,13 @@ import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fetchLibrary } from "./api";
+import { applyPreload } from "./lib/preload";
 import { createQueryClient } from "./queryClient";
 import { routeTree } from "./routeTree.gen";
 import { parseSearch, stringifySearch } from "./searchParams";
 
 const queryClient = createQueryClient();
+applyPreload(queryClient);
 
 // Always have the library warm so navigating back is instant.
 queryClient.prefetchQuery({ queryKey: ["library"], queryFn: fetchLibrary });

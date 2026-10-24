@@ -22,6 +22,7 @@ import { FilePreview } from "./-file/FilePreview";
 import { StructuredDiffView } from "./-file/StructuredDiffView";
 import { projectRefToSide, qualifyRefForSide } from "./-file/pptrRef";
 import type { FileLocator } from "./-file/types";
+import { queryKeys } from "../lib/queryKeys";
 
 type Search = {
   /// Branch of the base manifest. Omitted in URL when `"public"`.
@@ -80,7 +81,7 @@ function DiffPage() {
     branch: targetBranch,
   };
   const statusQuery = useQuery({
-    queryKey: ["manifest-statuses", appid, [baseRef, targetRef]],
+    queryKey: queryKeys.manifestStatuses(appid, [baseRef, targetRef]),
     queryFn: () => fetchManifestStatuses(appid, [baseRef, targetRef]),
   });
   // Full status query for the manifest switcher — shared cache key with
@@ -110,7 +111,7 @@ function DiffPage() {
     return refs;
   }, [appInfoQuery.data, extraQuery.data]);
   const switcherStatusQuery = useQuery({
-    queryKey: ["manifest-statuses", appid, compareRefs],
+    queryKey: queryKeys.manifestStatuses(appid, compareRefs),
     queryFn: () => fetchManifestStatuses(appid, compareRefs),
     enabled: compareRefs.length > 0 && extraQuery.isSuccess,
   });
