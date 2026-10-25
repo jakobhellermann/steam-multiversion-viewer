@@ -271,7 +271,7 @@ fn type_artifact_name(type_name: &str) -> String {
 /// `ilspycmd` instead of failing cleanly. Container-level check only
 /// (no metadata resolution), so a managed PE with corrupt metadata
 /// still gets a shot at `ilspycmd`.
-fn is_managed_pe(bytes: &[u8]) -> bool {
+pub fn is_managed_pe(bytes: &[u8]) -> bool {
     dll_diff::dotnetdll::dll::DLL::parse(bytes).is_ok()
 }
 

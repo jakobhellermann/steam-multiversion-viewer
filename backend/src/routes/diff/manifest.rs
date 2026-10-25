@@ -403,9 +403,9 @@ pub struct DeepDiffProgress {
 
 /// Deep manifest diff
 ///
-/// Like [`manifest_diff`], but a changed Unity file only counts when its structured diff is non-empty (normalization noise like PPtr renumbering and HingeJoint2D m_ConnectedAnchor float noise is dropped); DLLs stay fingerprint-level since decompiling is expensive.
+/// Like [`manifest_diff`], but a changed deep-comparable file only counts when its structured diff is non-empty (normalization noise like PPtr renumbering and HingeJoint2D m_ConnectedAnchor float noise is dropped); managed DLLs compare through `dotnetdll` type signatures, so a byte change that leaves the managed content identical drops out.
 /// `Added`/`Removed` rows pass through as-is — no base-side content to structural-diff.
-/// Downloads both sides of every Unity candidate, so this is far pricier than `manifest_diff`.
+/// Downloads both sides of every deep-comparable candidate, so this is far pricier than `manifest_diff`.
 /// Served `immutable` because the response is a pure function of the two manifests — unless any per-file diff errored during the sweep (errors keep the file as `changed`, and caching that approximation would freeze it).
 #[utoipa::path(
     get,
@@ -457,7 +457,7 @@ pub async fn manifest_diff_deep(
 
     // Private env pair for the sweep, evicted at checkpoints; the shared per-manifest cache never evicts.
     #[cfg(feature = "unity")]
-    let mut unity_envs = if changed_candidates.iter().any(|p| is_deep_comparable(p)) {
+    let mut unity_envs = if changed_candidates.iter().any(|p| needs_unity_env(p)) {
         Some(super::structured::build_unity_env_pair(
             Arc::new(base_snap),
             Arc::new(target_snap),
@@ -502,7 +502,6 @@ pub async fn manifest_diff_deep(
     /// `changed`, but taints the response: it is no longer a pure
     /// function of the manifests, so it must not be cached
     /// immutably.
-    #[cfg_attr(not(feature = "unity"), allow(dead_code))]
     enum Verdict {
         Kept(String),
         Dropped,
@@ -514,27 +513,48 @@ pub async fn manifest_diff_deep(
         for path in chunk {
             let path = path.clone();
             let sem = sem.clone();
+            let state = &state;
+            let branch = q.branch.clone();
+            let target_branch = q.target_branch.clone();
+            let (target_depot_id, target_manifest_id) = (q.target_depot_id, q.target_manifest_id);
             #[cfg(feature = "unity")]
-            let unity_ctx = (
-                &state,
-                q.branch.clone(),
-                q.target_branch.clone(),
-                q.target_depot_id,
-                q.target_manifest_id,
-                unity_envs.clone(),
-            );
+            let unity_ctx = (state, unity_envs.clone());
             fu.push(async move {
                 let _permit = sem.acquire().await.expect("semaphore not closed");
                 if !is_deep_comparable(&path) {
                     return Verdict::Kept(path);
                 }
+                if matches!(
+                    transform::tools::transformer_for(&path, None),
+                    Some(transform::Transformer::Dll)
+                ) {
+                    return match super::structured::deep_dll_diff(
+                        state,
+                        appid,
+                        depot_id,
+                        manifest_id,
+                        &branch,
+                        target_depot_id,
+                        target_manifest_id,
+                        &target_branch,
+                        &path,
+                    )
+                    .await
+                    {
+                        Ok(tree) if tree.has_no_changes() => Verdict::Dropped,
+                        Ok(_) => Verdict::Kept(path),
+                        Err(err) => {
+                            tracing::warn!(%path, reason = ?err, "deep diff: dll diff failed; keeping");
+                            Verdict::Errored(path)
+                        }
+                    };
+                }
                 #[cfg(feature = "unity")]
                 {
-                    let (state, branch, target_branch, target_depot_id, target_manifest_id, envs) =
-                        unity_ctx;
+                    let (state, envs) = unity_ctx;
                     let envs = envs
                         .as_ref()
-                        .expect("is_deep_comparable implies unity_envs was built");
+                        .expect("deep-comparable unity formats imply unity_envs was built");
                     return match super::structured::deep_structured_diff(
                         state,
                         appid,
@@ -558,7 +578,7 @@ pub async fn manifest_diff_deep(
                     };
                 }
                 #[cfg(not(feature = "unity"))]
-                unreachable!("is_deep_comparable is always false without the unity feature")
+                unreachable!("DLLs are the only deep-comparable format without the unity feature")
             });
         }
         while let Some(verdict) = fu.next().await {
@@ -664,6 +684,16 @@ pub(crate) fn open_manifests_concurrently<'a>(
 /// Which file types the deep filter structural-diffs — see
 /// [`super::structured::is_deep_comparable`] for the definition.
 pub use super::structured::is_deep_comparable;
+
+/// Deep-comparable paths whose deep check needs the private unity env pair;
+/// DLLs diff via `dotnetdll` and don't.
+#[cfg(feature = "unity")]
+fn needs_unity_env(path: &str) -> bool {
+    transform::tools::transformer_for(path, None).is_some_and(|kind| {
+        crate::routes::formats::capabilities(&kind).deep_comparable
+            && !matches!(kind, transform::Transformer::Dll)
+    })
+}
 
 #[cfg(test)]
 mod tests {

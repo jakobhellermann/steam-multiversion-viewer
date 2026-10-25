@@ -1,10 +1,11 @@
 // TODO(ai-review): review for style and correctness
 //! Per-format facts for the route layer.
 //!
-//! [`FormatCaps::deep_comparable`] must stay in sync with
-//! [`super::diff::structured::deep_structured_diff`]'s dispatch: the
-//! sweep calls it for every deep-comparable path, and the dispatch's
-//! fallthrough panics.
+//! [`FormatCaps::deep_comparable`] must stay in sync with the manifest
+//! deep-diff sweep's dispatch: the sweep structurally diffs every
+//! deep-comparable path (DLLs via `deep_dll_diff`, the rest via
+//! [`super::diff::structured::deep_structured_diff`]), and a fallthrough
+//! there panics.
 
 use transform::Transformer;
 
@@ -44,7 +45,7 @@ pub fn capabilities(kind: &Transformer) -> FormatCaps {
         Transformer::Dll => FormatCaps {
             rich_view: Some(RichView::Structured),
             text_dump: false,
-            deep_comparable: false,
+            deep_comparable: true,
         },
         #[cfg(feature = "unity")]
         Transformer::AddressablesCatalog => FormatCaps {

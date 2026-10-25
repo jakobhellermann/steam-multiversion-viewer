@@ -8,7 +8,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
 use tracing::Instrument as _;
-use transform::structured::StructuredTree;
+use transform::structured::{Node, NodeStatus, StructuredTree};
 
 use crate::http::ApiError;
 #[cfg(feature = "unity")]
@@ -293,6 +293,69 @@ async fn build_dll_diff(
     transform::dll::warm_full_decompile(&store_root, from_sha, from_bytes);
     transform::dll::warm_full_decompile(&store_root, to_sha, to_bytes);
     Ok(tree)
+}
+
+/// Deep-filter check for managed assemblies. Type signatures come from
+/// `dotnetdll` alone — no ilspy entity listing — so a byte-changed DLL whose
+/// managed content is identical (e.g. only the MVID differs) drops out of the
+/// deep filter. A native image has no structured view and stays `changed`.
+/// The sweep only reads `has_no_changes`, so the tree is a single root whose
+/// status carries the verdict.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn deep_dll_diff(
+    state: &AppState,
+    appid: AppId,
+    depot_id: DepotId,
+    manifest_id: ManifestId,
+    branch: &str,
+    target_depot_id: DepotId,
+    target_manifest_id: ManifestId,
+    target_branch: &str,
+    path: &str,
+) -> Result<StructuredTree> {
+    let ((base, base_path), (target, target_path)) = tokio::try_join!(
+        prepare_structured_side(state, appid, depot_id, manifest_id, path, branch),
+        prepare_structured_side(
+            state,
+            appid,
+            target_depot_id,
+            target_manifest_id,
+            path,
+            target_branch,
+        ),
+    )?;
+    let paths = DiffPaths {
+        base: base_path,
+        target: target_path,
+    };
+    let (base_bytes, _) = dll_side_bytes(&base, &paths.base).await?;
+    let (target_bytes, _) = dll_side_bytes(&target, &paths.target).await?;
+
+    let changed = if !transform::dll::is_managed_pe(&base_bytes)
+        || !transform::dll::is_managed_pe(&target_bytes)
+    {
+        true
+    } else {
+        let diff = tokio::task::spawn_blocking(move || dll_diff::diff(&base_bytes, &target_bytes))
+            .await
+            .map_err(|e| ApiError::internal(format!("dll-diff task panicked: {e}")))?
+            .map_err(|e| ApiError::internal(format!("dll-diff failed: {e}")))?;
+        diff.types
+            .iter()
+            .any(|t| t.status != dll_diff::Status::Unchanged)
+    };
+    Ok(StructuredTree {
+        root: Node {
+            id: format!("file:{path}"),
+            label: path.to_string(),
+            status: Some(if changed {
+                NodeStatus::Changed
+            } else {
+                NodeStatus::Unchanged
+            }),
+            ..Node::default()
+        },
+    })
 }
 
 /// Open a manifest, find the file (see [`find_corresponding`]), enqueue and await its chunks;
