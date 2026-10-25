@@ -5,7 +5,7 @@ use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 use tao::window::{Window, WindowBuilder};
-use wry::WebViewBuilder;
+use wry::{NewWindowResponse, WebViewBuilder};
 
 use crate::state::AppState;
 
@@ -95,6 +95,14 @@ fn build_webview(
         .with_back_forward_navigation_gestures(true)
         .with_background_color(PAGE_BACKGROUND);
 
+    // The webview hosts the app; pages outside its origin open in the system browser.
+    let builder = builder
+        .with_navigation_handler(external_navigation(url))
+        .with_new_window_req_handler(|uri, _| {
+            open_external(&uri);
+            NewWindowResponse::Deny
+        });
+
     #[cfg(target_os = "windows")]
     let builder = builder
         .with_transparent(transparent)
@@ -123,6 +131,37 @@ fn build_webview(
     });
 
     webview
+}
+
+/// Allows only navigations within the app's origin; every other page opens in the system browser.
+fn external_navigation(base_url: &str) -> impl Fn(String) -> bool + 'static {
+    let origin = url_origin(base_url).to_string();
+    move |uri| {
+        let same_origin = url_origin(&uri) == origin;
+        if !same_origin {
+            open_external(&uri);
+        }
+        same_origin
+    }
+}
+
+/// `scheme://host:port` of a URL, without path, query, or fragment.
+fn url_origin(url: &str) -> &str {
+    let authority = url.find("://").map_or(0, |i| i + 3);
+    url[authority..]
+        .find('/')
+        .map(|end| &url[..authority + end])
+        .unwrap_or(url)
+}
+
+/// Opens a web page outside the webview; non-http schemes are ignored.
+fn open_external(url: &str) {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return;
+    }
+    if let Err(err) = open::that_detached(url) {
+        tracing::warn!(%err, url, "failed to open external page");
+    }
 }
 
 /// WebView2 defaults its user data folder to the exe's directory, which is
