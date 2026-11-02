@@ -27,6 +27,8 @@
 //   carries no pptr `(type)` suffix.
 // - `color` — `__MARK__color␞#rrggbbaa` (rgba color).
 
+import type { TextLink } from "../../data/api";
+import { type CodeLink, escHTML } from "../../lib/syntax";
 import type { FileLocator } from "./types";
 
 const MARK_PREFIX = "__MARK__";
@@ -143,10 +145,46 @@ function isRemovalLine(lineHtml: string): boolean {
   return REMOVAL_LINE_RE.test(lineHtml);
 }
 
+/// Anchors for the backend's text links: a row of this tree if it lists the
+/// node, else the node's file on the link's diff side, else plain text.
+export function makeCodeLinks(
+  links: TextLink[],
+  locators: { base: FileLocator; target?: FileLocator },
+  isLocalRefInTree: (ref: string) => boolean,
+): CodeLink[] {
+  const hrefs = {
+    base: makeFileHref(locators.base),
+    target: locators.target ? makeFileHref(locators.target) : null,
+  };
+  const linkClass = "cursor-pointer underline decoration-slate-600 hover:decoration-sky-400";
+  return links.flatMap(({ start, end, node_id, file, side }): CodeLink[] => {
+    if (file === null) {
+      const local = [withSide(node_id, side), node_id].find(isLocalRefInTree);
+      if (local) {
+        return [
+          { start, end, attrs: { href: `#${local}`, "data-pptr-ref": local, class: linkClass } },
+        ];
+      }
+      if (!side) return [];
+    }
+    const locator = side === "target" ? locators.target : locators.base;
+    const fileHref = side === "target" ? hrefs.target : hrefs.base;
+    if (!locator || !fileHref) {
+      throw new Error(`text link on the ${side} side without a ${side} locator: ${node_id}`);
+    }
+    const attrs = {
+      href: `${fileHref(file ?? locator.path)}#${node_id}`,
+      "data-pptr-ref": node_id,
+      "data-pptr-file": "1",
+      class: linkClass,
+    };
+    return [{ start, end, attrs }];
+  });
+}
+
 /// Build the `…/file?path=<depotPath>` href (plus the non-public
-/// `&branch=` param) for one locator. Shared by the pptr and classref
-/// renderers — both link to another depot file by path.
-function makeFileHref(locator: FileLocator): (depotPath: string) => string {
+/// `&branch=` param) for one locator.
+export function makeFileHref(locator: FileLocator): (depotPath: string) => string {
   const branchParam =
     locator.branch === "public" ? "" : `&branch=${encodeURIComponent(locator.branch)}`;
   return (depotPath) =>
@@ -291,8 +329,4 @@ function renderShape(payload: string): string {
     .join("");
   const summary = `${polygons.length} ${polygons.length === 1 ? "polygon" : "polygons"}, ${points.length} pts`;
   return `<svg width="${svgW}" height="${svgH}" class="inline-block align-middle rounded-sm border border-slate-700/60 bg-slate-900/40"><title>${summary}</title>${polys}</svg>`;
-}
-
-export function escHTML(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

@@ -5,8 +5,7 @@ import { memo, useMemo } from "react";
 import { fetchTransformedFile, type FileView } from "../../data/api";
 import { formatBytes } from "../../lib/format";
 import { mediaKindForPath } from "../../lib/mediaKind";
-import { highlight, langForMime, langForPath } from "../../lib/syntax";
-import { escHTML } from "./markers";
+import { type CodeLink, highlight, langForMime, langForPath, linkPlain } from "../../lib/syntax";
 import { MediaPlayer } from "./MediaPlayer";
 import { StructuredView } from "./StructuredView";
 import type { FileLocator } from "./types";
@@ -180,6 +179,7 @@ function TransformedPreview({ locator }: { locator: FileLocator }) {
 /// React to diff a multi-megabyte `dangerouslySetInnerHTML` blob.
 /// Line height of `text-xs` (1rem).
 const LINE_HEIGHT_PX = 16;
+const NO_LINKS: CodeLink[] = [];
 /// Lines per independently laid-out block of a large plain-text view.
 const CHUNK_LINES = 200;
 
@@ -188,6 +188,7 @@ export const HighlightedPre = memo(function HighlightedPre({
   lang,
   bare = false,
   postProcess,
+  links = NO_LINKS,
 }: {
   code: string;
   lang: ReturnType<typeof langForPath>;
@@ -199,6 +200,8 @@ export const HighlightedPre = memo(function HighlightedPre({
   /// link markup (PPtr refs, jump targets, etc) without re-running
   /// the (expensive) shiki tokenisation.
   postProcess?: (html: string) => string;
+  /// Anchors over spans of `code`, sorted by start.
+  links?: CodeLink[];
 }) {
   // Shiki's `codeToHtml` is synchronous and tokenises the whole input
   // on the main thread — a 1 MB file freezes the tab for seconds.
@@ -211,8 +214,8 @@ export const HighlightedPre = memo(function HighlightedPre({
     // Cache by the actual code text — a length + 64-char prefix used
     // to collide for inputs that differed only further in (e.g. raw
     // vs PPtr-collapsed JSON), making us serve a stale render.
-    queryKey: ["syntax-highlight", lang, code],
-    queryFn: () => (lang ? highlight(code, lang) : Promise.resolve(null)),
+    queryKey: ["syntax-highlight", lang, code, links],
+    queryFn: () => (lang ? highlight(code, lang, links) : Promise.resolve(null)),
     enabled: lang != null && !tooBigForHighlight,
     staleTime: Infinity,
     gcTime: Infinity,
@@ -225,10 +228,13 @@ export const HighlightedPre = memo(function HighlightedPre({
   const lineCount = lines.length;
   const chunks = useMemo(() => {
     if (lines.length <= CHUNK_LINES * 2) return null;
-    const out: { text: string; lines: number }[] = [];
+    const out: { text: string; lines: number; offset: number }[] = [];
+    let offset = 0;
     for (let i = 0; i < lines.length; i += CHUNK_LINES) {
       const block = lines.slice(i, i + CHUNK_LINES);
-      out.push({ text: block.join("\n"), lines: block.length });
+      const text = block.join("\n");
+      out.push({ text, lines: block.length, offset });
+      offset += text.length + 1;
     }
     return out;
   }, [lines]);
@@ -247,14 +253,22 @@ export const HighlightedPre = memo(function HighlightedPre({
       <div className={chrome} style={cvStyle} dangerouslySetInnerHTML={{ __html: rendered }} />
     );
   }
+  // Pre-shiki / too-big-for-shiki fallback. Escape first, then run
+  // `postProcess` on the escaped text so `__MARK__…` sentinels are already
+  // swapped for their HTML on the very first paint — without this, every
+  // node switch flashes raw markers for the frames it takes shiki to tokenise.
+  const plainHtml = (text: string, offset: number) => {
+    const html = linkPlain(text, links, offset);
+    return postProcess ? postProcess(html) : html;
+  };
   const chrome = bare
     ? "font-mono text-xs whitespace-pre"
     : "overflow-x-auto rounded border border-slate-800 surface-well p-3 font-mono text-xs whitespace-pre";
   if (chunks) {
     // `content-visibility` only skips elements entirely off-screen, so a single huge <pre> is
     // laid out whole (~1 s for a 240k-line dump); blocks let the browser skip all but the
-    // visible ones. Markers sit inside JSON strings, which hold no raw newline, so they never
-    // straddle a block.
+    // visible ones. Markers sit inside JSON strings and links on identifiers, neither holds a
+    // raw newline, so they never straddle a block.
     return (
       <pre className={chrome}>
         {chunks.map((chunk, i) => (
@@ -264,31 +278,17 @@ export const HighlightedPre = memo(function HighlightedPre({
               contentVisibility: "auto",
               containIntrinsicSize: `auto 1px auto ${chunk.lines * LINE_HEIGHT_PX}px`,
             }}
-            {...(postProcess
-              ? { dangerouslySetInnerHTML: { __html: postProcess(escHTML(chunk.text)) } }
-              : { children: chunk.text })}
+            dangerouslySetInnerHTML={{ __html: plainHtml(chunk.text, chunk.offset) }}
           />
         ))}
       </pre>
     );
   }
-  // Pre-shiki / too-big-for-shiki fallback. Escape first, then run
-  // `postProcess` on the escaped text so `__MARK__…` sentinels are
-  // already swapped for their HTML on the very first paint — without
-  // this, every node switch flashes raw markers for the frames it
-  // takes shiki to tokenise.
-  if (postProcess) {
-    return (
-      <pre
-        className={chrome}
-        style={cvStyle}
-        dangerouslySetInnerHTML={{ __html: postProcess(escHTML(code)) }}
-      />
-    );
-  }
   return (
-    <pre className={chrome} style={cvStyle}>
-      {code}
-    </pre>
+    <pre
+      className={chrome}
+      style={cvStyle}
+      dangerouslySetInnerHTML={{ __html: plainHtml(code, 0) }}
+    />
   );
 });

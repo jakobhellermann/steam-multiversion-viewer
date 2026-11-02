@@ -110,7 +110,43 @@ export function warmLang(lang: Lang) {
   void highlight(WARMUP_CODE[lang] ?? "", lang);
 }
 
-export async function highlight(code: string, lang: Lang): Promise<string> {
+/// An `<a>` over `code.slice(start, end)`.
+export type CodeLink = { start: number; end: number; attrs: Record<string, string> };
+
+export async function highlight(code: string, lang: Lang, links: CodeLink[] = []): Promise<string> {
   const [h] = await Promise.all([getHighlighter(), ensureLang(lang)]);
-  return h.codeToHtml(code, { lang, theme: THEME });
+  const decorations = links.map(({ start, end, attrs }) => ({
+    start,
+    end,
+    tagName: "a",
+    properties: attrs,
+    alwaysWrap: true,
+  }));
+  return h.codeToHtml(code, { lang, theme: THEME, decorations });
+}
+
+/// `code` as escaped HTML with `links` as anchors. `offset` is where `code`
+/// starts in the text the link offsets refer to; links outside it are skipped.
+export function linkPlain(code: string, links: CodeLink[], offset = 0): string {
+  let html = "";
+  let pos = 0;
+  for (const { start, end, attrs } of links) {
+    const from = start - offset;
+    const to = end - offset;
+    if (from < pos || to > code.length) continue;
+    const attrHtml = Object.entries(attrs)
+      .map(([k, v]) => ` ${k}="${escAttr(v)}"`)
+      .join("");
+    html += `${escHTML(code.slice(pos, from))}<a${attrHtml}>${escHTML(code.slice(from, to))}</a>`;
+    pos = to;
+  }
+  return html + escHTML(code.slice(pos));
+}
+
+export function escHTML(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escAttr(s: string): string {
+  return escHTML(s).replace(/"/g, "&quot;");
 }

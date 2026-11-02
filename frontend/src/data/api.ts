@@ -445,6 +445,20 @@ export type StructuredTree = {
 export type NodeContent = {
   mime: string;
   text: string;
+  /// Spans of `text` that link to a tree node, in source order.
+  links?: TextLink[];
+};
+
+export type TextLink = {
+  /// Offsets into `text` (UTF-16 code units).
+  start: number;
+  end: number;
+  /// Id of the target node, in `file`'s tree.
+  node_id: string;
+  /// Depot path of the file holding the target, `null` for this file.
+  file: string | null;
+  /// In a diff body: the manifest `file` and `node_id` belong to.
+  side?: "base" | "target";
 };
 
 export type NodeStatus = "unchanged" | "changed" | "added" | "removed";
@@ -523,15 +537,6 @@ export async function fetchStructuredDiff(
   return r.json();
 }
 
-export type StructuredDiffNodeContent = {
-  /// Content-Type of the body, without parameters: `text/x-diff` for a
-  /// two-sided unified diff, otherwise whatever the one available side
-  /// dumped as. Stays a mime rather than a grammar so this module does
-  /// not pull in the highlighter.
-  mime: string;
-  text: string;
-};
-
 /// Fetch the per-node body for a structured diff entry. Backend runs
 /// the JSON dump on each side and the text-diff in one shot. `nodeId`
 /// is the raw tree-row id — the backend parses out which side(s) to
@@ -544,7 +549,7 @@ export async function fetchStructuredDiffNode(
   target: { depot_id: number; manifest_id: string; branch: string },
   path: string,
   nodeId: string,
-): Promise<StructuredDiffNodeContent> {
+): Promise<NodeContent> {
   const qs = new URLSearchParams({
     path,
     branch: baseBranch,
@@ -557,9 +562,7 @@ export async function fetchStructuredDiffNode(
     `/api/apps/${appid}/depots/${baseDepotId}/manifests/${baseManifestId}/file/structured-diff/node?${qs}`,
   );
   if (!r.ok) throw new Error(await extractErrorMessage(r));
-  const ct = (r.headers.get("content-type") ?? "").split(";")[0].trim();
-  const text = await r.text();
-  return { mime: ct, text };
+  return r.json();
 }
 
 /// URL for a structured node's image body (a Texture2D as PNG).

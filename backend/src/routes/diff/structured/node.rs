@@ -3,10 +3,14 @@
 
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::header;
 use axum::response::{IntoResponse as _, Response};
+use bytes::Bytes;
+use camino::Utf8Path;
 use serde::Deserialize;
+use transform::diff::LineIndex;
+use transform::structured::{DiffSide, NodeContent};
 
 use crate::http::ApiError;
 #[cfg(feature = "unity")]
@@ -17,6 +21,7 @@ use crate::steam::{AppId, DepotId, ManifestId};
 use super::dll_side_bytes;
 use crate::routes::Result;
 use crate::routes::diff::{default_branch, diff_label};
+use crate::routes::dll_links::{self, ByteLink};
 
 /// Query string for the per-node structured-diff content endpoint; `node_id` is the raw tree-row id, parsed into per-side dump targets by [`split_diff_id`]'s prefix shape.
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -43,9 +48,8 @@ pub struct StructuredDiffNodeQuery {
     responses(
         (
             status = 200,
-            description = "Unified diff text, or one side's JSON for added/removed nodes",
-            content_type = "text/x-diff",
-            body = String,
+            description = "Unified diff text, or one side's body for added/removed nodes",
+            body = NodeContent,
         ),
         (status = 415, description = "File has no structured representation")
     )
@@ -145,24 +149,16 @@ async fn dll_node_body(
         ),
     )?;
 
-    let base_text = match (base_type, base_side.as_ref()) {
-        (Some(t), Some(side)) => Some(Dumped {
-            mime: MIME_CSHARP,
-            text: transform::dll::decompile_type(&store_root, &side.sha, &side.bytes, t)
-                .await
-                .map_err(ApiError::from_transform)?,
-        }),
-        _ => None,
+    let dump = async |type_name: Option<&str>, side: Option<&DllSide>| match type_name.zip(side) {
+        Some((type_name, side)) => dll_side_dump(&store_root, side, &q.path, type_name)
+            .await
+            .map(Some),
+        None => Ok(None),
     };
-    let target_text = match (target_type, target_side.as_ref()) {
-        (Some(t), Some(side)) => Some(Dumped {
-            mime: MIME_CSHARP,
-            text: transform::dll::decompile_type(&store_root, &side.sha, &side.bytes, t)
-                .await
-                .map_err(ApiError::from_transform)?,
-        }),
-        _ => None,
-    };
+    let (base_text, target_text) = tokio::try_join!(
+        dump(base_type, base_side.as_ref()),
+        dump(target_type, target_side.as_ref())
+    )?;
 
     let creation_time = |side: &Option<DllSide>| side.as_ref().map_or(0, |s| s.creation_time);
     let base_label = diff_label(depot_id, manifest_id, creation_time(&base_side));
@@ -258,10 +254,7 @@ async fn addressables_node_body(
                         transform::unity::addressables::dump_key_json(&bytes, &key)?
                     }
                 };
-                anyhow::Ok(Dumped {
-                    mime: "application/json",
-                    text,
-                })
+                anyhow::Ok(Dumped::plain("application/json", text))
             })
         };
         (
@@ -389,7 +382,7 @@ async fn bundle_node_body(
                                 pid,
                                 opts,
                             )?;
-                        Ok(Dumped { mime, text })
+                        Ok(Dumped::plain(mime, text))
                     },
                 )
             };
@@ -507,7 +500,7 @@ async fn unity_serialized_node_body(
                             transform::unity::serializedfile::dump_value::dump_object_json(
                                 &unity.env, &data_dir, &path, pid, opts,
                             )?;
-                        Ok(Dumped { mime, text })
+                        Ok(Dumped::plain(mime, text))
                     })
             };
         (
@@ -541,46 +534,115 @@ async fn unity_serialized_node_body(
 /// MIME type of a decompiled C# body.
 const MIME_CSHARP: &str = "text/x-csharp";
 
-/// One side of a Dll node: assembly bytes, the sha the decompile cache is keyed on, and the manifest's creation time.
+/// One side of a Dll node: its manifest, assembly bytes, the sha the decompile cache is keyed on, and the manifest's creation time.
 struct DllSide {
-    bytes: Vec<u8>,
+    snap: Arc<Snapshot>,
+    bytes: Bytes,
     sha: [u8; 20],
     creation_time: u32,
 }
 
+/// Decompile `type_name` on one side, linking the types it names within that side's manifest.
+async fn dll_side_dump(
+    store_root: &Utf8Path,
+    side: &DllSide,
+    path: &str,
+    type_name: &str,
+) -> Result<Dumped> {
+    let decompile = async {
+        transform::dll::decompile_type(store_root, &side.sha, &side.bytes, type_name)
+            .await
+            .map_err(ApiError::from_transform)
+    };
+    let (text, targets) = tokio::try_join!(
+        decompile,
+        dll_links::link_targets(&side.snap, path, side.bytes.clone(), type_name)
+    )?;
+    let (text, links) = dll_links::link_type_names(text, targets, type_name).await?;
+    Ok(Dumped {
+        mime: MIME_CSHARP,
+        text,
+        links,
+    })
+}
+
 /// One side's rendered body plus its MIME; the MIME must reach the response or a one-sided node gets mislabelled.
-#[derive(Debug, PartialEq)]
 struct Dumped {
     mime: &'static str,
     text: String,
+    /// Byte ranges of `text`.
+    links: Vec<ByteLink>,
 }
 
-/// Build the per-node body: a unified diff when both sides are present, the lone side verbatim otherwise, paired with its content type; `None` if neither resolved.
+impl Dumped {
+    fn plain(mime: &'static str, text: String) -> Self {
+        Dumped {
+            mime,
+            text,
+            links: Vec::new(),
+        }
+    }
+}
+
+/// Build the per-node body: a unified diff when both sides are present, the lone side verbatim otherwise; `None` if neither resolved.
 fn node_body_response(
     base: Option<Dumped>,
     target: Option<Dumped>,
     base_label: &str,
     target_label: &str,
 ) -> Option<Response> {
-    let (content_type, text) = node_body(base, target, base_label, target_label)?;
-    Some(([(header::CONTENT_TYPE, content_type)], text).into_response())
+    let content = node_body(base, target, base_label, target_label)?;
+    Some(Json(content).into_response())
 }
 
+/// Each side's links follow its lines into the diff; a context line keeps the base side's.
 fn node_body(
     base: Option<Dumped>,
     target: Option<Dumped>,
     base_label: &str,
     target_label: &str,
-) -> Option<(String, String)> {
-    let (mime, text) = match (base, target) {
-        (Some(b), Some(t)) => (
-            "text/x-diff",
-            transform::diff::unified_diff_text(&b.text, &t.text, base_label, target_label),
-        ),
-        (Some(one), None) | (None, Some(one)) => (one.mime, one.text),
+) -> Option<NodeContent> {
+    let on_side = |l: ByteLink, side| ByteLink {
+        side: Some(side),
+        ..l
+    };
+    let (mime, text, links) = match (base, target) {
+        (Some(b), Some(t)) => {
+            let diff = transform::diff::unified_diff(&b.text, &t.text, base_label, target_label);
+            let mut links = Vec::new();
+            for (side, dumped) in [(DiffSide::Base, b), (DiffSide::Target, t)] {
+                let lines = LineIndex::new(&dumped.text);
+                links.extend(dumped.links.into_iter().filter_map(|l| {
+                    let range = diff.map_range(side, &lines, l.range.clone())?;
+                    Some(on_side(ByteLink { range, ..l }, side))
+                }));
+            }
+            links.sort_by_key(|l| l.range.start);
+            ("text/x-diff", diff.text, links)
+        }
+        (Some(b), None) => {
+            let links = b
+                .links
+                .into_iter()
+                .map(|l| on_side(l, DiffSide::Base))
+                .collect();
+            (b.mime, b.text, links)
+        }
+        (None, Some(t)) => {
+            let links = t
+                .links
+                .into_iter()
+                .map(|l| on_side(l, DiffSide::Target))
+                .collect();
+            (t.mime, t.text, links)
+        }
         (None, None) => return None,
     };
-    Some((format!("{mime}; charset=utf-8"), text))
+    Some(NodeContent {
+        mime: mime.to_string(),
+        links: dll_links::to_text_links(&text, links),
+        text,
+    })
 }
 
 /// Resolve a bundle diff-tree node id to per-side `(archive_entry, obj_pid)` tuples: strips the outer `archive:<entry>/` prefix, then [`split_diff_id`]s and parses the object path-id on each side.
@@ -639,7 +701,8 @@ async fn open_dll_side(
     let creation_time = snap.manifest().creation_time;
     let (bytes, sha) = dll_side_bytes(&snap, path).await?;
     Ok(Some(DllSide {
-        bytes,
+        snap,
+        bytes: Bytes::from(bytes),
         sha,
         creation_time,
     }))
@@ -674,38 +737,84 @@ use crate::routes::unity::scratch_side as unity_side_with_scratch;
 mod tests {
     use super::*;
 
+    fn link(range: std::ops::Range<usize>, node_id: &str) -> ByteLink {
+        ByteLink {
+            range,
+            node_id: node_id.to_string(),
+            file: None,
+            side: None,
+        }
+    }
+
     #[test]
     fn node_body_keeps_the_one_sided_mime() {
-        let one = Dumped {
-            mime: "text/x-playmaker-fsm",
-            text: "state Idle\n".to_string(),
-        };
+        let one = Dumped::plain("text/x-playmaker-fsm", "state Idle\n".to_string());
         assert_eq!(
             node_body(Some(one), None, "base", "target"),
-            Some((
-                "text/x-playmaker-fsm; charset=utf-8".to_string(),
-                "state Idle\n".to_string()
-            ))
+            Some(NodeContent {
+                mime: "text/x-playmaker-fsm".to_string(),
+                text: "state Idle\n".to_string(),
+                links: Vec::new(),
+            })
         );
     }
 
     #[test]
     fn node_body_diffs_both_sides() {
-        let base = Dumped {
-            mime: "application/json",
-            text: "a\n".to_string(),
-        };
-        let target = Dumped {
-            mime: "application/json",
-            text: "b\n".to_string(),
-        };
+        let base = Dumped::plain("application/json", "a\n".to_string());
+        let target = Dumped::plain("application/json", "b\n".to_string());
         assert_eq!(
             node_body(Some(base), Some(target), "base", "target"),
-            Some((
-                "text/x-diff; charset=utf-8".to_string(),
-                "--- target\n+++ base\n@@ -1 +1 @@\n-b\n+a\n".to_string()
-            ))
+            Some(NodeContent {
+                mime: "text/x-diff".to_string(),
+                text: "--- target\n+++ base\n@@ -1 +1 @@\n-b\n+a\n".to_string(),
+                links: Vec::new(),
+            })
         );
+    }
+
+    #[test]
+    fn node_body_moves_each_sides_links_onto_its_diff_lines() {
+        let base = Dumped {
+            mime: MIME_CSHARP,
+            text: "Foo x;\nBaz y;\n".to_string(),
+            links: vec![link(0..3, "type:Foo"), link(7..10, "type:Baz")],
+        };
+        let target = Dumped {
+            mime: MIME_CSHARP,
+            text: "Foo x;\nBar y;\n".to_string(),
+            links: vec![link(0..3, "type:Foo"), link(7..10, "type:Bar")],
+        };
+        let content = node_body(Some(base), Some(target), "b", "t").unwrap();
+        assert_eq!(
+            content.text,
+            "--- t\n+++ b\n@@ -1,2 +1,2 @@\n Foo x;\n-Bar y;\n+Baz y;\n"
+        );
+        let links: Vec<_> = content
+            .links
+            .iter()
+            .map(|l| (&content.text[l.start..l.end], l.node_id.as_str(), l.side))
+            .collect();
+        assert_eq!(
+            links,
+            vec![
+                ("Foo", "type:Foo", Some(DiffSide::Base)),
+                ("Bar", "type:Bar", Some(DiffSide::Target)),
+                ("Baz", "type:Baz", Some(DiffSide::Base)),
+            ]
+        );
+    }
+
+    #[test]
+    fn node_body_tags_a_lone_sides_links_with_its_side() {
+        let target = Dumped {
+            mime: MIME_CSHARP,
+            text: "Bar y;\n".to_string(),
+            links: vec![link(0..3, "type:Bar")],
+        };
+        let content = node_body(None, Some(target), "b", "t").unwrap();
+        let sides: Vec<_> = content.links.iter().map(|l| l.side).collect();
+        assert_eq!(sides, vec![Some(DiffSide::Target)]);
     }
 
     #[test]

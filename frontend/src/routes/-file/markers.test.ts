@@ -1,7 +1,7 @@
 // TODO(ai-review): review for style and correctness
 import { describe, expect, test } from "vitest";
 
-import { makeDiffPostProcess, makePostProcess } from "./markers";
+import { makeCodeLinks, makeDiffPostProcess, makePostProcess } from "./markers";
 import type { FileLocator } from "./types";
 
 const BASE_MANIFEST = "708613018541602983";
@@ -135,5 +135,48 @@ describe("makePostProcess shape", () => {
     const out = makePostProcess(base, () => true)(html);
     expect(out).not.toContain("<svg");
     expect(out).not.toContain("<script>");
+  });
+});
+
+describe("makeCodeLinks", () => {
+  test("links this file's tree nodes by hash and other files by route", () => {
+    const links = makeCodeLinks(
+      [
+        { start: 0, end: 5, node_id: "type:Local", file: null },
+        { start: 6, end: 9, node_id: "type:NotInTree", file: null },
+        { start: 10, end: 16, node_id: "type:UnityEngine.Object", file: REF_FILE },
+      ],
+      { base },
+      (ref) => ref === "type:Local",
+    );
+    expect(links.map((l) => [l.start, l.attrs.href, l.attrs["data-pptr-file"]])).toEqual([
+      [0, "#type:Local", undefined],
+      [
+        10,
+        `/apps/367520/depots/367523/manifests/${BASE_MANIFEST}/file?path=${encFile}#type:UnityEngine.Object`,
+        "1",
+      ],
+    ]);
+  });
+});
+
+describe("makeCodeLinks in a diff", () => {
+  test("routes each side to its manifest and falls back to the side's file", () => {
+    const links = makeCodeLinks(
+      [
+        { start: 0, end: 3, node_id: "type:Added", file: null, side: "base" },
+        { start: 4, end: 7, node_id: "type:Unchanged", file: null, side: "target" },
+        { start: 8, end: 11, node_id: "type:Ext", file: REF_FILE, side: "target" },
+      ],
+      { base, target },
+      (ref) => ref === "base:type:Added",
+    );
+    const route = (manifest: string, path: string) =>
+      `/apps/367520/depots/367523/manifests/${manifest}/file?path=${encodeURIComponent(path)}`;
+    expect(links.map((l) => l.attrs.href)).toEqual([
+      "#base:type:Added",
+      `${route(TARGET_MANIFEST, base.path)}#type:Unchanged`,
+      `${route(TARGET_MANIFEST, REF_FILE)}#type:Ext`,
+    ]);
   });
 });

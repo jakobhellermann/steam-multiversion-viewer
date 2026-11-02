@@ -7,6 +7,7 @@ use crate::state::AppState;
 pub mod auth;
 pub mod config;
 pub mod diff;
+pub(crate) mod dll_links;
 pub mod downloads;
 pub mod events;
 pub mod export;

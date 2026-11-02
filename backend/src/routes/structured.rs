@@ -20,8 +20,8 @@ use crate::steam::{AppId, DepotId, ManifestId};
 use transform::Transformer;
 use transform::structured::{NodeContent, StructuredTree};
 
-use super::Result;
 use super::files::FileViewQuery;
+use super::{Result, dll_links};
 
 /// Structured tree
 #[utoipa::path(
@@ -166,6 +166,7 @@ fn empty_node() -> (ImmutableCache, Json<NodeContent>) {
         Json(NodeContent {
             mime: "text/plain".to_string(),
             text: String::new(),
+            links: Vec::new(),
         }),
     )
 }
@@ -212,14 +213,23 @@ pub async fn manifest_file_structured_node(
     if let Some(type_name) = q.node_id.strip_prefix("type:") {
         let cfg = state.config.load();
         let bytes = snapshot.read_full(&q.path).await?;
-        let text = transform::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let decompile = async {
+            transform::dll::decompile_type(&cfg.store_root, &file_sha, &bytes, type_name)
+                .await
+                .map_err(|e| ApiError::internal(e.to_string()))
+        };
+        let (text, targets) = tokio::try_join!(
+            decompile,
+            dll_links::link_targets(&snapshot, &q.path, bytes.clone(), type_name)
+        )?;
+        let (text, links) = dll_links::link_type_names(text, targets, type_name).await?;
+        let links = dll_links::to_text_links(&text, links);
         return Ok((
             ImmutableCache,
             Json(NodeContent {
                 mime: "text/x-csharp".to_string(),
                 text,
+                links,
             }),
         ));
     }
@@ -239,6 +249,7 @@ pub async fn manifest_file_structured_node(
             Json(NodeContent {
                 mime: "application/json".to_string(),
                 text,
+                links: Vec::new(),
             }),
         ));
     }
@@ -306,6 +317,7 @@ pub async fn manifest_file_structured_node(
             Json(NodeContent {
                 mime: mime.to_string(),
                 text,
+                links: Vec::new(),
             }),
         ));
     }
@@ -358,6 +370,7 @@ pub async fn manifest_file_structured_node(
             Json(NodeContent {
                 mime: mime.to_string(),
                 text,
+                links: Vec::new(),
             }),
         ))
     }

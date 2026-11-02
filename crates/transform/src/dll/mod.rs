@@ -30,7 +30,9 @@ use crate::cache::tool_command;
 use crate::{TempInput, TransformError, tempfile_for};
 
 pub mod diff;
+pub mod links;
 pub mod native;
+pub mod refs;
 pub mod tree;
 
 #[cfg(test)]

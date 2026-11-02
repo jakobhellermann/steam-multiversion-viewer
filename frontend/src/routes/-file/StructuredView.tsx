@@ -15,6 +15,7 @@ import {
   structuredNodeImageUrl,
   type NodeStatus,
   type StructuredNode,
+  type TextLink,
 } from "../../data/api";
 import { Loader2 } from "lucide-react";
 
@@ -22,7 +23,7 @@ import { mediaKindForMime } from "../../lib/mediaKind";
 import { langForMime, warmLang } from "../../lib/syntax";
 import { useDelayedFlag } from "../../lib/useDelayedFlag";
 import { HighlightedPre, MediaView } from "./FilePreview";
-import { makePostProcess } from "./markers";
+import { makeCodeLinks, makePostProcess } from "./markers";
 import { parsePptrRef, pptrNodeKeys } from "./pptrRef";
 import { focusUnlessSelecting, scopeSelectAll } from "./selection";
 import type { FileLocator } from "./types";
@@ -1252,13 +1253,16 @@ export function NodeContentPanel({
   // alone while a new node is still in-flight. react-query's per-key
   // cache doesn't carry across nodes, so stash the last settled
   // result ourselves.
-  type Settled = { kind: "ok"; text: string; mime: string } | { kind: "err"; message: string };
+  type Settled =
+    | { kind: "ok"; text: string; mime: string; links: TextLink[] | undefined }
+    | { kind: "err"; message: string };
   const lastSettledRef = useRef<Settled | null>(null);
   if (content.data) {
     lastSettledRef.current = {
       kind: "ok",
       text: content.data.text,
       mime: content.data.mime,
+      links: content.data.links,
     };
   } else if (content.error) {
     lastSettledRef.current = {
@@ -1270,6 +1274,11 @@ export function NodeContentPanel({
   const text = settled?.kind === "ok" ? settled.text : "";
   const mime = settled?.kind === "ok" ? settled.mime : "";
   const postProcess = useMemo(() => makePostProcess(locator, isInTree), [locator, isInTree]);
+  const textLinks = settled?.kind === "ok" ? settled.links : undefined;
+  const codeLinks = useMemo(
+    () => (textLinks ? makeCodeLinks(textLinks, { base: locator }, isInTree) : undefined),
+    [textLinks, locator, isInTree],
+  );
   const router = useRouter();
   // Delegated click — pptr anchors are either local hash refs (no
   // `href`, just `data-pptr-ref`) or full route links (`href` set to
@@ -1365,7 +1374,13 @@ export function NodeContentPanel({
       onKeyDown={handleKeyDown}
       className="w-max min-w-full outline-none"
     >
-      <HighlightedPre code={text} lang={langForMime(mime)} bare postProcess={postProcess} />
+      <HighlightedPre
+        code={text}
+        lang={langForMime(mime)}
+        bare
+        postProcess={postProcess}
+        links={codeLinks}
+      />
     </div>
   );
 }

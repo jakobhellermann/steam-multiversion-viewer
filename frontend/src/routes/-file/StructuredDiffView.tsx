@@ -8,12 +8,13 @@ import {
   fetchStructuredDiffNode,
   structuredNodeImageUrl,
   type StructuredNode,
+  type TextLink,
 } from "../../data/api";
 import { mediaKindForMime } from "../../lib/mediaKind";
 import { type Lang, langForMime } from "../../lib/syntax";
 import { useDelayedFlag } from "../../lib/useDelayedFlag";
 import { HighlightedPre, MediaView } from "./FilePreview";
-import { makeDiffPostProcess, makePostProcess } from "./markers";
+import { makeCodeLinks, makeDiffPostProcess, makePostProcess } from "./markers";
 import { focusUnlessSelecting, scopeSelectAll } from "./selection";
 import { NODE_SPINNER_DELAY_MS, NodePanelSpinner, Tree } from "./StructuredView";
 import type { FileLocator } from "./types";
@@ -168,7 +169,9 @@ function DiffNodeBody({
   // the last successful response in a ref. Loading shimmer for a
   // sub-second fetch is noisier than just leaving the previous body
   // up.
-  type Settled = { kind: "ok"; lang: Lang | null; text: string } | { kind: "err"; message: string };
+  type Settled =
+    | { kind: "ok"; lang: Lang | null; text: string; links: TextLink[] }
+    | { kind: "err"; message: string };
   const lastSettledRef = useRef<Settled | null>(null);
   if (!enabled) {
     // Section / group / namespace rows have no body — drop whatever
@@ -194,6 +197,7 @@ function DiffNodeBody({
       kind: "ok",
       lang: langForMime(content.data.mime),
       text: content.data.text,
+      links: content.data.links ?? [],
     };
   } else if (content.error) {
     lastSettledRef.current = {
@@ -245,9 +249,20 @@ function DiffNodeBody({
       : node.status === "removed"
         ? makePostProcess(targetLocator, isInTree, "target")
         : makePostProcess(baseLocator, isInTree, "base");
+  const links = makeCodeLinks(
+    settled.links,
+    { base: baseLocator, target: targetLocator },
+    isInTree,
+  );
   return (
     <DiffContentPane>
-      <HighlightedPre code={settled.text} lang={settled.lang} bare postProcess={postProcess} />
+      <HighlightedPre
+        code={settled.text}
+        lang={settled.lang}
+        bare
+        postProcess={postProcess}
+        links={links}
+      />
     </DiffContentPane>
   );
 }

@@ -9,7 +9,8 @@
 //! served by a separate route keyed on the node id, so the initial
 //! tree response can stay small even for files with thousands of nodes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
@@ -211,7 +212,7 @@ impl StructuredTree {
 }
 
 /// Result returned by the lazy node-content endpoint.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 #[schema(example = json!({
     "mime": "application/json",
     "text": "{\n  \"m_Name\": \"Player\"\n}"
@@ -220,6 +221,54 @@ pub struct NodeContent {
     /// MIME type the frontend uses to pick a syntax highlighter.
     pub mime: String,
     pub text: String,
+    /// Spans of `text` that link to a tree node, in source order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<TextLink>,
+}
+
+/// A span of [`NodeContent::text`] linking to a structured-tree node.
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub struct TextLink {
+    /// Offsets in UTF-16 code units, i.e. JavaScript string indices.
+    pub start: usize,
+    pub end: usize,
+    /// Id of the target node, in `file`'s tree.
+    pub node_id: String,
+    /// Depot path of the file holding the target, `None` for this file.
+    pub file: Option<String>,
+    /// In a diff body: the manifest `file` and `node_id` belong to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side: Option<DiffSide>,
+}
+
+/// One manifest of a diff: `base` is shown as `+`, `target` as `-`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffSide {
+    Base,
+    Target,
+}
+
+/// Convert byte ranges of `text` to UTF-16 code unit ranges.
+pub fn utf16_ranges(text: &str, ranges: &[Range<usize>]) -> Vec<Range<usize>> {
+    let mut bounds: Vec<usize> = ranges.iter().flat_map(|r| [r.start, r.end]).collect();
+    bounds.sort_unstable();
+    let mut converted = HashMap::with_capacity(bounds.len());
+    let mut utf16 = 0;
+    let mut chars = text.char_indices().peekable();
+    for bound in bounds {
+        while let Some(&(byte, c)) = chars.peek()
+            && byte < bound
+        {
+            utf16 += c.len_utf16();
+            chars.next();
+        }
+        converted.insert(bound, utf16);
+    }
+    ranges
+        .iter()
+        .map(|r| converted[&r.start]..converted[&r.end])
+        .collect()
 }
 
 pub fn human_bytes(n: u64) -> String {
@@ -254,5 +303,22 @@ pub fn aggregate_status(children: &[Node]) -> NodeStatus {
         NodeStatus::Changed
     } else {
         NodeStatus::Unchanged
+    }
+}
+
+#[cfg(test)]
+mod utf16_tests {
+    use super::utf16_ranges;
+
+    #[test]
+    fn utf16_ranges_count_code_units_past_multibyte_chars() {
+        // "ä" is 2 bytes / 1 unit, "😀" is 4 bytes / 2 units.
+        let text = "ä Foo 😀 Bar";
+        let foo = text.find("Foo").unwrap();
+        let bar = text.find("Bar").unwrap();
+        assert_eq!(
+            utf16_ranges(text, &[foo..foo + 3, bar..bar + 3]),
+            vec![2..5, 9..12]
+        );
     }
 }
